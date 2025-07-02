@@ -1,0 +1,18 @@
+{
+  "modelPath": "E:/ai-training/llamaTest/model/gemma-3-4b-it-q4_0.gguf",
+  "params": {
+    "ctx-size": 8192,
+    "n-gpu-layers": 35,
+    "threads": 24,
+    "batch-size": 512,
+    "mirostat": 1,
+    "mirostat-lr": 0.1,
+    "mirostat-ent": 5.0,
+    "repeat_penalty": 1.05,
+    "top_p": 0.95,
+    "top_k": 50,
+    "temp": 0.65,
+    "no-mmap": true,
+    "port" : 8011           
+  }
+}
