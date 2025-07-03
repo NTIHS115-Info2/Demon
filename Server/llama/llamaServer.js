@@ -10,8 +10,8 @@ const log = new Logger('llama-server.log');
 
 class LlamaServerManager {
   constructor(options = {}) {
-    this.binPath = options.binPath || path.resolve(__dirname,'..' , 'llama_cpp_bin' ,'llama-server.exe');
-    this.settingsDir = options.settingsDir || path.resolve(__dirname,'..' ,'settings');
+    this.binPath = options.binPath || path.resolve(__dirname, 'llama_cpp_bin' ,'llama-server.exe');
+    this.settingsDir = options.settingsDir || path.resolve(__dirname,'settings');
     this.process = null;
     this.running = false;
     this.currentPreset = '';
@@ -55,13 +55,22 @@ class LlamaServerManager {
         const args = this.buildArgs(config);
     
         this.process = spawn(this.binPath, args);
-        this.running = true;
     
-        this.process.stdout.on('data', data => process.stdout.write(`[llama stdout] ${data}`));
-        this.process.stderr.on('data', data => process.stderr.write(`[llama stderr] ${data}`));
+        this.process.stderr.on('data', data => {
+          const msg = data.toString();
+          if (msg.toLowerCase().includes('error') || msg.toLowerCase().includes('failed')) {
+            log.error(`[llama stderr] ${msg}`);
+          } else if (msg.includes('server is listening on')) {
+              this.running = true;
+              log.info('✅ Llama server is ready and listening.');
+          } else {
+            log.info(`[llama stderr] ${msg}`);
+          }
+        });
+
         this.process.on('exit', code => {
-        this.running = false;
-        log.info(`Llama server exited with code ${code}`);
+          this.running = false;
+          log.info(`Llama server exited with code ${code}`);
         });
     } catch (err) {
         this.restartWithPreset(presetName);
