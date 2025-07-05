@@ -11,3 +11,12 @@
 - llama.cpp 的測試文件
 ## Fix
 - llama.cpp 的運行判定，以及部分檔案位置指定錯誤
+
+### [v.0.2.0]
+## New
+- 撰寫fileReader 與 測試腳本， fileReader隸屬於tools內
+- 撰寫PromptComposer 與 預設系統提示詞功能測試腳本
+- logger增加Original功能，可以讓logger輸出原態
+- logger增加UseConsole功能，可以選擇是否要使用logger內部的console.log輸出，預設關閉
+## Fix
+- logger的防呆機制，確保每個log檔案的.log副檔名被加入

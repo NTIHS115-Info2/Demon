@@ -4,8 +4,9 @@ const tar = require('tar');
 
 let __baseLogPath = path.resolve(__dirname, '..', '..', 'logs');
 
-let initialized = false;                // 是否已初始化
+let initialized = false;               // 是否已初始化
 let globalLogPath = null;              // 本次啟動的 log 資料夾
+let UseConsoleLog = false;              // 是否使用 console.log 輸出
 const streamMap = new Map();           // 儲存每個 log 檔案名稱對應的 writeStream
 
 /**
@@ -43,15 +44,19 @@ class Logger {
           tar.c({ gzip: true, file: archivePath, cwd: __baseLogPath }, [lastFolder.name])
             .then(() => {
               fs.rmSync(lastPath, { recursive: true, force: true });
-              console.log(`[Logger] 已壓縮上次 log 為：${archivePath}`);
+              if(UseConsoleLog) console.log(`[Logger] 已壓縮上次 log 為：${archivePath}`);
             })
             .catch(err => {
-              console.log(`[Logger] log 壓縮失敗：${err.message}`);
+              if(UseConsoleLog) console.log(`[Logger] log 壓縮失敗：${err.message}`);
             });
         }
       } catch (err) {
-        console.warn('[Logger] 初始化期間壓縮失敗，但主流程繼續：', err.message);
+        if(UseConsoleLog) console.warn('[Logger] 初始化期間壓縮失敗，但主流程繼續：', err.message);
       }
+    }
+
+    if(!logFileName.includes('.log')){
+      logFileName += '.log'; // 確保 log 檔名以 .log 結尾
     }
 
     // 建立 logger stream
@@ -75,6 +80,12 @@ class Logger {
     return `${timestamp} - ${level.toUpperCase()} - ${message}`;
   }
 
+  Original(msg) {
+    // 原始訊息輸出，無格式化
+    this.logStream.write(`${new Date().toISOString()} - ORIGINAL - ${msg}\n`);
+    if(UseConsoleLog) console.log(msg);
+  }
+
   /**
    * 記錄 INFO 級別訊息
    * @param {string} msg
@@ -82,7 +93,7 @@ class Logger {
   info(msg) {
     const line = this.format('INFO', msg);
     this.logStream.write(line + '\n');
-    console.log(line);
+    if(UseConsoleLog) console.log(line);
   }
 
   /**
@@ -92,7 +103,7 @@ class Logger {
   warn(msg) {
     const line = this.format('WARN', msg);
     this.logStream.write(line + '\n');
-    console.warn(line);
+    if(UseConsoleLog) console.warn(line);
   }
 
   /**
@@ -102,7 +113,7 @@ class Logger {
   error(msg) {
     const line = this.format('ERROR', msg);
     this.logStream.write(line + '\n');
-    console.error(line);
+    if(UseConsoleLog) console.error(line);
   }
 
   /**
@@ -119,3 +130,6 @@ module.exports = Logger
 module.exports.SetLoggerBasePath = (basePath) => {
   __baseLogPath = path.resolve(basePath);
 };
+module.exports.SetConsoleLog = (bool) => {
+  UseConsoleLog = bool;
+}
