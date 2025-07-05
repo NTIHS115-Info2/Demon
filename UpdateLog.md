@@ -20,3 +20,7 @@
 - logger增加UseConsole功能，可以選擇是否要使用logger內部的console.log輸出，預設關閉
 ## Fix
 - logger的防呆機制，確保每個log檔案的.log副檔名被加入
+
+### [v.0.2.1]
+## Fix
+- 更新測試檔案名稱，讓其更符合測試內容
