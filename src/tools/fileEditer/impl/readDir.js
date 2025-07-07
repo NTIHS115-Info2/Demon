@@ -1,35 +1,15 @@
 const fs = require('fs');
 const path = require('path');
+const Logger = require('../../../core/logger');
+const { GetFileContent } = require('./readFile');
 
-const Logger = require('../core/logger');
-
-const logger = new Logger('fileReader');
-
-/**
- * 
- * @param {path} filePath 
- * @returns 
- */
-// 讀取檔案內容的工具函式
-async function GetFileContent(filePath) {
-  return new Promise((resolve, reject) => {
-    fs.readFile(filePath, 'utf8', (err, data) => {
-      if (err) {
-        logger.error(`讀取檔案 ${filePath} 失敗：${err.message}`);
-        return reject(err);
-      }
-      logger.info(`成功讀取檔案 ${filePath}`);
-      resolve(data);
-    });
-  })
-}
+const logger = new Logger('fileEditer');
 
 /**
- * 
+ * 讀取資料夾下所有檔案的內容
  * @param {path} dirPath 
- * @returns 
+ * @returns {Promise<string[]>}
  */
-// 讀取資料夾下所有檔案的內容
 async function GetFilesContent(dirPath) {
   return new Promise((resolve, reject) => {
     fs.readdir(dirPath, (err, files) => {
@@ -56,6 +36,4 @@ async function GetFilesContent(dirPath) {
   });
 }
 
-
 module.exports.GetFilesContent = GetFilesContent;
-module.exports.GetFileContent = GetFileContent;
