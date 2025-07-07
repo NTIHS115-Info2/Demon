@@ -1,6 +1,6 @@
 {
   "scripts": {
-    "fileeditertest" : "node ./test/fileEditerTest.js",
+    "fileeditertest": "node ./test/fileEditerTest.js",
     "defaultsystemprompttest": "node ./test/DefaultSystemPromptTest.js",
     "loggertest": "node ./test/LoggerTest.js",
     "servertest": "node ./test/llamaServerTest.js"
