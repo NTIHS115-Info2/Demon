@@ -3,12 +3,14 @@ const axios = require('axios');
 const LlamaServerManager = require('../Server/llama/llamaServer.js');
 const Logger = require('../src/core/logger.js');
 
+const log = new Logger(`llama-server-${presetName}.log`);
+
 const presets = ['common-high', 'common-low', 'exclusive'];
 
 // 每次使用一個新的 manager 實例
 async function testWithPreset(presetName) {
   const manager = new LlamaServerManager();
-  const log = new Logger(`llama-server-${presetName}.log`);
+  
 
   log.info(`\n\n🧪 開始測試預設：${presetName}`);
   manager.startWithPreset(presetName);

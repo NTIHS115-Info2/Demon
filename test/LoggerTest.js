@@ -5,7 +5,7 @@ const Logger = require('../src/core/logger.js');
 const { SetLoggerBasePath } = require('../src/core/logger.js');
 
 // 測試專用 basePath
-const TEST_BASE = path.resolve(__dirname, '..' , 'Server' , 'tlogs');
+const TEST_BASE = path.resolve(__dirname, '..' , 'logs' , 'tlogs');
 
 // 1. 設定 basePath
 SetLoggerBasePath(path.resolve(TEST_BASE));

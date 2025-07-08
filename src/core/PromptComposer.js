@@ -1,4 +1,4 @@
-const GetFilesContent = require('../tools/fileReader').GetFilesContent;
+const fileEditer = require('../tools/fileEditer');
 const Logger = require('../core/logger');
 
 const logger = new Logger('PromptComposer');
@@ -6,7 +6,7 @@ const logger = new Logger('PromptComposer');
 async function GetDefaultSystemPrompt() {
     return new Promise(async (resolve, reject) => {
         try {
-            const DefaultSystemPrompt = await GetFilesContent(__dirname + '/soulPresets');
+            const DefaultSystemPrompt = await fileEditer.GetFilesContent(__dirname + '/soulPresets');
 
             let result = "";
 
