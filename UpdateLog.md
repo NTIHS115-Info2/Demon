@@ -35,3 +35,13 @@
 ### [v.0.3.1]
 ## Fix
 - Bug修復
+
+### [v.0.4.0]
+## New
+- 將logger轉移到utils下，更符合其定位
+- llama的ServerManager細部實作改為async
+- 建立plugins的插件架構規範
+- 建立TalkToDemon
+- 建立PluginsManager
+- 引入jest測試方式
+- 將所有測試改為jest

@@ -1,8 +1,11 @@
 const fileEditer = require('../tools/fileEditer');
-const Logger = require('../core/logger');
+const Logger = require('../utils/logger');
 
 const logger = new Logger('PromptComposer');
 
+/** * 獲取預設系統提示
+ * @returns {Promise<string>} 預設系統提示內容
+ */
 async function GetDefaultSystemPrompt() {
     return new Promise(async (resolve, reject) => {
         try {

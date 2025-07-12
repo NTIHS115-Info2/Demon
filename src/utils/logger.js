@@ -2,7 +2,7 @@ const fs = require('fs');
 const path = require('path');
 const tar = require('tar');
 
-let __baseLogPath = path.resolve(__dirname, '..', '..', 'logs');
+let __baseLogPath;
 
 let initialized = false;               // 是否已初始化
 let globalLogPath = null;              // 本次啟動的 log 資料夾
@@ -23,6 +23,7 @@ class Logger {
       initialized = true;
 
       const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+      if(!__baseLogPath) __baseLogPath = path.resolve(__dirname, '..', '..', 'logs')
       globalLogPath = path.resolve(__baseLogPath, timestamp);
       fs.mkdirSync(globalLogPath, { recursive: true });
 
@@ -126,10 +127,21 @@ class Logger {
 
 }
 
-module.exports = Logger
-module.exports.SetLoggerBasePath = (basePath) => {
+/**
+ * 設定 Logger 的基礎路徑
+ * @param {string} basePath - 基礎路徑 請用path.join
+ * @throws {Error} 如果 basePath 不是有效的字串或為空
+ */
+function SetLoggerBasePath(basePath) {
+  if (typeof basePath !== 'string' || !basePath.trim()) {
+    throw new Error('Logger base path must be a valid non-empty string');
+  }
   __baseLogPath = path.resolve(basePath);
-};
+  if(UseConsoleLog) console.log(`[Logger] 基礎路徑已設定為：${__baseLogPath}`);
+}
+
+module.exports = Logger
+module.exports.SetLoggerBasePath = SetLoggerBasePath;
 module.exports.SetConsoleLog = (bool) => {
   UseConsoleLog = bool;
 }

@@ -1,7 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 
-const Logger = require('../../../core/logger');
+const Logger = require('../../../utils/logger');
 const logger = new Logger('fileEditer');
 
 function checkFile(filePath) {

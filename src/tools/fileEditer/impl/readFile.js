@@ -3,7 +3,7 @@ const path = require('path');
 
 const checkFile = require('../utils/checkFile').checkFile;
 
-const Logger = require('../../../core/logger');
+const Logger = require('../../../utils/logger');
 
 const logger = new Logger('fileEditer');
 

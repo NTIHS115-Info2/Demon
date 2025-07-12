@@ -1,6 +1,6 @@
 const fs = require('fs');
 const path = require('path');
-const Logger = require('../../../core/logger');
+const Logger = require('../../../utils/logger');
 const checkFile = require('../utils/checkFile').checkFile;
 const GetFileContent = require('./readFile').GetFileContent;
 
