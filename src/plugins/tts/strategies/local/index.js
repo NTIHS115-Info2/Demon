@@ -18,7 +18,7 @@ module.exports = {
     // Python 腳本位於兩層上層
     const scriptPath = path.resolve(__dirname, "index.py");
     processRef = new PythonShell(scriptPath, {
-      pythonPath: options.pythonPath || "E:\system\f5ttsenv\Scripts\python.exe",
+      pythonPath: options.pythonPath || "E:\\system\\f5ttsenv\\Scripts\\python.exe",
       args: [
         "--log-path", options.logPath || `${Logger.getLogPath()}/tts.log`
       ],

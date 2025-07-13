@@ -28,21 +28,64 @@ class PluginsManager {
     return typeof name === "string" ? name.toLowerCase() : name;
   }
 
+  // 審查插件是否具有必要函數
+  requestReview(plugin){
+    const requiredMethods = ['online', 'offline', 'restart', 'state' , 'updateStrategy'];
+    for (const method of requiredMethods) {
+      if (typeof plugin[method] !== 'function') {
+        throw new Error(`插件 ${plugin.pluginName} 缺少必要方法：${method}`);
+      }
+    }
+    return true; // 如果所有方法都存在，則返回 true
+  }
+
   /**
    * 載入指定名稱的插件
    * @param {string} name - 插件名稱
-   * @throws {Error} 當找不到插件的 setting.js 檔案時拋出錯誤
+   * @throws {Error} 當找不到插件的 index.js 檔案時拋出錯誤
    */
   async loadPlugin(name) {
     const pluginPath = path.join(this.rootPath, name, "index.js");
     if (fs.existsSync(pluginPath)) {
       const plugin = require(pluginPath);
+
+      if (!this.requestReview(plugin)) {
+        throw new Error(`插件 ${name} 不符合要求，請檢查其實作`);
+      }
+
       plugin.updateStrategy();  // 確保策略已更新
       this.plugins.set(this.normalizeName(name), plugin); // 這裡改為小寫
       Logger.info(`[PluginManager] 載入插件 ${name}`);
     } else {
-      throw new Error(`無法找到 ${name} 插件的 setting.js`);
+      throw new Error(`無法找到 ${name} 插件的 index.js`);
     }
+  }
+
+  /**
+   * 載入所有插件
+   * @returns {Promise<void>}
+   */
+  async loadAllPlugins() {
+
+    Logger.info("正在嘗試載入所有插件");
+
+    const pluginDirs = fs.readdirSync(this.rootPath).filter(dir => {
+      return fs.statSync(path.join(this.rootPath, dir)).isDirectory();
+    });
+
+    for (const dir of pluginDirs) {
+      try {
+        await this.loadPlugin(dir);
+      } catch (err) {
+        Logger.error(`[PluginManager] 載入插件 ${dir} 失敗：${err.message}`);
+      }
+
+      if(this.getPluginState(dir)) Logger.info(`${dir} v`)
+      else Logger.info(`${dir} x`)
+
+    }
+
+    Logger.info("所有插件載入成功");
   }
 
     /**
@@ -108,9 +151,6 @@ class PluginsManager {
       }
     });
   }
-
-
-
 
   /**
    * 處理啟動佇列中的任務

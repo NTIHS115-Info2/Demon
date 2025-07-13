@@ -30,7 +30,7 @@ module.exports = {
     // Python 執行檔相對於此策略目錄上兩層
     const scriptPath = path.resolve(__dirname, "index.py");
     const pyshell = new PythonShell(scriptPath, {
-      pythonPath: "E:\system\whisperenv\Scripts\python.exe",
+      pythonPath: "E:\\system\\whisperenv\\Scripts\\python.exe",
       args: [
         "--device-id", options.deviceId || "1",
         "--use-cpu",
@@ -43,6 +43,8 @@ module.exports = {
     });
 
     processRef = pyshell;
+
+    Logger.info("[ASR] PythonShell 啟動完成");
 
     pyshell.on("message", (msg) => {
       try {
