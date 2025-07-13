@@ -1,6 +1,7 @@
 const path = require("path");
 const { PythonShell } = require("python-shell");
-const logger = require("../../core/logger.js");
+// 更新路徑至新的 utils 位置
+const logger = require("../../../../utils/logger.js");
 
 let processRef = null;
 const Logger = new logger("tts.log");
@@ -14,7 +15,8 @@ module.exports = {
       Logger.info("[TTS] 已啟動，略過重複啟動");
       return;
     }
-    const scriptPath = path.resolve(__dirname, "index.py");
+    // Python 腳本位於兩層上層
+    const scriptPath = path.resolve(__dirname, "..", "..", "index.py");
     processRef = new PythonShell(scriptPath, {
       pythonPath: options.pythonPath || "E:\system\f5ttsenv\Scripts\python.exe",
       args: [

@@ -2,8 +2,9 @@ const path = require("path");
 const { PythonShell } = require("python-shell");
 
 // 內部引入
-const talker = require("../../core/TalkToAngel.js");
-const logger = require("../../core/logger.js");
+// 調整路徑以符合最新的專案架構
+const talker = require("../../../../core/TalkToDemon.js");
+const logger = require("../../../../utils/logger.js");
 
 let processRef = null;
 const Logger = new logger("asr.log");
@@ -26,7 +27,8 @@ function endPythonShell(shell) {
 module.exports = {
   name: "ASR",
   async online(options = {}) {
-    const scriptPath = path.resolve(__dirname, "index.py");
+    // Python 執行檔相對於此策略目錄上兩層
+    const scriptPath = path.resolve(__dirname, "..", "..", "index.py");
     const pyshell = new PythonShell(scriptPath, {
       pythonPath: "E:\system\whisperenv\Scripts\python.exe",
       args: [

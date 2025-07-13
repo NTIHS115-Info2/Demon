@@ -49,3 +49,16 @@
 ### [v.0.5a]
 ## New
 - 新增ASR和TTS插件，不過是還未依照插件規範設計的，等待後續v0.5版修改
+
+### [v.0.5]
+## New
+- 將 ASR 與 TTS 插件重構為符合插件規範的架構，修正路徑並補充錯誤處理
+- 新增 SpeechBroker 插件，負責將 Demon 串流輸出轉送至 TTS
+## Fix
+- 修正 ToDo 與 UpdateLog 尾端誤植字串
+
+### [v.0.5.1]
+## Test
+- 新增 ASR、TTS 與 SpeechBroker 插件測試，模擬 PythonShell 與事件流程
+## Fix
+- 修正插件策略檔引用 utils 路徑錯誤
