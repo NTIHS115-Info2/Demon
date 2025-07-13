@@ -1,0 +1,67 @@
+const local = require('./strategies/local');
+const Logger = require('../../utils/logger');
+const logger = new Logger('ASR');
+
+// 目前僅提供 local 策略
+let strategy = null;
+
+module.exports = {
+  // 更新策略，依照需求載入對應實作
+  async updateStrategy() {
+    logger.info('ASR 插件策略更新中...');
+    strategy = local;
+    logger.info('ASR 插件策略已載入');
+  },
+
+  // 啟動 ASR
+  async online(options) {
+    if (!strategy) await this.updateStrategy();
+    try {
+      return await strategy.online(options);
+    } catch (e) {
+      logger.error('[ASR] online 發生錯誤: ' + e);
+      throw e;
+    }
+  },
+
+  // 關閉 ASR
+  async offline() {
+    if (!strategy) await this.updateStrategy();
+    try {
+      return await strategy.offline();
+    } catch (e) {
+      logger.error('[ASR] offline 發生錯誤: ' + e);
+      throw e;
+    }
+  },
+
+  // 重啟 ASR
+  async restart(options) {
+    if (!strategy) await this.updateStrategy();
+    try {
+      return await strategy.restart(options);
+    } catch (e) {
+      logger.error('[ASR] restart 發生錯誤: ' + e);
+      throw e;
+    }
+  },
+
+  // 取得狀態
+  async state() {
+    if (!strategy) await this.updateStrategy();
+    try {
+      return await strategy.state();
+    } catch (e) {
+      logger.error('[ASR] state 查詢錯誤: ' + e);
+      return -1;
+    }
+  },
+
+  // 選用函式，目前策略未提供
+  async send(data) {
+    if (!strategy || typeof strategy.send !== 'function') {
+      return false;
+    }
+    return strategy.send(data);
+  }
+};
