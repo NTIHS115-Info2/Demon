@@ -62,3 +62,7 @@
 - 新增 ASR、TTS 與 SpeechBroker 插件測試，模擬 PythonShell 與事件流程
 ## Fix
 - 修正插件策略檔引用 utils 路徑錯誤
+
+### [v.0.5.2]
+## Move
+- 移動新增插件的index.py到正確位址

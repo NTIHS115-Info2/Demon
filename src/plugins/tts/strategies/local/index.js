@@ -16,7 +16,7 @@ module.exports = {
       return;
     }
     // Python 腳本位於兩層上層
-    const scriptPath = path.resolve(__dirname, "..", "..", "index.py");
+    const scriptPath = path.resolve(__dirname, "index.py");
     processRef = new PythonShell(scriptPath, {
       pythonPath: options.pythonPath || "E:\system\f5ttsenv\Scripts\python.exe",
       args: [

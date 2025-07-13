@@ -28,7 +28,7 @@ module.exports = {
   name: "ASR",
   async online(options = {}) {
     // Python 執行檔相對於此策略目錄上兩層
-    const scriptPath = path.resolve(__dirname, "..", "..", "index.py");
+    const scriptPath = path.resolve(__dirname, "index.py");
     const pyshell = new PythonShell(scriptPath, {
       pythonPath: "E:\system\whisperenv\Scripts\python.exe",
       args: [

@@ -5,5 +5,7 @@ src/core/soulPresets
 Server/llama/llama_cpp_bin
 Server/llama/model
 
+src/plugins/tts/strategies/local/f5_tts
+
 logs
 yarn.lock
