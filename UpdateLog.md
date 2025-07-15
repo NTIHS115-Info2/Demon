@@ -70,3 +70,34 @@
 ### [v.0.5.3]
 ## Fix
 - 修復ASR/TTS插件無法正常啟動問題
+### [v.0.5.4]
+## New
+- 新增 ngrok 監控腳本，可自動啟動並監測 3000 端口
+## Update
+- ToDo 完成 ngrok 相關項目
+
+### [v.0.6]
+## Update
+- 新增 ngrok 啟動腳本並支援自訂指令
+- 強化標準輸出日誌處理
+
+### [v.0.6.1]
+## New
+- ngrokServer 新增子網域註冊功能，可將外部請求導向對應插件
+- 新增 ngrok 插件並整合至 pluginsManager
+## Change
+- 移除舊的 Server/ngrok/index.js 啟動方式
+
+### [v.0.6.2]
+## Update
+- 插件註冊子網域改採物件傳入，並新增解註冊功能
+- ngrokServer 解除子網域時增加檢查與日誌
+
+### [v.0.6.3]
+## Change
+- 移除 ngrok 插件額外的 register/unregister 介面
+- send() 取代註冊與解註冊行為並加入錯誤處理
+
+### [v.0.6.4]
+## Docs
+- 新增 ngrok 插件 options.md，說明各接口傳入的 options 內容
