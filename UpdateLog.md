@@ -70,3 +70,15 @@
 ### [v.0.5.3]
 ## Fix
 - 修復ASR/TTS插件無法正常啟動問題
+### [v.0.6]
+## New
+- 新增 Discord 插件並撰寫測試檔案
+
+### [v.0.6.1]
+## Improve
+- 調整 Discord 插件 send 方法，可傳入 func 以呼叫內部功能
+
+
+### [v.0.6.2]
+## Docs
+- 新增 send.md，說明 send 輸入及用法
