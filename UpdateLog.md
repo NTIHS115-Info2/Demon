@@ -101,3 +101,13 @@
 ### [v.0.6.4]
 ## Docs
 - 新增 ngrok 插件 options.md，說明各接口傳入的 options 內容
+
+### [v.0.7]
+## New
+- 實作 LlamaServer 遠端與伺服器策略
+- 新增 remote/infor.js 儲存子網域設定
+- 新增 ASR 與 TTS 插件的 remote 與 server 策略
+- remote/infor.js 提供子網域與接口資訊
+## Change
+- LlamaServer 插件可依 mode 切換 local、remote、server 三種策略
+- ASR、TTS 插件可依 mode 切換 local、remote、server 三種策略

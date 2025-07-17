@@ -1,21 +1,37 @@
 const local = require('./strategies/local');
+const remote = require('./strategies/remote');
+const server = require('./strategies/server');
 const Logger = require('../../utils/logger');
 const logger = new Logger('ASR');
 
-// 目前僅提供 local 策略
 let strategy = null;
+let mode = 'local';
 
 module.exports = {
-  // 更新策略，依照需求載入對應實作
-  async updateStrategy() {
+  /**
+   * 更新策略模式
+   * @param {'local'|'remote'|'server'} newMode
+   */
+  async updateStrategy(newMode = 'local') {
     logger.info('ASR 插件策略更新中...');
-    strategy = local;
-    logger.info('ASR 插件策略已載入');
+    mode = newMode;
+    switch (newMode) {
+      case 'remote':
+        strategy = remote;
+        break;
+      case 'server':
+        strategy = server;
+        break;
+      default:
+        strategy = local;
+    }
+    logger.info(`ASR 插件策略已切換為 ${mode}`);
   },
 
   // 啟動 ASR
-  async online(options) {
-    if (!strategy) await this.updateStrategy();
+  async online(options = {}) {
+    const useMode = options.mode || mode;
+    if (!strategy || useMode !== mode) await this.updateStrategy(useMode);
     try {
       return await strategy.online(options);
     } catch (e) {
@@ -26,7 +42,7 @@ module.exports = {
 
   // 關閉 ASR
   async offline() {
-    if (!strategy) await this.updateStrategy();
+    if (!strategy) await this.updateStrategy(mode);
     try {
       return await strategy.offline();
     } catch (e) {
@@ -36,8 +52,9 @@ module.exports = {
   },
 
   // 重啟 ASR
-  async restart(options) {
-    if (!strategy) await this.updateStrategy();
+  async restart(options = {}) {
+    const useMode = options.mode || mode;
+    if (!strategy || useMode !== mode) await this.updateStrategy(useMode);
     try {
       return await strategy.restart(options);
     } catch (e) {
@@ -48,7 +65,7 @@ module.exports = {
 
   // 取得狀態
   async state() {
-    if (!strategy) await this.updateStrategy();
+    if (!strategy) await this.updateStrategy(mode);
     try {
       return await strategy.state();
     } catch (e) {
@@ -59,7 +76,8 @@ module.exports = {
 
   // 選用函式，目前策略未提供
   async send(data) {
-    if (!strategy || typeof strategy.send !== 'function') {
+    if (!strategy) await this.updateStrategy(mode);
+    if (typeof strategy.send !== 'function') {
       return false;
     }
     return strategy.send(data);
