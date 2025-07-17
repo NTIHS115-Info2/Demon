@@ -10,6 +10,9 @@ const handlers = {};
 // 建立 logger 實例，輸出至 speechBroker.log
 const logger = new Logger('speechBroker.log');
 
+// 此策略的預設啟動優先度
+const priority = 75;
+
 // 中文標點轉換對照表（全形 → 半形）
 const PUNCTUATION_MAP = {
   '。': '。',
@@ -56,6 +59,7 @@ async function sendToTTS(sentence) {
 }
 
 module.exports = {
+  priority,
   name: 'speechBroker',
 
   /** 啟動插件，監聽 TalkToDemon 串流輸出 */

@@ -9,6 +9,9 @@ const logger = require("../../../../utils/logger.js");
 let processRef = null;
 const Logger = new logger("asr.log");
 
+// 此策略的預設啟動優先度
+const priority = 80;
+
 function endPythonShell(shell) {
   return new Promise((resolve, reject) => {
     shell.end((err, code, signal) => {
@@ -25,6 +28,7 @@ function endPythonShell(shell) {
 }
 
 module.exports = {
+  priority,
   name: "ASR",
   async online(options = {}) {
     // Python 執行檔相對於此策略目錄上兩層

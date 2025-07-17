@@ -8,7 +8,11 @@ const logger = new Logger('LlamaServerManager');
 
 let llamaServerManager = null;
 
+// 此策略的預設啟動優先度
+const priority = 50;
+
 module.exports = {
+    priority,
 
     async online(options) {
         logger.info('LlamaServerManager 正在啟動中...');

@@ -1,59 +1,61 @@
-const local = require('./strategies/local');
-const remote = require('./strategies/remote');
+// 取得策略模組
+const strategies = require('./strategies');
 
 const Logger = require('../../utils/logger');
 const logger = new Logger('LlamaServerManager');
 
-let strategies = null;
+let strategy = null;
+
 
 module.exports = {
+    priority: 0,
 
     async updateStrategy() {
         logger.info('LlamaServerManager 更新策略中...');
-        // 這裡可以根據需要更新策略
-        // 目前僅支援 local 策略
-        strategies = local;
+        // 這裡可以根據需要更新策略，目前僅支援 local 策略
+        strategy = strategies.local;
+        this.priority = strategy.priority;
         logger.info('LlamaServerManager 策略更新完成');
     },
 
     async online(options) {
-        if (!strategies) {
+        if (!strategy) {
             logger.warn('LlamaServerManager 尚未初始化，正在初始化...');
             await this.updateStrategy();
         }
-        return await strategies.online(options);
+        return await strategy.online(options);
     },
 
     async offline() {
-        if (!strategies) {
+        if (!strategy) {
             logger.warn('LlamaServerManager 尚未初始化，正在初始化...');
             await this.updateStrategy();
         }
-        return await strategies.offline();
+        return await strategy.offline();
     },
 
     async restart(options) {
-        if (!strategies) {
+        if (!strategy) {
             logger.warn('LlamaServerManager 尚未初始化，正在初始化...');
             await this.updateStrategy();
         }
-        return await strategies.restart(options);
+        return await strategy.restart(options);
     },
 
     async state() {
-        if (!strategies) {
+        if (!strategy) {
             logger.warn('LlamaServerManager 尚未初始化，正在初始化...');
             await this.updateStrategy();
         }
-        return await strategies.state();
+        return await strategy.state();
     },
 
     async send(options) {
-        if (!strategies) {
+        if (!strategy) {
             logger.warn('LlamaServerManager 尚未初始化，正在初始化...');
             await this.updateStrategy();
         }
-        return await strategies.send(options);
+        return await strategy.send(options);
     },
     
 }

@@ -6,7 +6,11 @@ const logger = require("../../../../utils/logger.js");
 let processRef = null;
 const Logger = new logger("tts.log");
 
+// 此策略的啟動優先度
+const priority = 70;
+
 module.exports = {
+  priority,
   name: "TTS",
 
   // 啟動 TTS 腳本

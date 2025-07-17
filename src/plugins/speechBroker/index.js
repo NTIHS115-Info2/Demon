@@ -1,14 +1,18 @@
-const local = require('./strategies/local');
+// 引入策略模組
+const strategies = require('./strategies');
 const Logger = require('../../utils/logger');
 const logger = new Logger('SpeechBroker');
 
 let strategy = null;
 
+
 module.exports = {
+  priority: 0,
   // 更新策略，目前僅支援 local
   async updateStrategy() {
     logger.info('SpeechBroker 策略更新中...');
-    strategy = local;
+    strategy = strategies.local;
+    this.priority = strategy.priority;
     logger.info('SpeechBroker 策略已載入');
   },
 

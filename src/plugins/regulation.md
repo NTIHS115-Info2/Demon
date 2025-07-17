@@ -33,8 +33,9 @@
 - send      -> option{}
 
 ## 接口回傳值
-- state     -> 會回傳目前狀態 0為下線 1為上線 -1為錯誤 -2為插件state未定義
+- state     -> 會回傳目前狀態 0 為下線 1 為上線 -1 為錯誤 -2 為插件 state 未定義
 - send      -> Promise<void>
 
-## 要求
-- async
+## 其他要求
+- 所有接口函式皆需 async
+- `priority` 屬性應在各策略實作的 `index.js` 定義，整數值，數字越大越早啟動，預設 0

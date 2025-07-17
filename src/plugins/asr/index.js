@@ -1,15 +1,21 @@
-const local = require('./strategies/local');
+// 引入策略集合，包含預設的 local 策略
+const strategies = require('./strategies');
 const Logger = require('../../utils/logger');
 const logger = new Logger('ASR');
 
 // 目前僅提供 local 策略
 let strategy = null;
 
+
 module.exports = {
+  // 優先度將於 updateStrategy 時由所選策略設定
+  priority: 0,
   // 更新策略，依照需求載入對應實作
   async updateStrategy() {
     logger.info('ASR 插件策略更新中...');
-    strategy = local;
+    strategy = strategies.local;
+    // 依據所選策略設定優先度
+    this.priority = strategy.priority;
     logger.info('ASR 插件策略已載入');
   },
 

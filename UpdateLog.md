@@ -101,3 +101,27 @@
 ### [v.0.6.4]
 ## Docs
 - 新增 ngrok 插件 options.md，說明各接口傳入的 options 內容
+
+### [v.0.7]
+## New
+- PluginsManager 支援插件優先度機制，加入 `priority` 欄位
+- queueOnline 增加重複上線檢查
+- 所有插件新增 `priority` 屬性
+## Test
+- 補充 PluginsManager 測試，驗證排序與防呆邏輯
+## Docs
+- 更新 regulation.md 與 ToDo.md
+
+
+### [v.0.7.1]
+## Change
+- 將各插件的 `priority` 移至 `strategies/index.js` 定義
+- 插件根目錄改為從 strategies 引入優先度
+- 更新 regulation 說明
+
+### [v.0.7.2]
+## Change
+- 將 `priority` 下放至各策略實作的 `index.js`
+- 更新所有插件以從所選策略讀取優先度
+- 調整文件說明與 ToDo
+

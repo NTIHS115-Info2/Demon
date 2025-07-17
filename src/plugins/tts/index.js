@@ -1,14 +1,19 @@
-const local = require('./strategies/local');
+// 取得策略集合
+const strategies = require('./strategies');
 const Logger = require('../../utils/logger');
 const logger = new Logger('TTS');
 
 let strategy = null;
 
+
 module.exports = {
+  // 優先度將在 updateStrategy 中設定
+  priority: 0,
   // 更新策略
   async updateStrategy() {
     logger.info('TTS 插件策略更新中...');
-    strategy = local;
+    strategy = strategies.local;
+    this.priority = strategy.priority;
     logger.info('TTS 插件策略已載入');
   },
 
