@@ -1,14 +1,5 @@
 ### 給codex的訊息
 
-這次你要撰寫一個較為複雜的分支，你只需要專注在ToDo的Discord項目
+這次你要更新一個較為複雜的分支，根據UpdateLog.md 裡面的主支v.0.7.x版本更新的項目，完善pb.v.0.6.x更新的項目
 
-Discord相關的項目是要放在plugins內，當作一個插件存在，要用Discord.js撰寫，並且每個功能也要撰寫測試檔案
-
-請先完成以下幾個目標
-
-可以上線Discord機器人
-
-特定頻道的訊息讀取
-有包含@訊息的訊息讀取以及回覆
-
-斜線指令
+說詳細一點，pb.v.0.6.x是使用舊的core/pluginsManager，但是v.0.7.x有更新pluginsManager和其他東西，所以要讓pb.v.0.6.x的項目能夠在v.0.7.x的pluginsManager上運行。
