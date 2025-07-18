@@ -17,7 +17,8 @@ class PluginsManager {
   constructor() {
     // 使用相對於當前檔案位置的 plugins 目錄，避免硬編碼絕對路徑
     this.rootPath = path.resolve(__dirname, '..', 'plugins');
-    this.plugins = new Map();          // 儲存已載入的插件
+    // 插件容器，key 為插件名稱，value 為插件實例
+    this.plugins = new Map();
     this.queue = [];                   // 插件啟動佇列
     this.running = false;              // 佇列處理狀態
     this.maxConcurrent = 1;            // 每次僅啟動一個插件
@@ -53,8 +54,11 @@ class PluginsManager {
         throw new Error(`插件 ${name} 不符合要求，請檢查其實作`);
       }
 
+      // 若插件未定義 priority 則給予預設值 0
+      if (typeof plugin.priority !== 'number') plugin.priority = 0;
+
       plugin.updateStrategy();  // 確保策略已更新
-      this.plugins.set(this.normalizeName(name), plugin); // 這裡改為小寫
+      this.plugins.set(this.normalizeName(name), plugin); // 儲存插件
       Logger.info(`[PluginManager] 載入插件 ${name}`);
     } else {
       throw new Error(`無法找到 ${name} 插件的 index.js`);
@@ -129,6 +133,18 @@ class PluginsManager {
     const plugin = this.plugins.get(id);
     if (!plugin?.online) return false;
 
+    // 檢查插件狀態，避免重複啟動
+    try {
+      const state = await this.getPluginState(id);
+      if (state === 1) {
+        Logger.warn(`[Queue] 插件 ${id} 已在線上，忽略重複啟動`);
+        return false;
+      }
+    } catch (err) {
+      Logger.error(`[Queue] 取得插件 ${id} 狀態失敗：${err.message}`);
+      return false;
+    }
+
     // 用 Promise 包一層「包進 queue 後會觸發執行」的邏輯
     return new Promise((resolve, reject) => {
       this.queue.push(async () => {
@@ -171,7 +187,10 @@ class PluginsManager {
    * @returns {Promise<void>}
    */
   async queueAllOnline(options = {}) {
-    for (const name of this.plugins.keys()) {
+    // 依照 priority 由高至低排序，數值相同保持載入順序
+    const arr = Array.from(this.plugins.entries());
+    arr.sort((a, b) => (b[1].priority || 0) - (a[1].priority || 0));
+    for (const [name] of arr) {
       await this.queueOnline(name, options);
     }
   }

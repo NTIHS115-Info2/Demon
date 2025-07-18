@@ -13,4 +13,4 @@ const logger            = new Logger('mainScripts.log');
 
     logger.info("pluginsManager 啟動完畢");
 
-})()
+})();

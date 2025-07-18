@@ -70,15 +70,77 @@
 ### [v.0.5.3]
 ## Fix
 - 修復ASR/TTS插件無法正常啟動問題
+### [v.0.5.4]
+## New
+- 新增 ngrok 監控腳本，可自動啟動並監測 3000 端口
+## Update
+- ToDo 完成 ngrok 相關項目
+
 ### [v.0.6]
+## Update
+- 新增 ngrok 啟動腳本並支援自訂指令
+- 強化標準輸出日誌處理
+
+### [v.0.6.1]
+## New
+- ngrokServer 新增子網域註冊功能，可將外部請求導向對應插件
+- 新增 ngrok 插件並整合至 pluginsManager
+## Change
+- 移除舊的 Server/ngrok/index.js 啟動方式
+
+### [v.0.6.2]
+## Update
+- 插件註冊子網域改採物件傳入，並新增解註冊功能
+- ngrokServer 解除子網域時增加檢查與日誌
+
+### [v.0.6.3]
+## Change
+- 移除 ngrok 插件額外的 register/unregister 介面
+- send() 取代註冊與解註冊行為並加入錯誤處理
+
+### [v.0.6.4]
+## Docs
+- 新增 ngrok 插件 options.md，說明各接口傳入的 options 內容
+
+### [v.0.7]
+## New
+- 實作 LlamaServer 遠端與伺服器策略
+- 新增 remote/infor.js 儲存子網域設定
+- 新增 ASR 與 TTS 插件的 remote 與 server 策略
+- remote/infor.js 提供子網域與接口資訊
+- PluginsManager 支援插件優先度機制，加入 `priority` 欄位
+- queueOnline 增加重複上線檢查
+- 所有插件新增 `priority` 屬性
+## Change
+- LlamaServer 插件可依 mode 切換 local、remote、server 三種策略
+- ASR、TTS 插件可依 mode 切換 local、remote、server 三種策略
+## Test
+- 補充 PluginsManager 測試，驗證排序與防呆邏輯
+## Docs
+- 更新 regulation.md 與 ToDo.md
+
+
+### [v.0.7.1]
+## Change
+- 將各插件的 `priority` 移至 `strategies/index.js` 定義
+- 插件根目錄改為從 strategies 引入優先度
+- 更新 regulation 說明
+
+### [v.0.7.2]
+## Change
+- 將 `priority` 下放至各策略實作的 `index.js`
+- 更新所有插件以從所選策略讀取優先度
+- 調整文件說明與 ToDo
+
+### pb = plugins branch
+### [pb.v.0.6]
 ## New
 - 新增 Discord 插件並撰寫測試檔案
 
-### [v.0.6.1]
+### [pb.v.0.6.1]
 ## Improve
 - 調整 Discord 插件 send 方法，可傳入 func 以呼叫內部功能
 
-
-### [v.0.6.2]
+### [pb.v.0.6.2]
 ## Docs
 - 新增 send.md，說明 send 輸入及用法
