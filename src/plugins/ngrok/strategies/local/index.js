@@ -4,7 +4,11 @@ const logger = new Logger('NgrokLocal');
 
 let manager = null;
 
+// 此策略的啟動優先度
+const priority = 60;
+
 module.exports = {
+  priority,
   async online(options) {
     logger.info('Ngrok 正在啟動...');
     if (!manager) manager = new NgrokServerManager(options);

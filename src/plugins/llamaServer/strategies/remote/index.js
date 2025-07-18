@@ -7,7 +7,11 @@ const logger = new Logger('LlamaRemote');
 
 let baseUrl = '';
 
+// 此策略的預設啟動優先度
+const priority = 40;
+
 module.exports = {
+    priority,
   /**
    * 啟動遠端策略
    * @param {Object} options

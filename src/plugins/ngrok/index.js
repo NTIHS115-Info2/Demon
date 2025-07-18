@@ -1,13 +1,17 @@
-const local = require('./strategies/local');
+// 引入策略模組
+const strategies = require('./strategies');
 const Logger = require('../../utils/logger');
 const logger = new Logger('Ngrok');
 
 let strategy = null;
 
+
 module.exports = {
+  priority: 0,
   async updateStrategy() {
     logger.info('Ngrok 策略更新中...');
-    strategy = local;
+    strategy = strategies.local;
+    this.priority = strategy.priority;
     logger.info('Ngrok 策略已載入');
   },
 

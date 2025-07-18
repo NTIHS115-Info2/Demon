@@ -1,6 +1,5 @@
-const local = require('./strategies/local');
-const remote = require('./strategies/remote');
-const server = require('./strategies/server');
+// 取得策略集合
+const strategies = require('./strategies');
 const Logger = require('../../utils/logger');
 const logger = new Logger('TTS');
 
@@ -8,6 +7,8 @@ let strategy = null;
 let mode = 'local';
 
 module.exports = {
+  // 優先度將在 updateStrategy 中設定
+  priority: 0,
   /**
    * 更新策略模式
    * @param {'local'|'remote'|'server'} newMode
@@ -23,8 +24,9 @@ module.exports = {
         strategy = server;
         break;
       default:
-        strategy = local;
+        strategy = strategies.local;
     }
+    this.priority = strategy.priority;
     logger.info(`TTS 插件策略已切換為 ${mode}`);
   },
 

@@ -1,13 +1,15 @@
-const local = require('./strategies/local');
-const remote = require('./strategies/remote');
-const server = require('./strategies/server');
+// 引入策略集合，包含預設的 local 策略
+const strategies = require('./strategies');
 const Logger = require('../../utils/logger');
 const logger = new Logger('ASR');
 
 let strategy = null;
 let mode = 'local';
 
+
 module.exports = {
+  // 優先度將於 updateStrategy 時由所選策略設定
+  priority: 0,
   /**
    * 更新策略模式
    * @param {'local'|'remote'|'server'} newMode
@@ -17,14 +19,16 @@ module.exports = {
     mode = newMode;
     switch (newMode) {
       case 'remote':
-        strategy = remote;
+        strategy = strategies.remote;
         break;
       case 'server':
-        strategy = server;
+        strategy = strategies.server;
         break;
       default:
-        strategy = local;
+        strategy = strategies.local;
     }
+    // 依據所選策略設定優先度
+    this.priority = strategy.priority;
     logger.info(`ASR 插件策略已切換為 ${mode}`);
   },
 

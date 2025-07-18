@@ -1,5 +1,5 @@
 const local = require('../local');
-const info = require('../remote/infor');
+const info = require('./infor');
 const pluginsManager = require('../../../../core/pluginsManager');
 const Logger = require('../../../../utils/logger');
 

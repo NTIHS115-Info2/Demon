@@ -1,14 +1,16 @@
-const local = require('./strategies/local');
-const remote = require('./strategies/remote');
-const server = require('./strategies/server');
+// 取得策略模組
+const strategies = require('./strategies');
 
 const Logger = require('../../utils/logger');
 const logger = new Logger('LlamaServerManager');
 
-let strategies = null;
+let strategy = null;
 let mode = 'local';
 
+
 module.exports = {
+
+    priority: 0,
 
     /**
      * 更新策略模式
@@ -28,43 +30,50 @@ module.exports = {
                 strategies = local;
         }
         logger.info(`LlamaServerManager 策略已切換為 ${mode}`);
+        // 這裡可以根據需要更新策略，目前僅支援 local 策略
+        strategy = strategies.local;
+        this.priority = strategy.priority;
+        logger.info('LlamaServerManager 策略更新完成');
     },
 
     async online(options = {}) {
         const useMode = options.mode || mode;
-        if (!strategies || useMode !== mode) {
+        if (!strategy || useMode !== mode) {
             await this.updateStrategy(useMode);
         }
-        return strategies.online(options);
+        return strategy.online(options);
     },
 
     async offline() {
-        if (!strategies) {
-            await this.updateStrategy(mode);
+        if (!strategy) {
+            logger.warn('LlamaServerManager 尚未初始化，正在初始化...');
+            await this.updateStrategy();
         }
-        return strategies.offline();
+        return await strategy.offline();
     },
 
-    async restart(options = {}) {
-        const useMode = options.mode || mode;
-        if (!strategies || useMode !== mode) {
-            await this.updateStrategy(useMode);
+    async restart(options) {
+        if (!strategy) {
+            logger.warn('LlamaServerManager 尚未初始化，正在初始化...');
+            await this.updateStrategy();
         }
-        return strategies.restart(options);
+        return await strategy.restart(options);
     },
 
     async state() {
-        if (!strategies) {
-            await this.updateStrategy(mode);
+        if (!strategy) {
+            logger.warn('LlamaServerManager 尚未初始化，正在初始化...');
+            await this.updateStrategy();
         }
-        return strategies.state();
+        return await strategy.state();
     },
 
     async send(options) {
-        if (!strategies) {
-            await this.updateStrategy(mode);
+        if (!strategy) {
+            logger.warn('LlamaServerManager 尚未初始化，正在初始化...');
+            await this.updateStrategy();
         }
-        return strategies.send(options);
+        return await strategy.send(options);
     },
     
 }
