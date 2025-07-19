@@ -132,3 +132,18 @@
 - 更新所有插件以從所選策略讀取優先度
 - 調整文件說明與 ToDo
 
+### [v.0.7.3]
+## Fix
+- 補上遠端策略遺漏的 infor.js 檔案
+- 修正 LlamaServerManager 策略切換邏輯
+## Test
+- 新增 ASR、TTS、LlamaServer 遠端策略單元測試
+
+### [v.0.7.4]
+## Fix
+- 移除多餘的 remote/infor.js，改由 server 策略提供設定
+- 修正 TTS 插件策略切換錯誤
+## Change
+- ASR、TTS 策略 index.js 匯出三種策略
+- 整理三個插件根目錄 index.js，統一策略載入邏輯
+
