@@ -16,16 +16,8 @@ module.exports = {
   async updateStrategy(newMode = 'local') {
     logger.info('TTS 插件策略更新中...');
     mode = newMode;
-    switch (newMode) {
-      case 'remote':
-        strategy = remote;
-        break;
-      case 'server':
-        strategy = server;
-        break;
-      default:
-        strategy = strategies.local;
-    }
+    // 依傳入模式選擇對應策略，預設 local
+    strategy = strategies[newMode] || strategies.local;
     this.priority = strategy.priority;
     logger.info(`TTS 插件策略已切換為 ${mode}`);
   },

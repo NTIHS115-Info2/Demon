@@ -1,6 +1,7 @@
 const axios = require('axios');
 const Logger = require('../../../../utils/logger');
-const info = require('./infor');
+// 改為直接引用 server 策略的設定
+const info = require('../server/infor');
 
 const logger = new Logger('ASRRemote');
 let baseUrl = '';

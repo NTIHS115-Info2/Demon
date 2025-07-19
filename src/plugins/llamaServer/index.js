@@ -4,7 +4,8 @@ const strategies = require('./strategies');
 const Logger = require('../../utils/logger');
 const logger = new Logger('LlamaServerManager');
 
-let strategy = null;
+// 目前使用中的策略，預設採用 local
+let strategy = strategies.local;
 let mode = 'local';
 
 
@@ -19,20 +20,10 @@ module.exports = {
     async updateStrategy(newMode = 'local') {
         logger.info('LlamaServerManager 更新策略中...');
         mode = newMode;
-        switch (newMode) {
-            case 'remote':
-                strategies = remote;
-                break;
-            case 'server':
-                strategies = server;
-                break;
-            default:
-                strategies = local;
-        }
-        logger.info(`LlamaServerManager 策略已切換為 ${mode}`);
-        // 這裡可以根據需要更新策略，目前僅支援 local 策略
-        strategy = strategies.local;
+        // 依傳入模式選擇對應策略，預設為 local
+        strategy = strategies[newMode] || strategies.local;
         this.priority = strategy.priority;
+        logger.info(`LlamaServerManager 策略已切換為 ${mode}`);
         logger.info('LlamaServerManager 策略更新完成');
     },
 
@@ -74,6 +65,6 @@ module.exports = {
             await this.updateStrategy();
         }
         return await strategy.send(options);
-    },
-    
-}
+    }
+
+};

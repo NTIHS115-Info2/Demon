@@ -17,16 +17,8 @@ module.exports = {
   async updateStrategy(newMode = 'local') {
     logger.info('ASR 插件策略更新中...');
     mode = newMode;
-    switch (newMode) {
-      case 'remote':
-        strategy = strategies.remote;
-        break;
-      case 'server':
-        strategy = strategies.server;
-        break;
-      default:
-        strategy = strategies.local;
-    }
+    // 依傳入模式選擇對應策略，預設 local
+    strategy = strategies[newMode] || strategies.local;
     // 依據所選策略設定優先度
     this.priority = strategy.priority;
     logger.info(`ASR 插件策略已切換為 ${mode}`);
