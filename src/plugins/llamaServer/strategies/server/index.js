@@ -4,9 +4,12 @@ const pluginsManager = require('../../../../core/pluginsManager');
 const Logger = require('../../../../utils/logger');
 
 const logger = new Logger('LlamaServer');
+const priority = 50;
+
 let registered = false;
 
 module.exports = {
+  priority,
   /**
    * 啟動伺服器模式：啟動本地 Llama 並註冊 ngrok 子網域
    */

@@ -2,8 +2,8 @@
 
 const fs = require('fs');
 const path = require('path');
-const Logger = require('../src/utils/logger');
-const SetLoggerBasePath = require('../src/utils/logger').SetLoggerBasePath;
+const Logger = require('../../src/utils/logger');
+const SetLoggerBasePath = require('../../src/utils/logger').SetLoggerBasePath;
 
 describe('Logger 模組功能', () => {
   const LOG_DIR = path.join(__dirname, '..', 'logs', 'tlogs');

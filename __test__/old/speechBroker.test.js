@@ -27,7 +27,7 @@ jest.mock('../src/core/pluginsManager.js', () => ({
 const pmPath = require.resolve('../src/core/pluginsManager.js');
 const pmMock = require(pmPath);
 
-const brokerLocal = require('../src/plugins/speechBroker/strategies/local');
+const brokerLocal = require('../../src/plugins/speechBroker/strategies/local');
 
 describe('SpeechBroker 本地策略', () => {
   beforeEach(async () => {

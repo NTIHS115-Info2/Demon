@@ -18,7 +18,7 @@ jest.mock('python-shell', () => {
 }, { virtual: true });
 
 const { PythonShell } = require('python-shell');
-const ttsLocal = require('../src/plugins/tts/strategies/local');
+const ttsLocal = require('../../src/plugins/tts/strategies/local');
 
 describe('TTS 本地策略', () => {
   beforeEach(async () => { jest.clearAllMocks(); await ttsLocal.offline(); });

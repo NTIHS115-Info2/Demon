@@ -4,9 +4,12 @@ const pluginsManager = require('../../../../core/pluginsManager');
 const Logger = require('../../../../utils/logger');
 
 const logger = new Logger('TTSServer');
+const priority = 80;
+
 let registered = false;
 
 module.exports = {
+  priority,
   /** 啟動伺服器模式並註冊子網域 */
   async online(options = {}) {
     await local.online(options);
