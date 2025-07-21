@@ -1,6 +1,6 @@
 // __tests__/DefaultSystemPrompt.test.js
 
-const GetDefaultSystemPrompt = require('../src/core/PromptComposer').GetDefaultSystemPrompt;
+const GetDefaultSystemPrompt = require('../../src/core/PromptComposer').GetDefaultSystemPrompt;
 
 describe('GetDefaultSystemPrompt', () => {
   test('應回傳非空字串', async () => {

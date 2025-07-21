@@ -1,7 +1,7 @@
 const axios = require('axios');
 jest.mock('axios');
 
-const ttsRemote = require('../src/plugins/tts/strategies/remote');
+const ttsRemote = require('../../src/plugins/tts/strategies/remote');
 
 describe('TTS 遠端策略', () => {
   beforeEach(() => { jest.clearAllMocks(); });

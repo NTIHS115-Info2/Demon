@@ -2,7 +2,7 @@
 
 const fs = require('fs');
 const path = require('path');
-const fileEditer = require('../src/tools/fileEditer');
+const fileEditer = require('../../src/tools/fileEditer');
 
 const TEST_DIR = path.join(__dirname, 'fileEditerTestDir');
 const FILE1 = path.join(TEST_DIR, 'test.txt');

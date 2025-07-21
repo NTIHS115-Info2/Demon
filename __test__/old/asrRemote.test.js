@@ -1,7 +1,7 @@
 const axios = require('axios');
 jest.mock('axios');
 
-const asrRemote = require('../src/plugins/asr/strategies/remote');
+const asrRemote = require('../../src/plugins/asr/strategies/remote');
 
 describe('ASR 遠端策略', () => {
   beforeEach(() => {

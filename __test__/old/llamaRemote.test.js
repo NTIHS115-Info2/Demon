@@ -2,7 +2,7 @@ const axios = require('axios');
 const { EventEmitter } = require('events');
 jest.mock('axios');
 
-const llamaRemote = require('../src/plugins/llamaServer/strategies/remote');
+const llamaRemote = require('../../src/plugins/llamaServer/strategies/remote');
 
 describe('LlamaServer 遠端策略', () => {
   beforeEach(() => { jest.clearAllMocks(); });

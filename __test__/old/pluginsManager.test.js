@@ -3,7 +3,7 @@
 // 測試 PluginsManager 的核心生命週期方法
 // 引入 pluginManager 實作 :contentReference[oaicite:0]{index=0}
 
-const PluginManager = require('../src/core/pluginsManager');
+const PluginManager = require('../../src/core/pluginsManager');
 
 describe('PluginsManager 核心功能', () => {
   let mockPlugin;

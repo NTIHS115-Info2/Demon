@@ -3,8 +3,8 @@
 // 測試 TalkToDemonManager 在 llama plugin 啟動下的行為
 // 引入 TalkToDemonManager 實作 :contentReference[oaicite:1]{index=1}
 
-const talkManager = require('../src/core/TalkToDemon'); // 如實檔名為 TalkToDemon.js
-const PluginManager = require('../src/core/pluginsManager');
+const talkManager = require('../../src/core/TalkToDemon'); // 如實檔名為 TalkToDemon.js
+const PluginManager = require('../../src/core/pluginsManager');
 const { EventEmitter } = require('events');
 
 describe('TalkToDemonManager 串流對話測試', () => {

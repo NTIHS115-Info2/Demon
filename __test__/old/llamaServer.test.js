@@ -1,7 +1,7 @@
 // __test__/llamaServer.test.js
 
 const axios = require('axios');
-const LlamaServerManager = require('../Server/llama/llamaServer');
+const LlamaServerManager = require('../../Server/llama/llamaServer');
 
 jest.setTimeout(60000);
 
