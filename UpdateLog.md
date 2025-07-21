@@ -147,3 +147,11 @@
 - ASR、TTS 策略 index.js 匯出三種策略
 - 整理三個插件根目錄 index.js，統一策略載入邏輯
 
+
+### [v.0.8]
+## New
+- 新增 OsInfor 工具，提供 table 與 get 兩種接口
+- ASR、TTS、LlamaServer 插件支援自動選擇策略
+- 各策略補上 priority 欄位並新增 serverInfo 判定
+## Test
+- 新增 OsInfor 與 TTS updateStrategy 測試

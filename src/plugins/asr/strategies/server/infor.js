@@ -5,5 +5,8 @@ module.exports = {
     stop: 'stop',
     restart: 'restart',
     state: 'state'
+  },
+  serverInfo: {
+    platform: 'linux'
   }
 };
