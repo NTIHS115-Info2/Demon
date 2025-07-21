@@ -133,14 +133,18 @@
 - 調整文件說明與 ToDo
 
 ### pb = plugins branch
-### [pb.v.0.6]
+### [pb.v.0.1]
 ## New
 - 新增 Discord 插件並撰寫測試檔案
 
-### [pb.v.0.6.1]
+### [pb.v.0.1.1]
 ## Improve
 - 調整 Discord 插件 send 方法，可傳入 func 以呼叫內部功能
 
-### [pb.v.0.6.2]
+### [pb.v.0.1.2]
 ## Docs
 - 新增 send.md，說明 send 輸入及用法
+
+### [pb.v.0.1.3]
+## Change
+- Discord 插件加入策略入口與 `priority`，相容新版 pluginsManager

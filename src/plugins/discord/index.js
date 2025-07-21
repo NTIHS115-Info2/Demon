@@ -1,18 +1,30 @@
-const local = require('./strategies/local');
+// 引入策略模組，初期僅提供 local 策略
+const strategies = require('./strategies');
 const Logger = require('../../utils/logger');
 const logger = new Logger('DISCORD');
 
 let strategy = null;
+let mode = 'local';
 
 module.exports = {
-  async updateStrategy() {
+  // 優先度將在 updateStrategy 時由所選策略設定
+  priority: 0,
+  /**
+   * 更新策略模式，目前僅支援 local
+   * @param {'local'} newMode
+   */
+  async updateStrategy(newMode = 'local') {
     logger.info('Discord 插件策略更新中...');
-    strategy = local;
+    mode = newMode;
+    strategy = strategies.local;
+    // 依策略設定優先度
+    this.priority = strategy.priority;
     logger.info('Discord 插件策略已載入');
   },
 
   async online(options) {
-    if (!strategy) await this.updateStrategy();
+    const useMode = options.mode || mode;
+    if (!strategy || useMode !== mode) await this.updateStrategy(useMode);
     try {
       return await strategy.online(options);
     } catch (e) {
@@ -22,7 +34,7 @@ module.exports = {
   },
 
   async offline() {
-    if (!strategy) await this.updateStrategy();
+    if (!strategy) await this.updateStrategy(mode);
     try {
       return await strategy.offline();
     } catch (e) {
@@ -32,7 +44,8 @@ module.exports = {
   },
 
   async restart(options) {
-    if (!strategy) await this.updateStrategy();
+    const useMode = options?.mode || mode;
+    if (!strategy || useMode !== mode) await this.updateStrategy(useMode);
     try {
       return await strategy.restart(options);
     } catch (e) {
@@ -42,7 +55,7 @@ module.exports = {
   },
 
   async state() {
-    if (!strategy) await this.updateStrategy();
+    if (!strategy) await this.updateStrategy(mode);
     try {
       return await strategy.state();
     } catch (e) {
@@ -53,7 +66,7 @@ module.exports = {
 
   // 將外部傳入的指令分派至內部對應函式
   async send(data = {}) {
-    if (!strategy) await this.updateStrategy();
+    if (!strategy) await this.updateStrategy(mode);
     if (!data.func) return false;
     const { func, ...params } = data;
     try {

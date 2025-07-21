@@ -2,7 +2,11 @@ const clientManager = require('./clientManager');
 const messageHandler = require('./messageHandler');
 const commandHandler = require('./commandHandler');
 
+// 插件啟動優先度，數值越大越先啟動
+const priority = 65;
+
 module.exports = {
+  priority,
   name: 'DISCORD',
 
   async online(options = {}) {
