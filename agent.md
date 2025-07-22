@@ -1,5 +1,12 @@
 ### 給codex的訊息
 
-這次你要更新一個較為複雜的分支，根據UpdateLog.md 裡面的主支v.0.7.x版本更新的項目，完善pb.v.0.1.x更新的項目
+### 版本更新要點
+## MessageHandler
+- 將MsgHandler 改為針對私訊,提及訊息,回覆訊息 將接收數據傳入給TalkToDemon 接收後反傳的 用標點符號為判斷 一句一句將回覆推送回去
+- 這個版本先針對我自己 所以說要特別判斷id 是不是 cookice 如果不是的話 就不理會（統一用 “我還學不會跟別人說話” 來回覆）
 
-說詳細一點，pb.v.0.1.x是使用舊的core/pluginsManager，但是v.0.7.x有更新pluginsManager和其他東西，所以要讓pb.v.0.1.x的項目能夠在v.0.7.x的pluginsManager上運行。
+- 私訊 ➜ handleDirectMessage
+- 提及 ➜ handleMentionMessage
+- 回覆 ➜ handleReplyMessage
+
+- 所有版本的對話 都只會將使用者輸入送進給talktodemon 他會自己管控
