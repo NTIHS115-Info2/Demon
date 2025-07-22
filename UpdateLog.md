@@ -148,3 +148,13 @@
 ### [pb.v.0.1.3]
 ## Change
 - Discord 插件加入策略入口與 `priority`，相容新版 pluginsManager
+
+### [pb.v.0.1.4]
+## Update
+- MessageHandler 支援私訊、提及與回覆，整合 TalkToDemon
+- 限制僅回應指定使用者，其他人回覆「我還學不會跟別人說話」
+
+### [pb.v.0.1.5]
+## Update
+- 調整 MessageHandler 依句號即時推送回覆，保留標點符號
+- 強化錯誤處理與註解
