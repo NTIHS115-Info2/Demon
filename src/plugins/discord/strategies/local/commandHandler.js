@@ -6,18 +6,25 @@ const logger = new Logger('DISCORD');
 let commands = [];
 
 /**
- * 設定 slash 指令
+ * 設定 slash 指令，可選擇指定 guild 或全域註冊
  * @param {object} options { applicationId, guildId, token }
  */
 async function register(options = {}) {
   const { applicationId, guildId, token } = { ...config, ...options };
-  if (!applicationId || !guildId || !token) return;
+  if (!applicationId || !token) return;
 
   const rest = new REST({ version: '10' }).setToken(token);
   const data = commands.map(cmd => cmd.toJSON());
 
   try {
-    await rest.put(Routes.applicationGuildCommands(applicationId, guildId), { body: data });
+    if (guildId) {
+      await rest.put(
+        Routes.applicationGuildCommands(applicationId, guildId),
+        { body: data }
+      );
+    } else {
+      await rest.put(Routes.applicationCommands(applicationId), { body: data });
+    }
     logger.info('[DISCORD] Slash 指令註冊完成');
   } catch (e) {
     logger.error('[DISCORD] 註冊指令失敗: ' + e);

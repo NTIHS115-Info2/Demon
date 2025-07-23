@@ -165,3 +165,9 @@
 ## Update
 - 各檔案改為讀取 `config.js` 作為預設值
 - 更新文件說明
+
+### [pb.v.0.1.7]
+## Change
+- 改為全域監聽所有伺服器與頻道，可選擇以 channelId 限制
+- `commandHandler` 支援無 guildId 時註冊為全域 Slash 指令
+- 更新文件說明
