@@ -2,6 +2,8 @@
 
 此文件說明如何透過 `send` 方法調用 Discord 插件功能。
 
+插件根目錄的 `config.js` 提供預設 Token 等設定，預設全域監聽，可透過 channelId 自行限制。
+
 ## 基本格式
 ```json
 {

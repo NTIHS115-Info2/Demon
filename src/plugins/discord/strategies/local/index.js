@@ -1,6 +1,7 @@
 const clientManager = require('./clientManager');
 const messageHandler = require('./messageHandler');
 const commandHandler = require('./commandHandler');
+const config = require('../../config');
 
 // 插件啟動優先度，數值越大越先啟動
 const priority = 65;
@@ -10,15 +11,12 @@ module.exports = {
   name: 'DISCORD',
 
   async online(options = {}) {
-    const client = await clientManager.login(options);
-    messageHandler.attach(client, options);
+    const opts = { ...config, ...options };
+    const client = await clientManager.login(opts);
+    messageHandler.attach(client, opts);
     commandHandler.setupDefaultCommands();
     commandHandler.handle(client);
-    await commandHandler.register({
-      applicationId: options.applicationId,
-      guildId: options.guildId,
-      token: options.token
-    });
+    await commandHandler.register(opts);
   },
 
   async offline() {
@@ -26,8 +24,9 @@ module.exports = {
   },
 
   async restart(options = {}) {
+    const opts = { ...config, ...options };
     await this.offline();
-    await clientManager.login(options);
+    await clientManager.login(opts);
   },
 
   async state() {

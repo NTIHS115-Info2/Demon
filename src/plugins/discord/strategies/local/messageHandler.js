@@ -1,10 +1,11 @@
 const Logger = require('../../../../utils/logger');
 const talker = require('../../../../core/TalkToDemon');
+const config = require('../../config');
 
 const logger = new Logger('DISCORD');
 
-// 允許互動的使用者 ID，暫時僅限作者本人
-const OWNER_ID = 'cookice';
+// 允許互動的使用者 ID，預設取自 config
+const OWNER_ID = config.userId || 'cookice';
 
 // 回覆非作者訊息時的預設內容
 const DENY_MESSAGE = '我還學不會跟別人說話';
@@ -99,16 +100,18 @@ async function handleReplyMessage(msg, uid = OWNER_ID) {
 }
 
 /**
- * 附加訊息監聽器，讀取特定頻道並回覆 Mention
+ * 附加訊息監聽器，預設全域監聽並回覆 Mention
  * @param {import('discord.js').Client} client
  * @param {object} options { channelId }
  */
 function attach(client, options = {}) {
-  const targetChannel = options.channelId;
+  // 可選擇限制監聽的頻道 ID，預設空值代表全域監聽
+  const targetChannel = options.channelId || config.channelId;
   const allowId = options.userId || OWNER_ID;
 
   client.on('messageCreate', async msg => {
     try {
+      // 若指定頻道則只監聽該頻道
       if (targetChannel && msg.channel.id !== targetChannel) return;
       if (msg.author.bot) return;
 

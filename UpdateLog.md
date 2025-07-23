@@ -158,3 +158,16 @@
 ## Update
 - 調整 MessageHandler 依句號即時推送回覆，保留標點符號
 - 強化錯誤處理與註解
+
+### [pb.v.0.1.6]
+## New
+- 新增 Discord `config.js` 統一管理 Token 與頻道等設定
+## Update
+- 各檔案改為讀取 `config.js` 作為預設值
+- 更新文件說明
+
+### [pb.v.0.1.7]
+## Change
+- 改為全域監聽所有伺服器與頻道，可選擇以 channelId 限制
+- `commandHandler` 支援無 guildId 時註冊為全域 Slash 指令
+- 更新文件說明
