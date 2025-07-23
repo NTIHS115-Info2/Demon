@@ -1,5 +1,6 @@
 const { Client, GatewayIntentBits, Partials } = require('discord.js');
 const Logger = require('../../../../utils/logger');
+const config = require('../../config');
 const logger = new Logger('DISCORD');
 
 let client = null;
@@ -23,7 +24,8 @@ module.exports = {
         ],
         partials: [Partials.Channel]
       });
-      await client.login(options.token);
+      const token = options.token || config.token;
+      await client.login(token);
       logger.info('[DISCORD] 客戶端登入成功');
       return client;
     } catch (e) {

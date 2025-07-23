@@ -1,5 +1,6 @@
 const { REST, Routes, SlashCommandBuilder } = require('discord.js');
 const Logger = require('../../../../utils/logger');
+const config = require('../../config');
 const logger = new Logger('DISCORD');
 
 let commands = [];
@@ -9,7 +10,7 @@ let commands = [];
  * @param {object} options { applicationId, guildId, token }
  */
 async function register(options = {}) {
-  const { applicationId, guildId, token } = options;
+  const { applicationId, guildId, token } = { ...config, ...options };
   if (!applicationId || !guildId || !token) return;
 
   const rest = new REST({ version: '10' }).setToken(token);

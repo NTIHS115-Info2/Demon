@@ -1,10 +1,11 @@
 const Logger = require('../../../../utils/logger');
 const talker = require('../../../../core/TalkToDemon');
+const config = require('../../config');
 
 const logger = new Logger('DISCORD');
 
-// 允許互動的使用者 ID，暫時僅限作者本人
-const OWNER_ID = 'cookice';
+// 允許互動的使用者 ID，預設取自 config
+const OWNER_ID = config.userId || 'cookice';
 
 // 回覆非作者訊息時的預設內容
 const DENY_MESSAGE = '我還學不會跟別人說話';
@@ -104,7 +105,7 @@ async function handleReplyMessage(msg, uid = OWNER_ID) {
  * @param {object} options { channelId }
  */
 function attach(client, options = {}) {
-  const targetChannel = options.channelId;
+  const targetChannel = options.channelId || config.channelId;
   const allowId = options.userId || OWNER_ID;
 
   client.on('messageCreate', async msg => {

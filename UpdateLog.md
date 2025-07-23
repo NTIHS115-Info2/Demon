@@ -158,3 +158,10 @@
 ## Update
 - 調整 MessageHandler 依句號即時推送回覆，保留標點符號
 - 強化錯誤處理與註解
+
+### [pb.v.0.1.6]
+## New
+- 新增 Discord `config.js` 統一管理 Token 與頻道等設定
+## Update
+- 各檔案改為讀取 `config.js` 作為預設值
+- 更新文件說明
