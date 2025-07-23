@@ -9,3 +9,5 @@ src/plugins/tts/strategies/local/f5_tts
 
 logs
 yarn.lock
+
+src/plugins/discord/config.js
