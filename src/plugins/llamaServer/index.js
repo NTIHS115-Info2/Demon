@@ -24,57 +24,19 @@ module.exports = {
      */
     async updateStrategy(newMode = 'auto', options = {}) {
         logger.info('LlamaServerManager 更新策略中...');
-        weights = { ...weights, ...(options.weights || {}) };
-
-        if (newMode !== 'auto') {
-            mode = newMode;
-            strategy = strategies[newMode] || strategies.local;
-            this.priority = strategy.priority;
-            logger.info(`LlamaServerManager 策略已切換為 ${mode}`);
-            return;
-        }
-
-        const order = Object.keys(weights).sort((a, b) => weights[b] - weights[a]);
-
-        for (const m of order) {
-            if (m === 'remote') {
-                if (options.baseUrl) {
-                    try {
-                        await axios.get(options.baseUrl, { timeout: 1000 });
-                        mode = 'remote';
-                        strategy = strategies.remote;
-                        this.priority = strategy.priority;
-                        logger.info('LlamaServerManager 自動選擇 remote 策略');
-                        return;
-                    } catch (e) {
-                        logger.warn('remote 無法連線: ' + e.message);
-                    }
-                }
-            } else if (m === 'server') {
-                try {
-                    const info = await OsInfor.table();
-                    const ok = Object.entries(serverInfo.serverInfo || {}).every(([k, v]) => info[k] === v);
-                    if (ok) {
-                        mode = 'server';
-                        strategy = strategies.server;
-                        this.priority = strategy.priority;
-                        logger.info('LlamaServerManager 自動選擇 server 策略');
-                        return;
-                    }
-                } catch (e) {
-                    logger.warn('server 判定失敗: ' + e.message);
-                }
-            } else if (m === 'local') {
-                mode = 'local';
+        mode = newMode;
+        switch (newMode) {
+            case 'remote':
+                strategy = strategies.remote;
+                break;
+            case 'server':
+                strategy = strategies.server;
+                break;
+            default:
                 strategy = strategies.local;
-                this.priority = strategy.priority;
-                logger.info('LlamaServerManager 自動選擇 local 策略');
-                return;
-            }
         }
-
-        mode = 'local';
-        strategy = strategies.local;
+        logger.info(`LlamaServerManager 策略已切換為 ${mode}`);
+        // 這裡可以根據需要更新策略，目前僅支援 local 策略
         this.priority = strategy.priority;
         logger.info('LlamaServerManager 自動選擇預設 local 策略');
     },

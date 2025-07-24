@@ -125,7 +125,7 @@ class TalkToDemonManager extends EventEmitter {
    */
   talk(talker = '其他', content = '', options = {}) {
     const { uninterruptible=false, important=false } = options;
-    const userMsg = { role:'user', content:`<${talker}> ${content}`, timestamp:Date.now() };
+    const userMsg = { role:'user', content:`${talker}： ${content}`, timestamp:Date.now() };
 
     this._pruneHistory();
     this.history.push(userMsg);
