@@ -21,17 +21,16 @@ module.exports = {
         mode = newMode;
         switch (newMode) {
             case 'remote':
-                strategies = remote;
+                strategy = strategies.remote;
                 break;
             case 'server':
-                strategies = server;
+                strategy = strategies.server;
                 break;
             default:
-                strategies = local;
+                strategy = strategies.local;
         }
         logger.info(`LlamaServerManager 策略已切換為 ${mode}`);
         // 這裡可以根據需要更新策略，目前僅支援 local 策略
-        strategy = strategies.local;
         this.priority = strategy.priority;
         logger.info('LlamaServerManager 策略更新完成');
     },

@@ -1,7 +1,7 @@
 const axios = require('axios');
 const EventEmitter = require('events');
 const Logger = require('../../../../utils/logger');
-const info = require('./infor');
+const info = require('../server/infor');
 
 const logger = new Logger('LlamaRemote');
 

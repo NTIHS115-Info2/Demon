@@ -171,3 +171,9 @@
 - 改為全域監聽所有伺服器與頻道，可選擇以 channelId 限制
 - `commandHandler` 支援無 guildId 時註冊為全域 Slash 指令
 - 更新文件說明
+
+### [pb.v.0.1.8]
+## Fix
+- 修復DM訊息無法使用問題
+## Change
+- 將其他人的對話也納入回應範圍

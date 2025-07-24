@@ -20,6 +20,7 @@ module.exports = {
         intents: options.intents || [
           GatewayIntentBits.Guilds,
           GatewayIntentBits.GuildMessages,
+          GatewayIntentBits.DirectMessages,
           GatewayIntentBits.MessageContent
         ],
         partials: [Partials.Channel]

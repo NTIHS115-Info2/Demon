@@ -7,18 +7,16 @@ const logger = new Logger('DISCORD');
 // 允許互動的使用者 ID，預設取自 config
 const OWNER_ID = config.userId || 'cookice';
 
-// 回覆非作者訊息時的預設內容
-const DENY_MESSAGE = '我還學不會跟別人說話';
-
 /**
  * 按標點偵測逐句回覆
  * @param {object} msg Discord 訊息物件
  * @param {string} text 原始回覆內容
+ * @param {string} [speakerName] 說話者名稱，如果未提供則使用預設邏輯
  */
-async function replyBySentence(msg, text) {
+async function replyBySentence(msg, text, speakerName) {
   let buffer = '';
   // 只要遇到句號類標點就立即傳送該段文字
-  const regex = /[。.!?]/;
+  const regex = /[。!?]/;
 
   // 傳送封裝，確保錯誤不會使流程中斷
   const send = async sentence => {
@@ -34,13 +32,13 @@ async function replyBySentence(msg, text) {
   return new Promise((resolve, reject) => {
     const onData = chunk => {
       buffer += chunk;
-      let idx;
-      // 持續檢查當前緩衝區是否包含標點
-      while ((idx = buffer.search(regex)) !== -1) {
-        const part = buffer.slice(0, idx + 1);
-        buffer = buffer.slice(idx + 1);
-        send(part);
-      }
+      // let idx;
+      // // 持續檢查當前緩衝區是否包含標點
+      // while ((idx = buffer.search(regex)) !== -1) {
+      //   const part = buffer.slice(0, idx + 1);
+      //   buffer = buffer.slice(idx + 1);
+      //   send(part);
+      // }
     };
     const onEnd = () => {
       send(buffer);
@@ -63,40 +61,49 @@ async function replyBySentence(msg, text) {
     talker.on('end', onEnd);
     talker.on('error', onError);
 
-    try { talker.talk('爸爸', text); } catch(e){ onError(e); }
+    // 使用傳入的說話者名稱，如果沒有提供則使用預設值
+    const finalSpeakerName = speakerName || '爸爸';
+    try { talker.talk(finalSpeakerName, text); } catch(e){ onError(e); }
   });
 }
 
 /**
  * 私訊處理
  * @param {object} msg Discord 訊息物件
- * @param {string} [uid] 允許互動的使用者 ID
+ * @param {string} [uid] 允許互動的使用者 ID（擁有者ID）
  */
 async function handleDirectMessage(msg, uid = OWNER_ID) {
-  if (msg.author.id !== uid) return msg.reply(DENY_MESSAGE);
-  return replyBySentence(msg, msg.content);
+  // 對於擁有者，使用預設邏輯（'爸爸'）
+  // 對於其他人，使用他們的顯示名稱
+  const speakerName = msg.author.id === uid ? '爸爸' : (msg.author.displayName || msg.author.username);
+  return replyBySentence(msg, msg.content, speakerName);
 }
 
 /**
  * 提及訊息處理
  * @param {object} msg Discord 訊息物件
  * @param {string} botId Bot 自身的 ID
- * @param {string} [uid] 允許互動的使用者 ID
+ * @param {string} [uid] 允許互動的使用者 ID（擁有者ID）
  */
 async function handleMentionMessage(msg, botId, uid = OWNER_ID) {
-  if (msg.author.id !== uid) return msg.reply(DENY_MESSAGE);
   const clean = msg.content.replace(new RegExp(`<@!?${botId}>`,'g'), '').trim();
-  return replyBySentence(msg, clean);
+  
+  // 對於擁有者，使用預設邏輯（'爸爸'）
+  // 對於其他人，使用他們的顯示名稱
+  const speakerName = msg.author.id === uid ? '爸爸' : (msg.member?.displayName || msg.author.displayName || msg.author.username);
+  return replyBySentence(msg, clean, speakerName);
 }
 
 /**
  * 回覆訊息處理
  * @param {object} msg Discord 訊息物件
- * @param {string} [uid] 允許互動的使用者 ID
+ * @param {string} [uid] 允許互動的使用者 ID（擁有者ID）
  */
 async function handleReplyMessage(msg, uid = OWNER_ID) {
-  if (msg.author.id !== uid) return msg.reply(DENY_MESSAGE);
-  return replyBySentence(msg, msg.content);
+  // 對於擁有者，使用預設邏輯（'爸爸'）
+  // 對於其他人，使用他們的顯示名稱
+  const speakerName = msg.author.id === uid ? '爸爸' : (msg.member?.displayName || msg.author.displayName || msg.author.username);
+  return replyBySentence(msg, msg.content, speakerName);
 }
 
 /**
