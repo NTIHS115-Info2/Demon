@@ -1,83 +1,37 @@
-## ASR
-[x] 更改setting以及架構使其符合plugin要求
-[x] 測試檔案
+# Demon Plugin 系統 v1.5 - ToDo 清單
 
-## TTS
-[x] 更改setting以及架構使其符合plugin要求
-[x] 測試檔案
-[ ] 讓語音更好聽一點
+## ✅ 高優先事項
 
-## Discord
-[ ] 可以登入機器人帳號
-[ ] 可以發送訊息
-[ ] 可以獲取訊息
+- [ ] 完成 toolOutputRouter 實作
+  - [ ] 判斷工具輸出格式是否合法（JSON 結構、欄位完整）
+  - [ ] 成功回傳時注入狀態給 PromptComposer
+  - [ ] 錯誤與逾時時也注入對應失敗狀態
 
-## 命令
-[ ] 可以根據
+- [ ] 完成 PromptComposer 工具狀態注入邏輯
+  - [ ] 接收工具執行狀態（成功、逾時、失敗）
+  - [ ] 建構對應的 system prompt 提示字串格式
+  - [ ] 測試注入後 LLM 能否辨識並正確回應
 
-## ngork
-[x] 讓ngrok可以上線，並有腳本監測3000以及讓插件的remote方式可以註冊對外接口
+- [ ] 撰寫一組測試用 MockPlugin
+  - [ ] 提供簡單功能（如：字串轉大寫）
+  - [ ] 提供 tool-description.json
+  - [ ] 可人工模擬成功、失敗、逾時情境
 
-## 啟動腳本
-[X] 
+## 🔧 中優先事項
 
-## 小惡魔的對話設定
-[X] 對<>的前綴附加詞的說明設定
+- [ ] 撰寫 `tool-description.json` 標準格式範本
+  - [ ] 含基本說明、輸入範例、回傳格式範例
 
+- [ ] 建立 ToolReferencePlugin
+  - [ ] 自動讀取所有插件的 tool-description.json
+  - [ ] 整理為可給 LLM 查詢用的工具說明清單
 
-### ✅ PluginsManager 優先度功能 ToDo List
+## 🧪 測試項目
 
-## 📌 主要目的
+- [ ] 工具正常流程：LLM 呼叫 → 插件成功回傳 → 正確注入 → LLM 正確回應
+- [ ] 工具逾時流程：超過等待時間 → 注入失敗狀態 → LLM 給出容錯回應
+- [ ] 工具錯誤格式：回傳非 JSON → router 忽略 → 原樣輸出（fallback）
 
-- 為 `pluginsManager` 加入插件優先度排程功能，每個插件自帶整數型 `priority` 欄位。
-- 執行 `queueAllOnline` 時，依 `priority` 高→低排序啟動插件。
-- `queueOnline` 加入防呆機制，避免重複上線。
-- 各策略實作的 `index.js` 中需定義 `priority` 欄位，並由插件根目錄導入導出。
-- 相同優先度的插件保留原始載入順序。
-- 更新插件說明文件，納入本次優先度排程的規範。
+## 📌 補充任務
 
----
-
-## 📋 開發代辦事項清單
-
-### 1. 定義插件優先度屬性（priority）
-
-- [x] 設計 `priority` 屬性（int），預設值為 0。
-- [x] 加入至各策略 `index.js` 的導出結構中。
-
----
-
-### 2. 更新 `queueAllOnline` 排程邏輯
-
-- [x] 根據插件的 `priority` 欄位進行降序排序。
-- [x] 保留相同 `priority` 插件的載入順序。
-
----
-
-### 3. 實作 `queueOnline` 防呆機制
-
-- [x] 檢查插件是否已經在線。
-- [x] 已上線則跳過啟動，並記錄警告 log。
-
----
-
-### 4. 修改各策略的 `index.js`
-
-- [x] 新增並導出 `priority` 欄位。
-- [x] 保持與 `online`, `offline` 等欄位一致的結構。
-
----
-
-### 5. 撰寫測試與驗證邏輯
-
-- [x] 驗證優先度排序是否正確。
-- [x] 驗證相同優先度插件是否依照原順序啟動。
-- [x] 驗證重複上線防呆機制是否正確攔截。
-
----
-
-### 6. 更新文件與規範
-
-- [x] 修改或建立 `regulation.md` 文件。
-- [x] 說明：插件如何設定 `priority`。
-- [x] 描述：啟動順序邏輯與防呆機制的運作方式。
+- [ ] 製作 toolOutputRouter + PromptComposer 串接流程圖（可用 mermaid）
