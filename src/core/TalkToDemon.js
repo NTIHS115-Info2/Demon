@@ -5,6 +5,7 @@ const { EventEmitter }          = require('events');
 const PM                        = require('./pluginsManager.js');
 const Logger                    = require('../utils/logger.js');
 const GetDefaultSystemPrompt    = require('./PromptComposer.js').GetDefaultSystemPrompt;          // ★
+const historyManager            = require('./historyManager');
 
 // 參數
 const MAX_HISTORY     = 50;
@@ -125,7 +126,12 @@ class TalkToDemonManager extends EventEmitter {
    */
   talk(talker = '其他', content = '', options = {}) {
     const { uninterruptible=false, important=false } = options;
-    const userMsg = { role:'user', content:`${talker}： ${content}`, timestamp:Date.now() };
+    const userMsg = { role:'user', content:`${talker}： ${content}`, talker, timestamp:Date.now() };
+
+    // 寫入持久化歷史
+    historyManager.appendMessage(talker, 'user', userMsg.content).catch(e => {
+      this.logger.warn('[history] 紀錄使用者訊息失敗: ' + e.message);
+    });
 
     this._pruneHistory();
     this.history.push(userMsg);
@@ -157,9 +163,15 @@ class TalkToDemonManager extends EventEmitter {
 
     // 取得 system 提示詞（每次重新抓可動態更新）
     const systemPrompt = await GetDefaultSystemPrompt();
+    // 取得持久化歷史供模型參考
+    const persistHistory = await historyManager.getHistory(task.message.talker, MAX_HISTORY)
+      .catch(e => {
+        this.logger.warn('[history] 讀取歷史失敗: ' + e.message);
+        return [];
+      });
     const messages = [
       { role:'system', content:systemPrompt },
-      ...this.history.map(({role,content}) => ({ role, content }))
+      ...persistHistory.map(m => ({ role:m.role, content:m.content }))
     ];
 
     const handler = new LlamaStreamHandler(this.model);
@@ -177,7 +189,12 @@ class TalkToDemonManager extends EventEmitter {
       this.logger.info('[完成] 對話回應完成');
 
       if (responseBuffer.trim()) {
-        this.history.push({ role:'assistant', content:responseBuffer.trim(), timestamp:Date.now() });
+        const msg = { role:'assistant', content:responseBuffer.trim(), talker:task.message.talker, timestamp:Date.now() };
+        this.history.push(msg);
+        // 紀錄回應至歷史檔案
+        historyManager.appendMessage(task.message.talker, 'assistant', msg.content).catch(e => {
+          this.logger.warn('[history] 紀錄回應失敗: ' + e.message);
+        });
         this._pruneHistory();
       }
       if (this.pendingQueue.length > 0) {
