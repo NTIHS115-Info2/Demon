@@ -18,7 +18,8 @@ class PluginsManager {
     // 使用相對於當前檔案位置的 plugins 目錄，避免硬編碼絕對路徑
     this.rootPath = path.resolve(__dirname, '..', 'plugins');
     // 插件容器，key 為插件名稱，value 為插件實例
-    this.plugins = new Map();
+    this.plugins = new Map();           // 已載入的插件
+    this.llmPlugins = new Map();        // 額外紀錄 LLM 類型插件方便查詢
     this.queue = [];                   // 插件啟動佇列
     this.running = false;              // 佇列處理狀態
     this.maxConcurrent = 1;            // 每次僅啟動一個插件
@@ -58,7 +59,11 @@ class PluginsManager {
       if (typeof plugin.priority !== 'number') plugin.priority = 0;
 
       plugin.updateStrategy();  // 確保策略已更新
-      this.plugins.set(this.normalizeName(name), plugin); // 儲存插件
+      const id = this.normalizeName(name);
+      this.plugins.set(id, plugin); // 儲存插件
+      if (plugin.pluginType === 'LLM') {
+        this.llmPlugins.set(id, plugin);
+      }
       Logger.info(`[PluginManager] 載入插件 ${name}`);
     } else {
       throw new Error(`無法找到 ${name} 插件的 index.js`);
@@ -226,6 +231,34 @@ class PluginsManager {
       return await plugin.state();
     }
     return -2;
+  }
+
+  /**
+   * 取得指定名稱的 LLM 插件
+   * @param {string} name
+   * @returns {object|null}
+   */
+  getLLMPlugin(name) {
+    const id = this.normalizeName(name);
+    return this.llmPlugins.get(id) || null;
+  }
+
+  /**
+   * 取得所有已註冊的 LLM 插件清單
+   * @returns {Array<object>}
+   */
+  getAllLLMPlugin() {
+    return Array.from(this.llmPlugins.values());
+  }
+
+  /**
+   * 查詢插件的 metadata 資訊
+   * @param {string} name
+   * @returns {any}
+   */
+  getPluginMetadata(name) {
+    const id = this.normalizeName(name);
+    return this.plugins.get(id)?.metadata || null;
   }
 }
 

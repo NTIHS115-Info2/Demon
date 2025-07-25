@@ -4,7 +4,8 @@
 const { EventEmitter }          = require('events');
 const PM                        = require('./pluginsManager.js');
 const Logger                    = require('../utils/logger.js');
-const GetDefaultSystemPrompt    = require('./PromptComposer.js').GetDefaultSystemPrompt;          // ★
+const { GetDefaultSystemPrompt, composeSystemPrompt } = require('./PromptComposer.js');
+const toolOutputRouter          = require('./toolOutputRouter');
 
 // 參數
 const MAX_HISTORY     = 50;
@@ -106,6 +107,7 @@ class TalkToDemonManager extends EventEmitter {
     this.logger        = new Logger('TalkToDemon.log');
     this.gateOpen      = true;
     this.gateBuffer    = '';
+    this.busy          = false;       // 工具執行等待狀態
   }
 
   /*─── 工具函式 ──────────────────────────────────────────*/
@@ -171,14 +173,28 @@ class TalkToDemonManager extends EventEmitter {
       responseBuffer += chunk;
     });
 
-    handler.on('end', () => {
+    handler.on('end', async () => {
       this.emit('end');
       this.processing = false;
       this.logger.info('[完成] 對話回應完成');
 
-      if (responseBuffer.trim()) {
-        this.history.push({ role:'assistant', content:responseBuffer.trim(), timestamp:Date.now() });
-        this._pruneHistory();
+      const output = responseBuffer.trim();
+      if (output) {
+        const routed = await toolOutputRouter.routeOutput(output, { setBusy: s => this._setBusy(s) });
+        if (routed.handled) {
+          if (routed.target === 'user') {
+            this.emit('data', routed.content);
+          } else if (routed.target === 'llm') {
+            this.history.push({ role: 'system', content: routed.content, timestamp: Date.now() });
+            this._pruneHistory();
+            this._processNext({ message: this.currentTask.message });
+            return;
+          }
+        } else {
+          this.history.push({ role:'assistant', content: output, timestamp:Date.now() });
+          this._pruneHistory();
+          this.emit('data', output);
+        }
       }
       if (this.pendingQueue.length > 0) {
         const nextTask = this.pendingQueue.shift();
@@ -219,6 +235,12 @@ class TalkToDemonManager extends EventEmitter {
   openGate()  { this.gateOpen = true;  this.logger.info('[gate 打開]');  if (this.gateBuffer) { this.emit('data', this.gateBuffer); this.gateBuffer=''; } }
   closeGate() { this.gateOpen = false; this.logger.info('[gate 關閉]'); }
   getGateState() { return this.gateOpen ? 'open' : 'close'; }
+  getBusyState() { return this.busy ? 'busy' : 'idle'; }
+
+  _setBusy(state) {
+    this.busy = state;
+    if (state) this.emit('data', '我正在查詢，請稍等我一下～');
+  }
 
   _pushChunk(chunk) {
     if (this.gateOpen) this.emit('data', chunk);

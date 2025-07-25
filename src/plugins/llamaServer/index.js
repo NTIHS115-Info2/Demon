@@ -15,7 +15,8 @@ let weights = { ...defaultWeights };
 
 
 module.exports = {
-
+    pluginName: 'llamaServer',
+    pluginType: 'LLM',
     priority: 0,
 
     /**

@@ -1,0 +1,9 @@
+{
+  "name": "mock",
+  "description": "將字串轉成大寫後回傳",
+  "category": "轉換類",
+  "usage": {
+    "input": {"text": "hello"},
+    "output": "HELLO"
+  }
+}

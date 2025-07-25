@@ -1,0 +1,9 @@
+{
+  "name": "toolName",
+  "description": "工具用途簡述",
+  "category": "查詢類",
+  "usage": {
+    "input": { "param1": "foo" },
+    "output": "bar"
+  }
+}

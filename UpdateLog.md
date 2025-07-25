@@ -209,3 +209,21 @@
 - 修復DM訊息無法使用問題
 ## Change
 - 將其他人的對話也納入回應範圍
+
+### [pc.v.0.1]
+## New
+- 新增 MockPlugin 與 ToolReferencePlugin
+- 新增 toolOutputRouter 模組
+- PluginsManager 支援 LLM 插件查詢
+- TalkToDemon 整合工具輸出並加入忙碌狀態
+## Test
+- 新增 toolOutputRouter 單元測試
+
+### [pc.v.0.2]
+## New
+- MockPlugin 支援模擬失敗與逾時
+- ToolReferencePlugin 產生分類摘要
+- 新增 `tool-description.json` 樣板與流程圖文件
+## Update
+- toolOutputRouter 增加逾時處理
+- 補充 PromptComposer 測試
