@@ -1,6 +1,12 @@
 const { Client, GatewayIntentBits, Partials } = require('discord.js');
 const Logger = require('../../../../utils/logger');
-const config = require('../../config');
+let config = {};
+try {
+  config = require('../../config');
+} catch (e) {
+  // 若缺少預設設定檔，採用傳入的參數
+  config = {};
+}
 const logger = new Logger('DISCORD');
 
 let client = null;

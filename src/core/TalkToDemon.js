@@ -4,7 +4,8 @@
 const { EventEmitter }          = require('events');
 const PM                        = require('./pluginsManager.js');
 const Logger                    = require('../utils/logger.js');
-const GetDefaultSystemPrompt    = require('./PromptComposer.js').GetDefaultSystemPrompt;          // ★
+const { composeMessages } = require('./PromptComposer.js');
+const toolOutputRouter          = require('./toolOutputRouter');
 
 // 參數
 const MAX_HISTORY     = 50;
@@ -106,6 +107,9 @@ class TalkToDemonManager extends EventEmitter {
     this.logger        = new Logger('TalkToDemon.log');
     this.gateOpen      = true;
     this.gateBuffer    = '';
+    this.toolResultBuffer = [];       // 工具訊息暫存
+    this.waitingForTool   = false;    // 是否正等待工具完成
+    this._needCleanup     = false;    // 工具結果是否待清除
   }
 
   /*─── 工具函式 ──────────────────────────────────────────*/
@@ -116,6 +120,7 @@ class TalkToDemonManager extends EventEmitter {
       this.history = this.history.slice(-MAX_HISTORY);
     }
   }
+
 
   /*─── 外部呼叫：talk() ───────────────────────────────────*/
   /**
@@ -155,31 +160,48 @@ class TalkToDemonManager extends EventEmitter {
     this.processing   = true;
     this.currentTask  = task;
 
-    // 取得 system 提示詞（每次重新抓可動態更新）
-    const systemPrompt = await GetDefaultSystemPrompt();
-    const messages = [
-      { role:'system', content:systemPrompt },
-      ...this.history.map(({role,content}) => ({ role, content }))
-    ];
+    const messages = await composeMessages(this.history, this.toolResultBuffer);
 
     const handler = new LlamaStreamHandler(this.model);
     this.currentHandler = handler;
-    let responseBuffer = '';
+    const router = new toolOutputRouter.ToolStreamRouter();
+    router.on('waiting', s => this._setWaiting(s));
+    let assistantBuf = '';
+    let toolTriggered = false;
 
-    handler.on('data', chunk => {
+    router.on('data', chunk => {
+      assistantBuf += chunk;
       this._pushChunk(chunk);
-      responseBuffer += chunk;
     });
 
-    handler.on('end', () => {
+    router.on('tool', msg => {
+      toolTriggered = true;
+      this.toolResultBuffer.push(msg);
+      this._needCleanup = true;
+    });
+
+    handler.on('data', chunk => {
+      if (!toolTriggered) router.feed(chunk);
+    });
+
+    handler.on('end', async () => {
+      router.flush();
       this.emit('end');
       this.processing = false;
       this.logger.info('[完成] 對話回應完成');
 
-      if (responseBuffer.trim()) {
-        this.history.push({ role:'assistant', content:responseBuffer.trim(), timestamp:Date.now() });
-        this._pruneHistory();
+      if (toolTriggered) {
+        this._processNext({ message: this.currentTask.message });
+        return;
       }
+
+      const text = assistantBuf.trim();
+      if (text) {
+        this.history.push({ role:'assistant', content: text, timestamp:Date.now() });
+        this._pruneHistory();
+        this.emit('data', text);
+      }
+      if (!toolTriggered) this._cleanupToolBuffer();
       if (this.pendingQueue.length > 0) {
         const nextTask = this.pendingQueue.shift();
         this._processNext(nextTask);
@@ -219,10 +241,23 @@ class TalkToDemonManager extends EventEmitter {
   openGate()  { this.gateOpen = true;  this.logger.info('[gate 打開]');  if (this.gateBuffer) { this.emit('data', this.gateBuffer); this.gateBuffer=''; } }
   closeGate() { this.gateOpen = false; this.logger.info('[gate 關閉]'); }
   getGateState() { return this.gateOpen ? 'open' : 'close'; }
+  getWaitingState() { return this.waitingForTool ? 'waiting' : 'idle'; }
+
+  _setWaiting(state) {
+    this.waitingForTool = state;
+    if (state) this.emit('data', '我正在查詢，請稍等我一下～');
+  }
 
   _pushChunk(chunk) {
     if (this.gateOpen) this.emit('data', chunk);
     else               this.gateBuffer += chunk;
+  }
+
+  _cleanupToolBuffer() {
+    if (this._needCleanup) {
+      this.toolResultBuffer = [];
+      this._needCleanup = false;
+    }
   }
 }
 

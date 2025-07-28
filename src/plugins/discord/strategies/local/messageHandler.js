@@ -1,6 +1,12 @@
 const Logger = require('../../../../utils/logger');
 const talker = require('../../../../core/TalkToDemon');
-const config = require('../../config');
+let config = {};
+try {
+  config = require('../../config');
+} catch (e) {
+  // 測試環境可能沒有預設 config
+  config = {};
+}
 
 const logger = new Logger('DISCORD');
 

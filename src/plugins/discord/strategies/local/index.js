@@ -1,7 +1,12 @@
 const clientManager = require('./clientManager');
 const messageHandler = require('./messageHandler');
 const commandHandler = require('./commandHandler');
-const config = require('../../config');
+let config = {};
+try {
+  config = require('../../config');
+} catch (e) {
+  config = {};
+}
 
 // 插件啟動優先度，數值越大越先啟動
 const priority = 65;

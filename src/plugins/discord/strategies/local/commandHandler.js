@@ -1,6 +1,11 @@
 const { REST, Routes, SlashCommandBuilder } = require('discord.js');
 const Logger = require('../../../../utils/logger');
-const config = require('../../config');
+let config = {};
+try {
+  config = require('../../config');
+} catch (e) {
+  config = {};
+}
 const logger = new Logger('DISCORD');
 
 let commands = [];
