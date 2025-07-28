@@ -1,12 +1,15 @@
 const { REST, Routes, SlashCommandBuilder } = require('discord.js');
 const Logger = require('../../../../utils/logger');
-let config = {};
+const logger = new Logger('DISCORD');
+
+// 必須存在的設定檔，讀取失敗時拋出錯誤
+let config;
 try {
   config = require('../../config');
 } catch (e) {
-  config = {};
+  logger.error('[DISCORD] 無法讀取設定檔: ' + e.message);
+  throw e;
 }
-const logger = new Logger('DISCORD');
 
 let commands = [];
 

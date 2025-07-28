@@ -20,6 +20,15 @@ jest.mock('discord.js', () => {
   };
 }, { virtual: true });
 
+// 模擬 Discord 設定檔供各策略載入
+jest.mock('../src/plugins/discord/config', () => ({
+  token: 't',
+  applicationId: 'a',
+  guildId: 'g',
+  channelId: 'c',
+  userId: 'cookice'
+}), { virtual: true });
+
 const discordLocal = require('../src/plugins/discord/strategies/local');
 const discordPlugin = require('../src/plugins/discord');
 

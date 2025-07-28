@@ -2,9 +2,10 @@
 // ──────────────────────────────────────────────────────────────
 // 封裝對 llamaServer 的對話管理、串流控制、中斷與優先佇列
 const { EventEmitter }          = require('events');
+const { composeMessages }       = require('./PromptComposer.js');
 const PM                        = require('./pluginsManager.js');
 const Logger                    = require('../utils/logger.js');
-const { composeMessages } = require('./PromptComposer.js');
+const historyManager            = require('./historyManager');
 const toolOutputRouter          = require('./toolOutputRouter');
 
 // 參數
@@ -130,7 +131,12 @@ class TalkToDemonManager extends EventEmitter {
    */
   talk(talker = '其他', content = '', options = {}) {
     const { uninterruptible=false, important=false } = options;
-    const userMsg = { role:'user', content:`${talker}： ${content}`, timestamp:Date.now() };
+    const userMsg = { role:'user', content:`${talker}： ${content}`, talker, timestamp:Date.now() };
+
+    // 寫入持久化歷史
+    historyManager.appendMessage(talker, 'user', userMsg.content).catch(e => {
+      this.logger.warn('[history] 紀錄使用者訊息失敗: ' + e.message);
+    });
 
     this._pruneHistory();
     this.history.push(userMsg);
@@ -160,7 +166,7 @@ class TalkToDemonManager extends EventEmitter {
     this.processing   = true;
     this.currentTask  = task;
 
-    const messages = await composeMessages(this.history, this.toolResultBuffer);
+    const messages = await composeMessages(this.history, this.toolResultBuffer); // history的部分因為合併，所以需要更新，以便二者是配
 
     const handler = new LlamaStreamHandler(this.model);
     this.currentHandler = handler;
@@ -197,7 +203,7 @@ class TalkToDemonManager extends EventEmitter {
 
       const text = assistantBuf.trim();
       if (text) {
-        this.history.push({ role:'assistant', content: text, timestamp:Date.now() });
+        this.history.push({ role:'assistant', content: text, talker:task.message.talker, timestamp:Date.now() }); // 因為合併，所以要更新 以便二者是配
         this._pruneHistory();
         this.emit('data', text);
       }

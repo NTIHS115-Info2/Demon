@@ -11,6 +11,15 @@ jest.mock('../src/core/TalkToDemon', () => {
 }, { virtual: true });
 const talker = require('../src/core/TalkToDemon');
 
+// 模擬 Discord 設定檔，避免測試時找不到檔案
+jest.mock('../src/plugins/discord/config', () => ({
+  token: 't',
+  applicationId: 'a',
+  guildId: 'g',
+  channelId: 'c',
+  userId: 'cookice'
+}), { virtual: true });
+
 const handler = require('../src/plugins/discord/strategies/local/messageHandler');
 
 describe('Discord MessageHandler', () => {
@@ -19,8 +28,7 @@ describe('Discord MessageHandler', () => {
     const msg = { content:'hi', author:{ id:'cookice' }, reply: jest.fn().mockResolvedValue(), channel:{ type:'DM' } };
     await handler.handleDirectMessage(msg, 'cookice');
     expect(talker.talk).toHaveBeenCalledWith('爸爸', 'hi');
-    expect(msg.reply).toHaveBeenCalledWith('你好。');
-    expect(msg.reply).toHaveBeenCalledWith('再見。');
+    expect(msg.reply).toHaveBeenCalledWith('你好。再見。');
   });
 
   test('handleDirectMessage 拒絕陌生人', async () => {
