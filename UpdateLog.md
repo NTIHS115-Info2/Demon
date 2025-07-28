@@ -210,7 +210,7 @@
 ## Change
 - 將其他人的對話也納入回應範圍
 
-### tools branch
+### refactor/core/PromptComposer-llmtool
 ### [dev0.1]
 ## New
 - 新增 MockPlugin 與 ToolReferencePlugin
