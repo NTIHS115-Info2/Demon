@@ -208,9 +208,11 @@
 ## Fix
 - 修復DM訊息無法使用問題
 
+#### historyManager
+
 ## Change
 - 將其他人的對話也納入回應範圍
-### [hm.v.0.1.0]
+### [dev0.1]
 ## New
 - 新增 historyManager 模組，提供對話歷史持久化與裁剪機制
 - TalkToDemon 整合 historyManager，自動注入歷史訊息
@@ -218,11 +220,11 @@
 - 新增 historyManager 測試
 ## Update
 - 更新 ToDo 完成對話歷史相關項目
-### [hm.v.0.1.1]
+### [dev0.1.1]
 ## Fix
 - 移除多餘的 Discord config.js 範例檔案
 
-### [hm.v.0.1.2]
+### [dev0.1.2]
 ## Change
 - Discord 模組讀取設定檔失敗時將直接拋出錯誤，不再提供預設值
 ## Test
