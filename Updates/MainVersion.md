@@ -159,6 +159,11 @@
 ## New
 - 更新__test__/old 用來存放舊的測試### pb = plugins branch
 
+
 ### [v.0.9]
 ## New
-- discord插件（更新記錄視下方）
+- discord 插件（更新記錄詳見 DiscordPlugin.md）
+
+### [v.0.10a]
+## Fix
+- TalkToDemon 重新整合 historyManager 與 toolOutputRouter，修正合併後遺留的歷史處理問題

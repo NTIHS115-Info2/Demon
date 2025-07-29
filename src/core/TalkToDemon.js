@@ -166,7 +166,28 @@ class TalkToDemonManager extends EventEmitter {
     this.processing   = true;
     this.currentTask  = task;
 
-    const messages = await composeMessages(this.history, this.toolResultBuffer); // history的部分因為合併，所以需要更新，以便二者是配
+    // 讀取持久化歷史，失敗時以空陣列處理
+    let persistHistory = [];
+    try {
+      persistHistory = await historyManager.getHistory(task.message.talker, MAX_HISTORY);
+    } catch (err) {
+      this.logger.warn('[history] 讀取歷史失敗: ' + err.message);
+    }
+
+    // 合併歷史與當前訊息，再加入暫存的工具結果
+    this.history = [...persistHistory, task.message];
+    this._pruneHistory();
+
+    // composeMessages 可能因參數錯誤拋出例外，須捕捉以免整個流程中斷
+    let messages;
+    try {
+      messages = await composeMessages(this.history, this.toolResultBuffer);
+    } catch (err) {
+      this.logger.error('[錯誤] 組合訊息失敗: ' + err.message);
+      this.emit('error', err);
+      this.processing = false;
+      return;
+    }
 
     const handler = new LlamaStreamHandler(this.model);
     this.currentHandler = handler;
@@ -175,11 +196,13 @@ class TalkToDemonManager extends EventEmitter {
     let assistantBuf = '';
     let toolTriggered = false;
 
+    // 收到一般串流資料時直接輸出，同時累積至回應緩衝
     router.on('data', chunk => {
       assistantBuf += chunk;
       this._pushChunk(chunk);
     });
 
+    // 若偵測到工具觸發，先暫存結果，稍後重新組合後送出
     router.on('tool', msg => {
       toolTriggered = true;
       this.toolResultBuffer.push(msg);
@@ -196,6 +219,7 @@ class TalkToDemonManager extends EventEmitter {
       this.processing = false;
       this.logger.info('[完成] 對話回應完成');
 
+      // 若觸發工具，需等待工具完成後重新組合訊息再請求模型
       if (toolTriggered) {
         this._processNext({ message: this.currentTask.message });
         return;
@@ -203,8 +227,13 @@ class TalkToDemonManager extends EventEmitter {
 
       const text = assistantBuf.trim();
       if (text) {
-        this.history.push({ role:'assistant', content: text, talker:task.message.talker, timestamp:Date.now() }); // 因為合併，所以要更新 以便二者是配
+        // 回應成功時記錄至記憶與檔案
+        const msg = { role:'assistant', content: text, talker:task.message.talker, timestamp:Date.now() };
+        this.history.push(msg);
         this._pruneHistory();
+        historyManager.appendMessage(task.message.talker, 'assistant', msg.content).catch(e => {
+          this.logger.warn('[history] 紀錄回應失敗: ' + e.message);
+        });
         this.emit('data', text);
       }
       if (!toolTriggered) this._cleanupToolBuffer();
