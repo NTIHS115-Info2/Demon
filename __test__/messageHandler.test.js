@@ -19,15 +19,14 @@ describe('Discord MessageHandler', () => {
     const msg = { content:'hi', author:{ id:'cookice' }, reply: jest.fn().mockResolvedValue(), channel:{ type:'DM' } };
     await handler.handleDirectMessage(msg, 'cookice');
     expect(talker.talk).toHaveBeenCalledWith('爸爸', 'hi');
-    expect(msg.reply).toHaveBeenCalledWith('你好。');
-    expect(msg.reply).toHaveBeenCalledWith('再見。');
+    expect(msg.reply).toHaveBeenCalledWith('你好。再見。');
   });
 
-  test('handleDirectMessage 拒絕陌生人', async () => {
-    const msg = { content:'hi', author:{ id:'other' }, reply: jest.fn().mockResolvedValue(), channel:{ type:'DM' } };
-    await handler.handleDirectMessage(msg, 'cookice');
-    expect(talker.talk).not.toHaveBeenCalled();
-    expect(msg.reply).toHaveBeenCalledWith('我還學不會跟別人說話');
+  test('handleDirectMessage 現在對所有人回應', async () => {
+    const msg = { content:'hi', author:{ id:'other', displayName:'stranger' }, reply: jest.fn().mockResolvedValue(), channel:{ type:'DM' } };
+    await handler.handleDirectMessage(msg, 'cookie');
+    expect(talker.talk).toHaveBeenCalledWith('stranger', 'hi');
+    expect(msg.reply).toHaveBeenCalledWith('你好。再見。');
   });
 
   test('handleMentionMessage 會移除提及內容', async () => {
