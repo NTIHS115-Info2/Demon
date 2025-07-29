@@ -15,7 +15,6 @@ let weights = { ...defaultWeights };
 
 
 module.exports = {
-
     priority: 0,
 
     /**

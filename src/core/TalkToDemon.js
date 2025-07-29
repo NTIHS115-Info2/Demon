@@ -2,9 +2,11 @@
 // ──────────────────────────────────────────────────────────────
 // 封裝對 llamaServer 的對話管理、串流控制、中斷與優先佇列
 const { EventEmitter }          = require('events');
+const { composeMessages }       = require('./PromptComposer.js');
 const PM                        = require('./pluginsManager.js');
 const Logger                    = require('../utils/logger.js');
-const GetDefaultSystemPrompt    = require('./PromptComposer.js').GetDefaultSystemPrompt;          // ★
+const historyManager            = require('./historyManager');
+const toolOutputRouter          = require('./toolOutputRouter');
 
 // 參數
 const MAX_HISTORY     = 50;
@@ -106,6 +108,9 @@ class TalkToDemonManager extends EventEmitter {
     this.logger        = new Logger('TalkToDemon.log');
     this.gateOpen      = true;
     this.gateBuffer    = '';
+    this.toolResultBuffer = [];       // 工具訊息暫存
+    this.waitingForTool   = false;    // 是否正等待工具完成
+    this._needCleanup     = false;    // 工具結果是否待清除
   }
 
   /*─── 工具函式 ──────────────────────────────────────────*/
@@ -117,6 +122,7 @@ class TalkToDemonManager extends EventEmitter {
     }
   }
 
+
   /*─── 外部呼叫：talk() ───────────────────────────────────*/
   /**
    * @param {string} talker - 說話者識別（用於前綴 <talker> ）
@@ -125,7 +131,12 @@ class TalkToDemonManager extends EventEmitter {
    */
   talk(talker = '其他', content = '', options = {}) {
     const { uninterruptible=false, important=false } = options;
-    const userMsg = { role:'user', content:`${talker}： ${content}`, timestamp:Date.now() };
+    const userMsg = { role:'user', content:`${talker}： ${content}`, talker, timestamp:Date.now() };
+
+    // 寫入持久化歷史
+    historyManager.appendMessage(talker, 'user', userMsg.content).catch(e => {
+      this.logger.warn('[history] 紀錄使用者訊息失敗: ' + e.message);
+    });
 
     this._pruneHistory();
     this.history.push(userMsg);
@@ -155,31 +166,77 @@ class TalkToDemonManager extends EventEmitter {
     this.processing   = true;
     this.currentTask  = task;
 
-    // 取得 system 提示詞（每次重新抓可動態更新）
-    const systemPrompt = await GetDefaultSystemPrompt();
-    const messages = [
-      { role:'system', content:systemPrompt },
-      ...this.history.map(({role,content}) => ({ role, content }))
-    ];
+    // 讀取持久化歷史，失敗時以空陣列處理
+    let persistHistory = [];
+    try {
+      persistHistory = await historyManager.getHistory(task.message.talker, MAX_HISTORY);
+    } catch (err) {
+      this.logger.warn('[history] 讀取歷史失敗: ' + err.message);
+    }
+
+    // 合併歷史與當前訊息，再加入暫存的工具結果
+    this.history = [...persistHistory, task.message];
+    this._pruneHistory();
+
+    // composeMessages 可能因參數錯誤拋出例外，須捕捉以免整個流程中斷
+    let messages;
+    try {
+      messages = await composeMessages(this.history, this.toolResultBuffer);
+    } catch (err) {
+      this.logger.error('[錯誤] 組合訊息失敗: ' + err.message);
+      this.emit('error', err);
+      this.processing = false;
+      return;
+    }
 
     const handler = new LlamaStreamHandler(this.model);
     this.currentHandler = handler;
-    let responseBuffer = '';
+    const router = new toolOutputRouter.ToolStreamRouter();
+    router.on('waiting', s => this._setWaiting(s));
+    let assistantBuf = '';
+    let toolTriggered = false;
 
-    handler.on('data', chunk => {
+    // 收到一般串流資料時直接輸出，同時累積至回應緩衝
+    router.on('data', chunk => {
+      assistantBuf += chunk;
       this._pushChunk(chunk);
-      responseBuffer += chunk;
     });
 
-    handler.on('end', () => {
+    // 若偵測到工具觸發，先暫存結果，稍後重新組合後送出
+    router.on('tool', msg => {
+      toolTriggered = true;
+      this.toolResultBuffer.push(msg);
+      this._needCleanup = true;
+    });
+
+    handler.on('data', chunk => {
+      if (!toolTriggered) router.feed(chunk);
+    });
+
+    handler.on('end', async () => {
+      router.flush();
       this.emit('end');
       this.processing = false;
       this.logger.info('[完成] 對話回應完成');
 
-      if (responseBuffer.trim()) {
-        this.history.push({ role:'assistant', content:responseBuffer.trim(), timestamp:Date.now() });
-        this._pruneHistory();
+      // 若觸發工具，需等待工具完成後重新組合訊息再請求模型
+      if (toolTriggered) {
+        this._processNext({ message: this.currentTask.message });
+        return;
       }
+
+      const text = assistantBuf.trim();
+      if (text) {
+        // 回應成功時記錄至記憶與檔案
+        const msg = { role:'assistant', content: text, talker:task.message.talker, timestamp:Date.now() };
+        this.history.push(msg);
+        this._pruneHistory();
+        historyManager.appendMessage(task.message.talker, 'assistant', msg.content).catch(e => {
+          this.logger.warn('[history] 紀錄回應失敗: ' + e.message);
+        });
+        this.emit('data', text);
+      }
+      if (!toolTriggered) this._cleanupToolBuffer();
       if (this.pendingQueue.length > 0) {
         const nextTask = this.pendingQueue.shift();
         this._processNext(nextTask);
@@ -219,10 +276,23 @@ class TalkToDemonManager extends EventEmitter {
   openGate()  { this.gateOpen = true;  this.logger.info('[gate 打開]');  if (this.gateBuffer) { this.emit('data', this.gateBuffer); this.gateBuffer=''; } }
   closeGate() { this.gateOpen = false; this.logger.info('[gate 關閉]'); }
   getGateState() { return this.gateOpen ? 'open' : 'close'; }
+  getWaitingState() { return this.waitingForTool ? 'waiting' : 'idle'; }
+
+  _setWaiting(state) {
+    this.waitingForTool = state;
+    if (state) this.emit('data', '我正在查詢，請稍等我一下～');
+  }
 
   _pushChunk(chunk) {
     if (this.gateOpen) this.emit('data', chunk);
     else               this.gateBuffer += chunk;
+  }
+
+  _cleanupToolBuffer() {
+    if (this._needCleanup) {
+      this.toolResultBuffer = [];
+      this._needCleanup = false;
+    }
   }
 }
 

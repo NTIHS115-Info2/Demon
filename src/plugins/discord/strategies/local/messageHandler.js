@@ -1,8 +1,15 @@
 const Logger = require('../../../../utils/logger');
 const talker = require('../../../../core/TalkToDemon');
-const config = require('../../config');
-
 const logger = new Logger('DISCORD');
+
+// 嘗試讀取設定檔，若失敗直接拋出錯誤
+let config;
+try {
+  config = require('../../config');
+} catch (e) {
+  logger.error('[DISCORD] 無法讀取設定檔: ' + e.message);
+  throw e;
+}
 
 // 允許互動的使用者 ID，預設取自 config
 const OWNER_ID = config.userId || 'cookice';
@@ -73,9 +80,17 @@ async function replyBySentence(msg, text, speakerName) {
  * @param {string} [uid] 允許互動的使用者 ID（擁有者ID）
  */
 async function handleDirectMessage(msg, uid = OWNER_ID) {
-  // 對於擁有者，使用預設邏輯（'爸爸'）
-  // 對於其他人，使用他們的顯示名稱
-  const speakerName = msg.author.id === uid ? '爸爸' : (msg.author.displayName || msg.author.username);
+  // 僅允許特定使用者互動，其餘回覆固定訊息
+  if (msg.author.id !== uid) {
+    try {
+      await msg.reply('我還學不會跟別人說話');
+    } catch (e) {
+      logger.error('[DISCORD] 回覆失敗: ' + e);
+    }
+    return;
+  }
+  // 對於擁有者，使用預設稱呼
+  const speakerName = '爸爸';
   return replyBySentence(msg, msg.content, speakerName);
 }
 

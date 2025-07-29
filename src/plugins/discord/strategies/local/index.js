@@ -1,7 +1,16 @@
 const clientManager = require('./clientManager');
 const messageHandler = require('./messageHandler');
 const commandHandler = require('./commandHandler');
-const config = require('../../config');
+const Logger = require('../../../../utils/logger');
+const logger = new Logger('DISCORD');
+// 讀取共用設定檔，若不存在則拋出錯誤
+let config;
+try {
+  config = require('../../config');
+} catch (e) {
+  logger.error('[DISCORD] 無法讀取設定檔: ' + e.message);
+  throw e;
+}
 
 // 插件啟動優先度，數值越大越先啟動
 const priority = 65;
