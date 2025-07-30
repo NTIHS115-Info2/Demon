@@ -72,6 +72,7 @@ class ToolStreamRouter extends EventEmitter {
         break;
       }
 
+      logger.info(`偵測到工具呼叫: ${found.data.toolName}`);
       const plain = this.buffer.slice(0, found.start);
       if (plain) this.emit('data', plain);
       this.buffer = this.buffer.slice(found.end);
@@ -82,8 +83,9 @@ class ToolStreamRouter extends EventEmitter {
           timeout: this.timeout
         });
         this.emit('tool', message);
+        logger.info(`工具 ${found.data.toolName} 處理完成並發送結果`);
       } catch (err) {
-        logger.error('工具處理失敗: ' + err.message);
+        logger.error(`工具處理失敗: ${err.message}`);
       }
     }
   }
@@ -113,6 +115,8 @@ async function routeOutput(text, options = {}) {
  * @param {{emitWaiting:Function,timeout:number}} param1
  */
 async function handleTool(toolData, { emitWaiting = () => {}, timeout = 1500 } = {}) {
+  logger.info(`開始處理工具呼叫: ${toolData.toolName}`);
+  
   const plugin = PM.getLLMPlugin(toolData.toolName) || PM.plugins.get(toolData.toolName);
   if (!plugin) {
     logger.warn(`找不到工具 ${toolData.toolName}`);
@@ -125,10 +129,14 @@ async function handleTool(toolData, { emitWaiting = () => {}, timeout = 1500 } =
 
   try {
     emitWaiting(true);
+    logger.info(`執行工具 ${toolData.toolName}，參數: ${JSON.stringify(toolData)}`);
+    
     const result = await Promise.race([
       PM.send(toolData.toolName, toolData),
       new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), timeout))
     ]);
+    
+    logger.info(`工具 ${toolData.toolName} 執行成功，結果: ${result}`);
     return await PromptComposer.createToolMessage({
       called: true,
       toolName: toolData.toolName,
@@ -136,7 +144,9 @@ async function handleTool(toolData, { emitWaiting = () => {}, timeout = 1500 } =
       result
     });
   } catch (e) {
-    logger.error(`執行工具 ${toolData.toolName} 失敗: ${e.message}`);
+    const isTimeout = e.message === 'timeout';
+    logger.error(`執行工具 ${toolData.toolName} ${isTimeout ? '逾時' : '失敗'}: ${e.message}`);
+    
     return await PromptComposer.createToolMessage({
       called: true,
       toolName: toolData.toolName,
@@ -144,6 +154,7 @@ async function handleTool(toolData, { emitWaiting = () => {}, timeout = 1500 } =
     });
   } finally {
     emitWaiting(false);
+    logger.info(`工具 ${toolData.toolName} 處理完成`);
   }
 }
 

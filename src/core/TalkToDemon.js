@@ -210,7 +210,7 @@ class TalkToDemonManager extends EventEmitter {
     });
 
     handler.on('data', chunk => {
-      if (!toolTriggered) router.feed(chunk);
+      router.feed(chunk);
     });
 
     handler.on('end', async () => {
