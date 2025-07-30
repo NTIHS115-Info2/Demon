@@ -1,0 +1,29 @@
+{
+  "name": "text-to-speech",
+  "description": "Convert text to speech audio using TTS (Text-to-Speech)",
+  "type": "output",
+  "parameters": {
+    "text": {
+      "type": "string",
+      "description": "Text content to be converted to speech",
+      "required": true
+    },
+    "voice": {
+      "type": "string",
+      "description": "Voice type for TTS output",
+      "required": false,
+      "default": "default"
+    },
+    "speed": {
+      "type": "number",
+      "description": "Speech speed multiplier (0.5-2.0)",
+      "required": false,
+      "default": 1.0
+    }
+  },
+  "output": {
+    "type": "audio",
+    "description": "Generated audio file or audio data"
+  },
+  "usage": "Use this tool to convert text into spoken audio"
+}

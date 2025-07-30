@@ -73,5 +73,16 @@ module.exports = {
       logger.error('[toolReference] send 執行錯誤: ' + e.message);
       return false;
     }
+  },
+
+  async getStats() {
+    if (!strategy) await this.updateStrategy(mode);
+    if (typeof strategy.getStats !== 'function') return null;
+    try {
+      return await strategy.getStats();
+    } catch (e) {
+      logger.error('[toolReference] getStats 執行錯誤: ' + e.message);
+      return null;
+    }
   }
 };
