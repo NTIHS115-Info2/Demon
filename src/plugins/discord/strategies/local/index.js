@@ -6,7 +6,7 @@ const logger = new Logger('DISCORD');
 // 讀取共用設定檔，若不存在則拋出錯誤
 let config;
 try {
-  config = require('../../config');
+  config = require('../../configLoader');
 } catch (e) {
   logger.error('[DISCORD] 無法讀取設定檔: ' + e.message);
   throw e;

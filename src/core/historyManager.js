@@ -3,23 +3,68 @@ const path = require('path');
 
 const fileEditer = require('../tools/fileEditer');
 const Logger = require('../utils/logger');
+const configManager = require('../utils/configManager');
 
 const logger = new Logger('historyManager.log');
 
+// 歷史管理器設定檔綱要
+const HISTORY_CONFIG_SCHEMA = {
+  types: {
+    maxMessages: 'number',
+    expireDays: 'number',
+    backupCount: 'number',
+    maxFileSize: 'number'
+  },
+  ranges: {
+    maxMessages: { min: 10, max: 1000 },
+    expireDays: { min: 1, max: 365 },
+    backupCount: { min: 0, max: 10 },
+    maxFileSize: { min: 1024, max: 10485760 } // 1KB to 10MB
+  }
+};
+
+// 預設設定
+const DEFAULT_CONFIG = {
+  maxMessages: 100,
+  expireDays: 7,
+  backupCount: 3,
+  maxFileSize: 1048576 // 1MB
+};
+
 /**
  * 對話歷史管理器
- * 依照使用者 ID 儲存與讀取對話紀錄
+ * 依照使用者 ID 儲存與讀取對話紀錄，支援自動裁剪與備份
  */
 class HistoryManager {
   constructor(historyDir = path.resolve(__dirname, '..', '..', 'history')) {
     this.historyDir = historyDir;
     this.cache = new Map();
+    
+    // 載入設定檔（使用預設值如果載入失敗）
+    this.config = this.loadConfig();
+    
     if (!fs.existsSync(this.historyDir)) {
       fs.mkdirSync(this.historyDir, { recursive: true });
     }
-    // 歷史保留上限與過期時間
-    this.maxMessages = 100;
-    this.expireMs = 7 * 24 * 60 * 60 * 1000; // 7 天
+    
+    // 轉換設定為毫秒
+    this.expireMs = this.config.expireDays * 24 * 60 * 60 * 1000;
+  }
+
+  /**
+   * 載入歷史管理器設定
+   * @private
+   */
+  loadConfig() {
+    try {
+      const configPath = path.resolve(__dirname, '..', '..', 'config', 'history.js');
+      if (fs.existsSync(configPath)) {
+        return configManager.loadAndValidate(configPath, HISTORY_CONFIG_SCHEMA, 'HistoryManager');
+      }
+    } catch (error) {
+      logger.warn(`無法載入歷史管理器設定檔，使用預設值: ${error.message}`);
+    }
+    return DEFAULT_CONFIG;
   }
 
   /**
@@ -47,16 +92,56 @@ class HistoryManager {
   }
 
   /**
-   * 儲存指定使用者的歷史紀錄
+   * 儲存指定使用者的歷史紀錄，包含備份管理
    * @private
    */
   async _save(userId) {
     const file = path.join(this.historyDir, `${userId}.json`);
     const arr = this.cache.get(userId) || [];
+    
     try {
-      await fileEditer.writeFile_Cover(file, JSON.stringify(arr, null, 2));
+      // 檢查檔案大小，如需要則進行備份
+      await this._rotateIfNeeded(file);
+      
+      const content = JSON.stringify(arr, null, 2);
+      await fileEditer.writeFile_Cover(file, content);
     } catch (err) {
       logger.error(`寫入歷史檔案失敗: ${err.message}`);
+    }
+  }
+
+  /**
+   * 檔案輪轉備份
+   * @private
+   */
+  async _rotateIfNeeded(file) {
+    try {
+      if (!fs.existsSync(file)) return;
+      
+      const stats = fs.statSync(file);
+      if (stats.size < this.config.maxFileSize) return;
+      
+      // 進行檔案輪轉
+      const backupCount = this.config.backupCount;
+      if (backupCount > 0) {
+        // 移動舊備份檔案
+        for (let i = backupCount; i > 1; i--) {
+          const oldBackup = `${file}.${i - 1}`;
+          const newBackup = `${file}.${i}`;
+          if (fs.existsSync(oldBackup)) {
+            fs.renameSync(oldBackup, newBackup);
+          }
+        }
+        
+        // 創建新備份
+        if (backupCount >= 1) {
+          fs.renameSync(file, `${file}.1`);
+        }
+        
+        logger.info(`歷史檔案備份完成: ${file}`);
+      }
+    } catch (err) {
+      logger.error(`檔案輪轉失敗: ${err.message}`);
     }
   }
 
@@ -67,8 +152,19 @@ class HistoryManager {
   _prune(userId) {
     const arr = this.cache.get(userId) || [];
     const now = Date.now();
+    
+    // 移除過期訊息
     const filtered = arr.filter(m => now - m.timestamp <= this.expireMs);
-    const result = filtered.slice(-this.maxMessages);
+    
+    // 限制訊息數量
+    const result = filtered.slice(-this.config.maxMessages);
+    
+    // 記錄裁剪統計
+    const removedCount = arr.length - result.length;
+    if (removedCount > 0) {
+      logger.info(`[${userId}] 裁剪了 ${removedCount} 條歷史訊息`);
+    }
+    
     this.cache.set(userId, result);
   }
 
@@ -109,6 +205,70 @@ class HistoryManager {
   async clearHistory(userId) {
     this.cache.set(userId, []);
     await this._save(userId);
+  }
+
+  /**
+   * 獲取歷史管理器統計資訊
+   * @returns {object} 統計資訊
+   */
+  getStats() {
+    const stats = {
+      config: this.config,
+      cacheSize: this.cache.size,
+      historyFiles: [],
+      totalSize: 0
+    };
+
+    try {
+      const files = fs.readdirSync(this.historyDir);
+      for (const file of files) {
+        if (file.endsWith('.json')) {
+          const filePath = path.join(this.historyDir, file);
+          const stat = fs.statSync(filePath);
+          stats.historyFiles.push({
+            name: file,
+            size: stat.size,
+            modified: stat.mtime
+          });
+          stats.totalSize += stat.size;
+        }
+      }
+    } catch (err) {
+      logger.error(`獲取統計資訊失敗: ${err.message}`);
+    }
+
+    return stats;
+  }
+
+  /**
+   * 清理過期備份檔案
+   */
+  async cleanupBackups() {
+    try {
+      const files = fs.readdirSync(this.historyDir);
+      const now = Date.now();
+      const maxAge = 30 * 24 * 60 * 60 * 1000; // 30 天
+      
+      let cleaned = 0;
+      for (const file of files) {
+        // 只處理備份檔案（.json.1, .json.2 等）
+        if (/\.json\.\d+$/.test(file)) {
+          const filePath = path.join(this.historyDir, file);
+          const stat = fs.statSync(filePath);
+          
+          if (now - stat.mtime.getTime() > maxAge) {
+            fs.unlinkSync(filePath);
+            cleaned++;
+          }
+        }
+      }
+      
+      if (cleaned > 0) {
+        logger.info(`清理了 ${cleaned} 個過期備份檔案`);
+      }
+    } catch (err) {
+      logger.error(`清理備份檔案失敗: ${err.message}`);
+    }
   }
 }
 

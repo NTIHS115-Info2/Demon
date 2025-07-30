@@ -1,19 +1,44 @@
 const { spawn } = require('child_process');
 const path = require('path');
+const fs = require('fs');
 const express = require('express');
 const Logger = require('../../src/utils/logger.js');
+const configManager = require('../../src/utils/configManager');
+
 const log = new Logger('ngrok-server.log');
+
+// Ngrok 設定檔驗證綱要
+const NGROK_CONFIG_SCHEMA = {
+  types: {
+    binPath: 'string',
+    port: 'number',
+    command: 'string',
+    authtoken: 'string'
+  },
+  ranges: {
+    port: { min: 1000, max: 65535 }
+  },
+  filePaths: ['binPath'] // 需要驗證存在的檔案路徑
+};
 
 class NgrokServerManager {
   constructor(options = {}) {
+    // 載入設定檔（如果存在）
+    const config = this.loadConfig();
+    
+    // 合併設定檔和傳入參數
+    const mergedOptions = { ...config, ...options };
+    
     // ngrok 執行檔路徑，預設為與本檔案同目錄的 ngrok.exe
-    this.binPath = options.binPath || path.resolve(__dirname, 'ngrok.exe');
+    this.binPath = mergedOptions.binPath || path.resolve(__dirname, 'ngrok.exe');
     // 本地監聽埠號
-    this.port = options.port || 3000;
+    this.port = mergedOptions.port || 3000;
     // 可自訂執行指令，例如 http、tcp 等
-    this.command = options.command || 'http';
+    this.command = mergedOptions.command || 'http';
+    // Ngrok authtoken（選填）
+    this.authtoken = mergedOptions.authtoken;
     // 其他額外參數
-    this.extraArgs = options.extraArgs || [];
+    this.extraArgs = mergedOptions.extraArgs || [];
 
     this.process = null;      // ngrok 子程序
     this.running = false;     // ngrok 是否運行中
@@ -22,13 +47,81 @@ class NgrokServerManager {
     this.app = null;          // express 實例
     this.server = null;       // HTTP server
     this.handlers = new Map();// 子網域對應表
+    
+    // 驗證 ngrok 執行檔
+    this.validateBinaryPath();
+  }
+
+  /**
+   * 載入 ngrok 設定檔
+   * @private
+   */
+  loadConfig() {
+    try {
+      const configPath = path.resolve(__dirname, '..', '..', 'config', 'ngrok.js');
+      if (fs.existsSync(configPath)) {
+        return configManager.loadAndValidate(configPath, NGROK_CONFIG_SCHEMA, 'Ngrok');
+      }
+    } catch (error) {
+      log.warn(`無法載入 Ngrok 設定檔，使用預設值: ${error.message}`);
+      // 創建範例設定檔
+      this.createExampleConfig();
+    }
+    return {};
+  }
+
+  /**
+   * 創建 Ngrok 範例設定檔
+   * @private
+   */
+  createExampleConfig() {
+    try {
+      const configDir = path.resolve(__dirname, '..', '..', 'config');
+      const examplePath = path.join(configDir, 'ngrok.example.js');
+      
+      const exampleConfig = {
+        binPath: "請填入ngrok.exe的完整路徑",
+        port: 3000,
+        command: "http",
+        authtoken: "請填入您的ngrok authtoken（選填）",
+        extraArgs: []
+      };
+      
+      if (!fs.existsSync(examplePath)) {
+        configManager.createExampleConfig(examplePath, exampleConfig, 'Ngrok');
+      }
+    } catch (error) {
+      log.error(`創建 Ngrok 範例設定檔失敗: ${error.message}`);
+    }
+  }
+
+  /**
+   * 驗證 ngrok 執行檔是否存在
+   * @private
+   */
+  validateBinaryPath() {
+    if (!fs.existsSync(this.binPath)) {
+      const error = new Error(`Ngrok 執行檔不存在: ${this.binPath}\n請下載 ngrok.exe 並確認路徑正確。`);
+      log.error(error.message);
+      throw error;
+    }
+    log.info(`Ngrok 執行檔驗證成功: ${this.binPath}`);
   }
 
   /**
    * 建立 ngrok 參數陣列
    */
   buildArgs(port) {
-    const args = [this.command, String(port), ...this.extraArgs, '--log=stdout'];
+    const args = [this.command, String(port)];
+    
+    // 如果有 authtoken，添加到參數中
+    if (this.authtoken && this.authtoken !== "請填入您的ngrok authtoken（選填）") {
+      args.push('--authtoken', this.authtoken);
+    }
+    
+    // 添加額外參數
+    args.push(...this.extraArgs, '--log=stdout');
+    
     return args;
   }
 

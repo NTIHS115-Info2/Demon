@@ -5,7 +5,7 @@ const logger = new Logger('DISCORD');
 // 必須存在的設定檔，讀取失敗時拋出錯誤
 let config;
 try {
-  config = require('../../config');
+  config = require('../../configLoader');
 } catch (e) {
   logger.error('[DISCORD] 無法讀取設定檔: ' + e.message);
   throw e;
