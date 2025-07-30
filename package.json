@@ -2,9 +2,6 @@
   "scripts": {
     "start": "node index.js",
     "test": "jest",
-    "demo-errors": "node index.js --demo-errors",
-    "test-uncaught": "node index.js --test-uncaught",
-    "test-unhandled": "node index.js --test-unhandled"
   },
   "name": "demon",
   "version": "1.0.0",
