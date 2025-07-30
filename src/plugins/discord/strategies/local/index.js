@@ -33,9 +33,22 @@ module.exports = {
   },
 
   async restart(options = {}) {
-    const opts = { ...config, ...options };
-    await this.offline();
-    await clientManager.login(opts);
+    logger.info('[DISCORD] 開始重啟客戶端');
+    try {
+      const opts = { ...config, ...options };
+      await this.offline();
+      await clientManager.login(opts);
+      messageHandler.attach(clientManager.getClient(), opts);
+      commandHandler.setupDefaultCommands();
+      commandHandler.handle(clientManager.getClient());
+      await commandHandler.register(opts);
+      logger.info('[DISCORD] 客戶端重啟完成');
+    } catch (e) {
+      // 避免記錄可能包含敏感資訊的完整錯誤
+      const safeError = e.message?.includes('token') ? '重啟時憑證驗證失敗' : e.message;
+      logger.error('[DISCORD] 客戶端重啟失敗: ' + safeError);
+      throw e;
+    }
   },
 
   async state() {
@@ -44,15 +57,31 @@ module.exports = {
 
   async send(data) {
     const client = clientManager.getClient();
-    if (!client) return false;
+    if (!client) {
+      logger.warn('[DISCORD] 客戶端未連線，無法發送訊息');
+      return false;
+    }
+    
+    // 驗證必要參數
+    if (!data || !data.channelId || !data.message) {
+      logger.error('[DISCORD] send 參數不完整，需要 channelId 和 message');
+      return false;
+    }
+    
     try {
       const channel = await client.channels.fetch(data.channelId);
-      if (channel) await channel.send(data.message);
+      if (!channel) {
+        logger.error('[DISCORD] 找不到指定頻道');
+        return false;
+      }
+      
+      await channel.send(data.message);
+      logger.info('[DISCORD] 訊息發送成功');
       return true;
     } catch (e) {
-      const Logger = require('../../../../utils/logger');
-      const logger = new Logger('DISCORD');
-      logger.error('[DISCORD] 發送訊息失敗: ' + e);
+      // 避免記錄可能包含敏感資訊的完整錯誤
+      const safeError = e.code ? `Discord API 錯誤 (${e.code})` : '發送訊息時發生未知錯誤';
+      logger.error('[DISCORD] 發送訊息失敗: ' + safeError);
       return false;
     }
   }

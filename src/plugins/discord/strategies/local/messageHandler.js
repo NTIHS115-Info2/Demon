@@ -32,7 +32,9 @@ async function replyBySentence(msg, text, speakerName) {
     try {
       await msg.reply(trimmed);
     } catch (e) {
-      logger.error('[DISCORD] 回覆失敗: ' + e);
+      // 避免記錄可能包含敏感資訊的完整錯誤
+      const safeError = e.code ? `Discord API 錯誤 (${e.code})` : '回覆訊息時發生未知錯誤';
+      logger.error('[DISCORD] 回覆失敗: ' + safeError);
     }
   };
 
@@ -84,13 +86,18 @@ async function handleDirectMessage(msg, uid = OWNER_ID) {
   if (msg.author.id !== uid) {
     try {
       await msg.reply('我還學不會跟別人說話');
+      logger.info('[DISCORD] 回覆非擁有者的 DM');
     } catch (e) {
-      logger.error('[DISCORD] 回覆失敗: ' + e);
+      // 避免記錄可能包含敏感資訊的完整錯誤
+      const safeError = e.code ? `Discord API 錯誤 (${e.code})` : '回覆 DM 時發生未知錯誤';
+      logger.error('[DISCORD] 回覆失敗: ' + safeError);
     }
     return;
   }
+  
   // 對於擁有者，使用預設稱呼
   const speakerName = '爸爸';
+  logger.info('[DISCORD] 處理擁有者的 DM');
   return replyBySentence(msg, msg.content, speakerName);
 }
 
@@ -103,9 +110,15 @@ async function handleDirectMessage(msg, uid = OWNER_ID) {
 async function handleMentionMessage(msg, botId, uid = OWNER_ID) {
   const clean = msg.content.replace(new RegExp(`<@!?${botId}>`,'g'), '').trim();
   
+  if (!clean) {
+    logger.info('[DISCORD] 收到空的提及訊息，忽略');
+    return;
+  }
+  
   // 對於擁有者，使用預設邏輯（'爸爸'）
   // 對於其他人，使用他們的顯示名稱
   const speakerName = msg.author.id === uid ? '爸爸' : (msg.member?.displayName || msg.author.displayName || msg.author.username);
+  logger.info(`[DISCORD] 處理 ${speakerName} 的提及訊息`);
   return replyBySentence(msg, clean, speakerName);
 }
 
@@ -115,9 +128,15 @@ async function handleMentionMessage(msg, botId, uid = OWNER_ID) {
  * @param {string} [uid] 允許互動的使用者 ID（擁有者ID）
  */
 async function handleReplyMessage(msg, uid = OWNER_ID) {
+  if (!msg.content.trim()) {
+    logger.info('[DISCORD] 收到空的回覆訊息，忽略');
+    return;
+  }
+  
   // 對於擁有者，使用預設邏輯（'爸爸'）
   // 對於其他人，使用他們的顯示名稱
   const speakerName = msg.author.id === uid ? '爸爸' : (msg.member?.displayName || msg.author.displayName || msg.author.username);
+  logger.info(`[DISCORD] 處理 ${speakerName} 的回覆訊息`);
   return replyBySentence(msg, msg.content, speakerName);
 }
 
@@ -131,21 +150,33 @@ function attach(client, options = {}) {
   const targetChannel = options.channelId || config.channelId;
   const allowId = options.userId || OWNER_ID;
 
+  logger.info(`[DISCORD] 附加訊息監聽器 - 目標頻道: ${targetChannel || '全域'}, 擁有者: ${allowId}`);
+
   client.on('messageCreate', async msg => {
     try {
       // 若指定頻道則只監聽該頻道
       if (targetChannel && msg.channel.id !== targetChannel) return;
+      
+      // 忽略機器人訊息
       if (msg.author.bot) return;
+      
+      // 忽略空訊息
+      if (!msg.content || !msg.content.trim()) return;
 
       if (msg.channel.type === 1 || msg.channel.type === 'DM') {
+        logger.info('[DISCORD] 收到 DM 訊息');
         await handleDirectMessage(msg, allowId);
       } else if (msg.reference && msg.mentions.repliedUser && msg.mentions.repliedUser.id === client.user.id) {
+        logger.info('[DISCORD] 收到回覆訊息');
         await handleReplyMessage(msg, allowId);
       } else if (msg.mentions.has(client.user)) {
+        logger.info('[DISCORD] 收到提及訊息');
         await handleMentionMessage(msg, client.user.id, allowId);
       }
     } catch (e) {
-      logger.error('[DISCORD] 處理訊息錯誤: ' + e);
+      // 避免記錄可能包含敏感資訊的完整錯誤
+      const safeError = e.code ? `處理訊息時發生 Discord API 錯誤 (${e.code})` : '處理訊息時發生未知錯誤';
+      logger.error('[DISCORD] 處理訊息錯誤: ' + safeError);
     }
   });
 }
