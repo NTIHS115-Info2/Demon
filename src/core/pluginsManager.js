@@ -23,6 +23,7 @@ class PluginsManager {
     this.queue = [];                   // 插件啟動佇列
     this.running = false;              // 佇列處理狀態
     this.maxConcurrent = 1;            // 每次僅啟動一個插件
+    this.queuedPlugins = new Set();    // 追蹤目前在佇列中的插件，防止重複加入
   }
 
   // 統一處理插件名稱小寫
@@ -138,15 +139,26 @@ class PluginsManager {
     const plugin = this.plugins.get(id);
     if (!plugin?.online) return false;
 
-    // 檢查插件狀態，避免重複啟動
+    // 原子檢查：檢查是否已在佇列中或已上線，防止重複加入
+    if (this.queuedPlugins.has(id)) {
+      Logger.warn(`[Queue] 插件 ${id} 已在佇列中，忽略重複加入`);
+      return false;
+    }
+
+    // 立即標記為正在處理，防止併發問題
+    this.queuedPlugins.add(id);
+
     try {
+      // 檢查插件狀態，避免重複啟動
       const state = await this.getPluginState(id);
       if (state === 1) {
         Logger.warn(`[Queue] 插件 ${id} 已在線上，忽略重複啟動`);
+        this.queuedPlugins.delete(id); // 移除標記
         return false;
       }
     } catch (err) {
       Logger.error(`[Queue] 取得插件 ${id} 狀態失敗：${err.message}`);
+      this.queuedPlugins.delete(id); // 移除標記
       return false;
     }
 
@@ -161,12 +173,18 @@ class PluginsManager {
         } catch (err) {
           Logger.error(`[Queue] 啟動插件 ${id} 失敗：${err.message}`);
           reject(err);
+        } finally {
+          // 從佇列中移除標記
+          this.queuedPlugins.delete(id);
         }
       });
 
       if (!this.running) {
         this.running = true;
         this.processQueue().then(() => {
+          this.running = false;
+        }).catch(err => {
+          Logger.error(`[Queue] 處理佇列時發生錯誤：${err.message}`);
           this.running = false;
         });
       }
@@ -204,8 +222,16 @@ class PluginsManager {
    * 關閉所有已啟動的插件
    */
   async offlineAll() {
-    for (const plugin of this.plugins.values()) {
-      if (plugin.offline) await plugin.offline();
+    for (const [name, plugin] of this.plugins.entries()) {
+      try {
+        if (plugin.offline) {
+          await plugin.offline();
+          Logger.info(`[PluginManager] 成功關閉插件：${name}`);
+        }
+      } catch (err) {
+        Logger.error(`[PluginManager] 關閉插件 ${name} 失敗：${err.message}`);
+        // 繼續處理其他插件，不拋出例外
+      }
     }
   }
 
@@ -214,8 +240,16 @@ class PluginsManager {
    * @param {Object} options - 重啟選項
    */
   async restartAll(options = {}) {
-    for (const plugin of this.plugins.values()) {
-      if (plugin.restart) await plugin.restart(options);
+    for (const [name, plugin] of this.plugins.entries()) {
+      try {
+        if (plugin.restart) {
+          await plugin.restart(options);
+          Logger.info(`[PluginManager] 成功重啟插件：${name}`);
+        }
+      } catch (err) {
+        Logger.error(`[PluginManager] 重啟插件 ${name} 失敗：${err.message}`);
+        // 繼續處理其他插件，不拋出例外
+      }
     }
   }
 
