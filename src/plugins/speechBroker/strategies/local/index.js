@@ -19,11 +19,12 @@ const PUNCTUATION_MAP = {
   '？': '?',
   '！': '!',
   '～': '~',
+  '.': '.',
   '♥': '', // 視為 emoji，移除
 };
 
 // 匹配中英文句尾符號（包含 emoji）
-const SENTENCE_ENDINGS = /[。！？?!~～♥\uFF01\uFF1F\u3002]/;
+const SENTENCE_ENDINGS = /[。！？?!.~～♥\uFF01\uFF1F\u3002]/;
 
 // 移除表情標記，例如 (害羞)、(微笑)
 const EXPRESSION_PATTERN = /[\(（][^\)）]{1,10}[\)）]/g;
