@@ -17,42 +17,72 @@ module.exports = {
     async online(options) {
         logger.info('LlamaServerManager 正在啟動中...');
         
+        // 如果已有實例在運行，先檢查其狀態
         if (llamaServerManager) {
-            logger.warn('LlamaServerManager 已經存在，正在重新啟動...');
-            await llamaServerManager.restartWithPreset(options.preset || 'exclusive');
-            return;
+            if (llamaServerManager.isRunning()) {
+                logger.warn('LlamaServerManager 已經在運行中，正在重新啟動...');
+                await llamaServerManager.restartWithPreset(options.preset || 'exclusive');
+                return true;
+            } else {
+                // 清理無效的實例
+                llamaServerManager = null;
+            }
         }
 
+        // 創建新的管理器實例
         llamaServerManager = new LlamaServerManager();
 
-        const result = await llamaServerManager.startWithPreset(options.preset || 'exclusive');
-
-        logger.info(`LlamaServerManager 已啟動，使用：${options.preset || 'exclusive'} 模式`);
-
-        return result; // 返回啟動結果，可能是 Promise 或其他值
+        try {
+            const result = await llamaServerManager.startWithPreset(options.preset || 'exclusive');
+            logger.info(`LlamaServerManager 已啟動，使用：${options.preset || 'exclusive'} 模式`);
+            return result;
+        } catch (error) {
+            logger.error(`LlamaServerManager 啟動失敗: ${error.message}`);
+            llamaServerManager = null; // 清理失敗的實例
+            throw error;
+        }
     },
 
     async offline() {
-
         logger.info('LlamaServerManager 正在關閉中...');
 
         if (!llamaServerManager || !llamaServerManager.isRunning()) {
             logger.warn('LlamaServerManager 尚未啟動或已經關閉');
-            return;
+            // 確保變數被重置
+            llamaServerManager = null;
+            return true;
         }
 
-        const result = await llamaServerManager.stop();
-        logger.info('LlamaServerManager 已關閉');
-
-        return result
-
+        try {
+            const result = await llamaServerManager.stop();
+            logger.info('LlamaServerManager 已關閉');
+            
+            // 重置管理器實例以釋放資源
+            llamaServerManager = null;
+            
+            return result;
+        } catch (error) {
+            logger.error(`LlamaServerManager 關閉時發生錯誤: ${error.message}`);
+            // 即使發生錯誤也要重置變數
+            llamaServerManager = null;
+            throw error;
+        }
     },
 
     async restart(options) {
         logger.info('LlamaServerManager 正在重新啟動...');
-        await this.offline();
-        await new Promise(resolve => setTimeout(resolve, 500));
-        await this.online(options);
+        
+        try {
+            await this.offline();
+            
+            // 等待資源釋放，使用更長的延遲確保穩定性
+            await new Promise(resolve => setTimeout(resolve, 1000));
+            
+            return await this.online(options);
+        } catch (error) {
+            logger.error(`LlamaServerManager 重新啟動失敗: ${error.message}`);
+            throw error;
+        }
     },
 
     /** 0為下線 1為上線 -1為錯誤 */
