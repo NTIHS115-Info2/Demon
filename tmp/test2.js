@@ -1,1 +1,0 @@
-module.exports = { token: "", port: 8080 };

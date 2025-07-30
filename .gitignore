@@ -12,3 +12,12 @@ yarn.lock
 index.js
 
 src/plugins/discord/config.js
+
+# Additional configuration and temporary files
+*.log
+.env
+history/*.json
+!history/.gitkeep
+tmp/
+config/*.js
+!config/*.example.js
