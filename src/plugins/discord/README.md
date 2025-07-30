@@ -34,9 +34,13 @@ Discord 介接插件，提供完整的 Discord Bot 功能，包含訊息監聽�
 
 ## 設定方式
 
-1. **建立設定檔**：參考 `config.example.md` 設定 Discord Bot
+1. **建立設定檔**：
+   - 複製 `config.template.js` 為 `config.js`
+   - 參考 `config.example.md` 填入正確的 Discord Bot 設定
 2. **環境變數**：使用環境變數儲存敏感資訊
 3. **權限設定**：確保 Bot 有適當的 Discord 權限
+
+⚠️ **注意**：`config.js` 檔案包含敏感資訊，已被 `.gitignore` 排除，請勿提交到版本控制。
 
 ## 使用方式
 
