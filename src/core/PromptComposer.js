@@ -87,15 +87,10 @@ async function composeToolPrompt(state = {}) {
       info += `工具 ${state.toolName} 已執行。`;
       
       if (state.success === true && state.result !== undefined) {
-        // 確保結果不會過長
         const resultStr = typeof state.result === 'string' 
           ? state.result 
           : JSON.stringify(state.result);
-        const maxLength = 1000;
-        const truncatedResult = resultStr.length > maxLength 
-          ? resultStr.substring(0, maxLength) + '...(已截斷)'
-          : resultStr;
-        info += `結果為: ${truncatedResult}`;
+        info += `結果為: ${resultStr}`;
       } else if (state.success === false) {
         info += '執行失敗或逾時。';
       }
