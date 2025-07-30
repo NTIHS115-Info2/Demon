@@ -283,6 +283,6 @@ ErrorDemoModule.demonstrateUnhandledRejection();
 
 ---
 
-**最後更新**: 2024-01-15  
+**最後更新**: 2025-07-31  
 **版本**: 1.0.0  
 **維護者**: Demon 開發團隊
