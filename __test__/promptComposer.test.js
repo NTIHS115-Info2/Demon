@@ -99,10 +99,12 @@ describe('PromptComposer Enhanced Tests', () => {
       
       const result = await composer.composeMessages(history, toolResults);
       
-      // 確認工具結果被插入到正確位置（user 訊息之後）
-      const userIndex = result.findIndex(msg => msg.role === 'user');
-      const toolIndex = result.findIndex(msg => msg.role === 'tool');
-      expect(toolIndex).toBeGreaterThan(userIndex);
+      // 確認訊息順序：system → history → tools
+      expect(result[0].role).toBe('system');
+      expect(result[1].role).toBe('user');
+      expect(result[2].role).toBe('assistant');
+      expect(result[3].role).toBe('tool');
+      expect(result.length).toBe(4);
     });
 
     test('處理無效輸入參數', async () => {

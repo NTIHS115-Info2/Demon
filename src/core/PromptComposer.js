@@ -159,39 +159,6 @@ function validateAndCleanMessages(messages) {
 }
 
 /**
- * 插入工具結果到適當位置 (toolResultBuffer 插入邏輯)
- * @param {Array} baseMessages 基礎訊息陣列
- * @param {Array} toolResults 工具結果陣列
- * @returns {Array}
- */
-function insertToolResults(baseMessages, toolResults) {
-  if (!Array.isArray(toolResults) || toolResults.length === 0) {
-    return baseMessages;
-  }
-  
-  const result = [...baseMessages];
-  const validToolResults = validateAndCleanMessages(toolResults);
-  
-  // 工具結果應該插入在最後一個使用者訊息之後
-  let insertIndex = result.length;
-  for (let i = result.length - 1; i >= 0; i--) {
-    if (result[i].role === MESSAGE_ROLES.USER) {
-      insertIndex = i + 1;
-      break;
-    }
-  }
-  
-  // 按時間戳排序工具結果
-  validToolResults.sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
-  
-  // 插入工具結果
-  result.splice(insertIndex, 0, ...validToolResults);
-  
-  logger.info(`插入了 ${validToolResults.length} 個工具結果到位置 ${insertIndex}`);
-  return result;
-}
-
-/**
  * 組合最終送入 LLM 的訊息陣列
  * 順序：系統提示詞 → 歷史訊息 → 工具結果 → 額外訊息
  * @param {Array<{role:string,content:string}>} history - 對話歷史
@@ -226,15 +193,21 @@ async function composeMessages(history = [], toolResultBuffer = [], extra = []) 
     const validHistory = validateAndCleanMessages(history);
     result.push(...validHistory);
 
-    // 3. 插入工具結果緩衝區 (toolResultBuffer 插入邏輯)
-    const withToolResults = insertToolResults(result, toolResultBuffer);
+    // 3. 驗證並加入工具結果緩衝區
+    const validToolResults = validateAndCleanMessages(toolResultBuffer);
+    if (validToolResults.length > 0) {
+      // 按時間戳排序工具結果
+      validToolResults.sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
+      result.push(...validToolResults);
+      logger.info(`加入了 ${validToolResults.length} 個工具結果`);
+    }
 
     // 4. 加入額外訊息
     const validExtra = validateAndCleanMessages(extra);
-    withToolResults.push(...validExtra);
+    result.push(...validExtra);
 
     // 5. 最終驗證整個訊息陣列
-    const finalMessages = validateAndCleanMessages(withToolResults);
+    const finalMessages = validateAndCleanMessages(result);
     
     // 6. 確保符合 LLM 需求的基本格式檢查
     if (finalMessages.length === 0) {
