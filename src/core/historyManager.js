@@ -107,8 +107,22 @@ class HistoryManager {
    * @param {string} userId
    */
   async clearHistory(userId) {
+    if (!userId) throw new Error('userId 不可為空');
+    
+    // 清除緩存
     this.cache.set(userId, []);
-    await this._save(userId);
+    
+    // 刪除實體檔案
+    const file = path.join(this.historyDir, `${userId}.json`);
+    try {
+      await fs.promises.unlink(file);
+      logger.info(`[clearHistory] 已刪除檔案: ${file}`);
+    } catch (err) {
+      // 檔案不存在或刪除失敗時警告但不中斷服務
+      if (err.code !== 'ENOENT') {
+        logger.error(`刪除歷史檔案失敗: ${err.message}`);
+      }
+    }
   }
 }
 
