@@ -37,14 +37,21 @@ module.exports = {
       if (m === 'remote') {
         if (options.baseUrl) {
           try {
-            await axios.get(options.baseUrl, { timeout: 1000 });
+            await axios.get(options.baseUrl, { 
+              timeout: 3000,
+              headers: { 'User-Agent': 'Demon-ASR/1.0.0' }
+            });
             mode = 'remote';
             strategy = strategies.remote;
             this.priority = strategy.priority;
             logger.info('ASR 自動選擇 remote 策略');
             return;
           } catch (e) {
-            logger.warn('remote 無法連線: ' + e.message);
+            if (e.code === 'ECONNABORTED') {
+              logger.warn('remote 連線逾時: ' + e.message);
+            } else {
+              logger.warn('remote 無法連線: ' + e.message);
+            }
           }
         }
       } else if (m === 'server') {
@@ -80,10 +87,17 @@ module.exports = {
   async online(options = {}) {
     const useMode = options.mode || mode;
     if (!strategy || useMode !== mode) await this.updateStrategy(useMode, options);
+    
+    const startTime = Date.now();
     try {
-      return await strategy.online(options);
+      logger.info(`[ASR] 啟動 ${useMode} 模式...`);
+      const result = await strategy.online(options);
+      const duration = Date.now() - startTime;
+      logger.info(`[ASR] ${useMode} 模式啟動成功 (耗時 ${duration}ms)`);
+      return result;
     } catch (e) {
-      logger.error('[ASR] online 發生錯誤: ' + e);
+      const duration = Date.now() - startTime;
+      logger.error(`[ASR] ${useMode} 模式啟動失敗 (耗時 ${duration}ms): ${e.message}`);
       throw e;
     }
   },
@@ -91,10 +105,17 @@ module.exports = {
   // 關閉 ASR
   async offline() {
     if (!strategy) await this.updateStrategy(mode);
+    
+    const startTime = Date.now();
     try {
-      return await strategy.offline();
+      logger.info(`[ASR] 關閉 ${mode} 模式...`);
+      const result = await strategy.offline();
+      const duration = Date.now() - startTime;
+      logger.info(`[ASR] ${mode} 模式關閉成功 (耗時 ${duration}ms)`);
+      return result;
     } catch (e) {
-      logger.error('[ASR] offline 發生錯誤: ' + e);
+      const duration = Date.now() - startTime;
+      logger.error(`[ASR] ${mode} 模式關閉失敗 (耗時 ${duration}ms): ${e.message}`);
       throw e;
     }
   },
@@ -103,10 +124,17 @@ module.exports = {
   async restart(options = {}) {
     const useMode = options.mode || mode;
     if (!strategy || useMode !== mode) await this.updateStrategy(useMode, options);
+    
+    const startTime = Date.now();
     try {
-      return await strategy.restart(options);
+      logger.info(`[ASR] 重啟 ${useMode} 模式...`);
+      const result = await strategy.restart(options);
+      const duration = Date.now() - startTime;
+      logger.info(`[ASR] ${useMode} 模式重啟成功 (耗時 ${duration}ms)`);
+      return result;
     } catch (e) {
-      logger.error('[ASR] restart 發生錯誤: ' + e);
+      const duration = Date.now() - startTime;
+      logger.error(`[ASR] ${useMode} 模式重啟失敗 (耗時 ${duration}ms): ${e.message}`);
       throw e;
     }
   },

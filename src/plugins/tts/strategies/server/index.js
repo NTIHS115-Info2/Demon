@@ -18,14 +18,18 @@ module.exports = {
       if (req.method === 'POST' && req.params.action === info.routes.send) {
         try {
           const text = String(req.body.text || '');
+          if (!text.trim()) {
+            logger.warn('TTS 遠端請求收到空白文字');
+            return res.status(400).json({ error: 'Empty text provided' });
+          }
           await local.send(text);
-          return res.status(200).end();
+          return res.status(200).json({ success: true, message: 'TTS processed successfully' });
         } catch (e) {
           logger.error('處理 TTS 遠端請求失敗: ' + e.message);
-          return res.status(500).end();
+          return res.status(500).json({ error: 'TTS processing failed', details: e.message });
         }
       }
-      return res.status(404).end();
+      return res.status(404).json({ error: 'Not found' });
     };
 
     const result = await pluginsManager.send('ngrok', { action: 'register', subdomain: info.subdomain, handler });

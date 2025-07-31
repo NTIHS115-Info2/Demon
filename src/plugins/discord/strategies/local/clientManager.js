@@ -5,7 +5,7 @@ const logger = new Logger('DISCORD');
 // 必須存在的設定檔，讀取失敗時拋出錯誤
 let config;
 try {
-  config = require('../../config');
+  config = require('../../configLoader');
 } catch (e) {
   logger.error('[DISCORD] 無法讀取設定檔: ' + e.message);
   throw e;
@@ -24,6 +24,13 @@ module.exports = {
       return client;
     }
     try {
+      const token = options.token || config.token;
+      
+      // Token 驗證
+      if (!token || typeof token !== 'string' || token.trim() === '') {
+        throw new Error('無效的 Discord Token');
+      }
+      
       client = new Client({
         intents: options.intents || [
           GatewayIntentBits.Guilds,
@@ -33,12 +40,14 @@ module.exports = {
         ],
         partials: [Partials.Channel]
       });
-      const token = options.token || config.token;
+      
       await client.login(token);
       logger.info('[DISCORD] 客戶端登入成功');
       return client;
     } catch (e) {
-      logger.error('[DISCORD] 客戶端登入失敗: ' + e);
+      // 避免在日誌中洩露敏感資訊，只記錄錯誤類型
+      const errorMsg = e.message?.includes('token') ? '登入憑證無效' : e.message;
+      logger.error('[DISCORD] 客戶端登入失敗: ' + errorMsg);
       client = null;
       throw e;
     }

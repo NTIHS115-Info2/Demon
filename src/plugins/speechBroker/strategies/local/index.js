@@ -13,20 +13,29 @@ const logger = new Logger('speechBroker.log');
 // 此策略的預設啟動優先度
 const priority = 75;
 
-// 中文標點轉換對照表（全形 → 半形）
+// 中文標點轉換對照表（全形 → 半形）以及emoji處理
 const PUNCTUATION_MAP = {
-  '。': '。',
-  '？': '?',
-  '！': '!',
-  '～': '~',
-  '♥': '', // 視為 emoji，移除
+  '。': '。',        // 中文句號保持不變
+  '？': '?',         // 全形問號 → 半形問號  
+  '！': '!',         // 全形驚嘆號 → 半形驚嘆號
+  '～': '~',         // 全形波浪號 → 半形波浪號
+  '\uFF1F': '?',     // Unicode全形問號
+  '\uFF01': '!',     // Unicode全形驚嘆號
+  '\u3002': '。',    // Unicode中文句號
+  '.': '.',          // 半形句號保持不變
+  '♥': '',           // 愛心emoji，移除
+  '❤': '',           // 紅心emoji，移除
+  '💖': '',          // 閃亮愛心emoji，移除
+  '😊': '',          // 微笑emoji，移除
+  '😍': '',          // 愛心眼emoji，移除
 };
 
-// 匹配中英文句尾符號（包含 emoji）
-const SENTENCE_ENDINGS = /[。！？?!~～♥\uFF01\uFF1F\u3002]/;
+// 匹配中英文句尾符號（不包含emoji，emoji只在清理時移除）
+const SENTENCE_ENDINGS = /[。！？?!~～\uFF01\uFF1F\u3002]/;
 
-// 移除表情標記，例如 (害羞)、(微笑)
-const EXPRESSION_PATTERN = /[\(（][^\)）]{1,10}[\)）]/g;
+// 移除表情標記，例如 (害羞)、(微笑)，但保留數字、數學或其他實用內容
+// 表情通常是純中文字符，不包含數字、符號或英文
+const EXPRESSION_PATTERN = /[\(（]([\u4e00-\u9fff]{1,6})[\)）]/g;
 
 /**
  * 清理字串片段，去除表情並統一標點
@@ -34,10 +43,14 @@ const EXPRESSION_PATTERN = /[\(（][^\)）]{1,10}[\)）]/g;
  * @returns {string} 清理後結果
  */
 function sanitizeChunk(chunk) {
-  // 去除 (表情)
-  const noExpression = chunk.replace(EXPRESSION_PATTERN, '');
+  // 去除 (表情) - 只移除純中文的括號內容
+  let result = chunk.replace(EXPRESSION_PATTERN, '');
+  
+  // 移除 emoji 字符
+  result = result.replace(/[♥❤💖😊😍]/g, '');
+  
   // 替換標點（句號不變）
-  return noExpression.replace(SENTENCE_ENDINGS, (match) => PUNCTUATION_MAP[match] ?? match);
+  return result.replace(SENTENCE_ENDINGS, (match) => PUNCTUATION_MAP[match] ?? match);
 }
 
 /**
@@ -46,15 +59,17 @@ function sanitizeChunk(chunk) {
  */
 async function sendToTTS(sentence) {
   try {
-    if (await PM.getPluginState('tts') !== 1) {
-      logger.warn('[SpeechBroker] TTS 插件未上線，無法送出，狀態碼: ' + await PM.getPluginState('tts'));
-      logger.warn('[SpeechBroker] TTS 插件未上線，無法送出: ' + sentence);
-      return;
+    const ttsState = await PM.getPluginState('tts');
+    if (ttsState !== 1) {
+      logger.warn(`[SpeechBroker] TTS 插件未上線，跳過語音輸出 (狀態: ${ttsState}): ${sentence}`);
+      return false;
     }
     PM.send('tts', sentence);
-    logger.info('[SpeechBroker] 送出 TTS: ' + sentence);
+    logger.info(`[SpeechBroker] 成功送出語音: ${sentence}`);
+    return true;
   } catch (e) {
-    logger.error('[SpeechBroker] TTS 輸出失敗: ' + e);
+    logger.error(`[SpeechBroker] TTS 輸出失敗: ${e.message || e}`);
+    return false;
   }
 }
 
@@ -64,62 +79,94 @@ module.exports = {
 
   /** 啟動插件，監聽 TalkToDemon 串流輸出 */
   async online(options = {}) {
-    if (isOnline) return;
+    if (isOnline) {
+      logger.info('[SpeechBroker] 插件已經在線上，跳過重複啟動');
+      return;
+    }
     isOnline = true;
     buffer = '';
 
     handlers.onData = async (chunk) => {
-      if (SENTENCE_ENDINGS.test(chunk)) {
-        const sentence = (buffer + chunk).trim();
-        const sanitized = sanitizeChunk(sentence);
-        if (sentence.length > 0) {
-          await sendToTTS(sanitized);
+      try {
+        if (SENTENCE_ENDINGS.test(chunk)) {
+          const sentence = (buffer + chunk).trim();
+          const sanitized = sanitizeChunk(sentence);
+          
+          if (sanitized.length > 0) {
+            logger.info(`[SpeechBroker] 偵測到句尾，處理完整句子: "${sentence}" → "${sanitized}"`);
+            await sendToTTS(sanitized);
+          }
+          buffer = '';
+        } else {
+          buffer += chunk;
         }
-        buffer = '';
-      } else {
-        buffer += chunk;
+      } catch (e) {
+        logger.error(`[SpeechBroker] 處理資料時發生錯誤: ${e.message || e}`);
       }
     };
     talker.on('data', handlers.onData);
 
     handlers.onEnd = async () => {
-      if (buffer.trim().length > 0) {
-        await sendToTTS(buffer.trim() + '.');
-        logger.info('[SpeechBroker] 串流完成，餘句送出: ' + buffer.trim());
-        buffer = '';
+      try {
+        if (buffer.trim().length > 0) {
+          const remainingSentence = sanitizeChunk(buffer.trim() + '.');
+          logger.info(`[SpeechBroker] 串流結束，補播殘句: "${buffer.trim()}" → "${remainingSentence}"`);
+          await sendToTTS(remainingSentence);
+          buffer = '';
+        }
+      } catch (e) {
+        logger.error(`[SpeechBroker] end事件處理錯誤: ${e.message || e}`);
       }
     };
     talker.on('end', handlers.onEnd);
 
     handlers.onAbort = async () => {
-      if (buffer.trim().length > 0) {
-        await sendToTTS(buffer.trim() + '.');
-        logger.info('[SpeechBroker] 中止輸出，餘句送出: ' + buffer.trim());
-        buffer = '';
+      try {
+        if (buffer.trim().length > 0) {
+          const remainingSentence = sanitizeChunk(buffer.trim() + '.');
+          logger.info(`[SpeechBroker] 串流中止，補播殘句: "${buffer.trim()}" → "${remainingSentence}"`);
+          await sendToTTS(remainingSentence);
+          buffer = '';
+        }
+      } catch (e) {
+        logger.error(`[SpeechBroker] abort事件處理錯誤: ${e.message || e}`);
       }
     };
     talker.on('abort', handlers.onAbort);
 
     handlers.onError = (err) => {
-      logger.error('[SpeechBroker] LLM 串流錯誤: ' + err);
+      logger.error(`[SpeechBroker] LLM 串流錯誤: ${err.message || err}`);
     };
     talker.on('error', handlers.onError);
 
-    logger.info('[SpeechBroker] 插件已上線');
+    logger.info('[SpeechBroker] 插件已成功上線，開始監聽語音串流');
   },
 
   /** 關閉插件 */
   async offline() {
-    if (!isOnline) return 0;
+    if (!isOnline) {
+      logger.info('[SpeechBroker] 插件已經離線，跳過重複關閉');
+      return 0;
+    }
+    
     isOnline = false;
     buffer = '';
-    // 移除所有事件監聽，避免離線後仍接收資料
-    talker.off('data', handlers.onData);
-    talker.off('end', handlers.onEnd);
-    talker.off('abort', handlers.onAbort);
-    talker.off('error', handlers.onError);
-    Object.keys(handlers).forEach(k => delete handlers[k]);
-    logger.info('[SpeechBroker] 插件已下線');
+    
+    try {
+      // 移除所有事件監聽，避免離線後仍接收資料
+      if (handlers.onData) talker.off('data', handlers.onData);
+      if (handlers.onEnd) talker.off('end', handlers.onEnd);
+      if (handlers.onAbort) talker.off('abort', handlers.onAbort);
+      if (handlers.onError) talker.off('error', handlers.onError);
+      
+      // 清理處理函式引用
+      Object.keys(handlers).forEach(k => delete handlers[k]);
+      
+      logger.info('[SpeechBroker] 插件已成功下線，所有事件監聽已移除');
+    } catch (e) {
+      logger.error(`[SpeechBroker] 下線過程中發生錯誤: ${e.message || e}`);
+    }
+    
     return 0;
   },
 

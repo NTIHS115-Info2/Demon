@@ -1,0 +1,23 @@
+{
+  "name": "speech-to-text",
+  "description": "Convert audio speech to text using ASR (Automatic Speech Recognition)",
+  "type": "input",
+  "parameters": {
+    "audio": {
+      "type": "string",
+      "description": "Base64 encoded audio data or audio file path",
+      "required": true
+    },
+    "language": {
+      "type": "string", 
+      "description": "Language code for speech recognition (e.g., 'zh-TW', 'en-US')",
+      "required": false,
+      "default": "zh-TW"
+    }
+  },
+  "output": {
+    "type": "string",
+    "description": "Recognized text from the audio input"
+  },
+  "usage": "Use this tool to convert spoken audio into text for further processing"
+}
