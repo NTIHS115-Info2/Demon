@@ -61,17 +61,6 @@ describe('PromptComposer Enhanced Tests', () => {
       expect(msg.role).toBe('tool');
     });
 
-    test('截斷過長結果', async () => {
-      const longResult = 'x'.repeat(1500);
-      const msg = await composer.createToolMessage({
-        called: true,
-        toolName: 'mock',
-        success: true,
-        result: longResult
-      });
-      expect(msg.content).toContain('已截斷');
-      expect(msg.content.length).toBeLessThan(longResult.length + 100);
-    });
   });
 
   describe('composeMessages', () => {

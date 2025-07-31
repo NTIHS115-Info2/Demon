@@ -9,6 +9,8 @@ let globalLogPath = null;              // 本次啟動的 log 資料夾
 let UseConsoleLog = false;              // 是否使用 console.log 輸出
 const streamMap = new Map();           // 儲存每個 log 檔案名稱對應的 writeStream
 
+const MIN_MASK_LENGTH = 6;             // 敏感資訊最小遮罩長度
+
 // 敏感資訊過濾規則
 const SENSITIVE_PATTERNS = [
   /token["\s]*[:=]["\s]*([a-zA-Z0-9._-]+)/gi,           // Token patterns
@@ -39,7 +41,7 @@ function filterSensitiveInfo(message) {
       if (sensitiveValue && typeof sensitiveValue === 'string') {
         const beforeSensitive = match.substring(0, match.indexOf(sensitiveValue));
         
-        if (sensitiveValue.length <= 6) {
+        if (sensitiveValue.length <= MIN_MASK_LENGTH) {
           return beforeSensitive + '*'.repeat(sensitiveValue.length);
         }
         const visiblePart = sensitiveValue.substring(0, 3);
@@ -78,7 +80,7 @@ class Logger {
       globalLogPath = path.resolve(__baseLogPath, timestamp);
       fs.mkdirSync(globalLogPath, { recursive: true });
 
-      // 壓縮上一份 log（非 await，只能 async background）
+      // 壓縮上一份 log
       try {
         const entries = fs.readdirSync(__baseLogPath, { withFileTypes: true })
           .filter(e => e.isDirectory() && e.name !== path.basename(globalLogPath))
@@ -92,8 +94,8 @@ class Logger {
           const lastPath = path.join(__baseLogPath, lastFolder.name);
           const archivePath = `${lastPath}.tar.gz`;
 
-          // ✅ 背景壓縮，不影響主流程
-          tar.c({ gzip: true, file: archivePath, cwd: __baseLogPath }, [lastFolder.name])
+          // ✅ 壓縮上次 log 資料夾
+          tar.c({ gzip: true, file: archivePath, cwd: __baseLogPath , sync: true }, [lastFolder.name])
             .then(() => {
               fs.rmSync(lastPath, { recursive: true, force: true });
               if(UseConsoleLog) console.log(`[Logger] 已壓縮上次 log 為：${archivePath}`);
@@ -206,21 +208,7 @@ class Logger {
 
 }
 
-/**
- * 設定 Logger 的基礎路徑
- * @param {string} basePath - 基礎路徑 請用path.join
- * @throws {Error} 如果 basePath 不是有效的字串或為空
- */
-function SetLoggerBasePath(basePath) {
-  if (typeof basePath !== 'string' || !basePath.trim()) {
-    throw new Error('Logger base path must be a valid non-empty string');
-  }
-  __baseLogPath = path.resolve(basePath);
-  if(UseConsoleLog) console.log(`[Logger] 基礎路徑已設定為：${__baseLogPath}`);
-}
-
 module.exports = Logger
-module.exports.SetLoggerBasePath = SetLoggerBasePath;
 module.exports.SetConsoleLog = (bool) => {
   UseConsoleLog = bool;
 }

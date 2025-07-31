@@ -3,8 +3,8 @@
 const fs = require('fs');
 const path = require('path');
 const { EventEmitter } = require('events');
-const pluginManager = require('../../src/core/pluginsManager');
-const TalkToDemon = require('../../src/core/TalkToDemon');
+const pluginManager = require('../src/core/pluginsManager');
+const TalkToDemon = require('../src/core/TalkToDemon');
 
 jest.setTimeout(60000);
 

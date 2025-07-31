@@ -5,6 +5,7 @@ describe('toolOutputRouter', () => {
   beforeAll(() => {
     PM.plugins.set('mock', {
       send: jest.fn(async ({ text }) => text.toUpperCase()),
+      state : jest.fn(() => 1),
       pluginType: 'TOOL'
     });
     PM.llmPlugins.set('mock', PM.plugins.get('mock'));
@@ -62,10 +63,12 @@ describe('toolOutputRouter', () => {
   test('處理多個工具呼叫', async () => {
     PM.plugins.set('tool1', {
       send: jest.fn(async ({ text }) => `Result1: ${text}`),
+      state : jest.fn(() => 1),
       pluginType: 'TOOL'
     });
     PM.plugins.set('tool2', {
       send: jest.fn(async ({ text }) => `Result2: ${text}`),
+      state : jest.fn(() => 1),
       pluginType: 'TOOL'
     });
     PM.llmPlugins.set('tool1', PM.plugins.get('tool1'));

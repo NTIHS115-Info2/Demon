@@ -12,12 +12,12 @@ let baseUrl = '';
 const priority = 40;
 
 // 錯誤處理配置
-const ERROR_CONFIG = {
+const ERROR_CONFIG = Object.freeze({
   MAX_RETRIES: 3,
   RETRY_DELAY_BASE: 1000,  // 基礎延遲 1 秒
   REQUEST_TIMEOUT: 30000,  // 30 秒超時
   CONNECTION_TIMEOUT: 10000 // 10 秒連接超時
-};
+});
 
 module.exports = {
     priority,

@@ -1,62 +1,63 @@
 const fs = require('fs');
 const path = require('path');
 
-// Test configuration error reporting
-describe('Configuration Integration Tests', () => {
+// 設定檔整合測試
+describe('設定檔整合測試', () => {
   const originalConfigPath = path.join(__dirname, '..', 'src', 'plugins', 'discord', 'config.js');
   const backupConfigPath = path.join(__dirname, '..', 'src', 'plugins', 'discord', 'config.js.backup');
 
   beforeAll(() => {
-    // Backup existing Discord config
+    // 備份原本的 Discord 設定檔
     if (fs.existsSync(originalConfigPath)) {
       fs.copyFileSync(originalConfigPath, backupConfigPath);
     }
+
   });
 
   afterAll(() => {
-    // Restore backup config
+    // 還原 Discord 設定檔
     if (fs.existsSync(backupConfigPath)) {
       fs.copyFileSync(backupConfigPath, originalConfigPath);
       fs.unlinkSync(backupConfigPath);
     }
   });
 
-  test('Discord plugin should create example config when config is missing', () => {
-    // Remove Discord config
+  test('Discord 插件在缺少設定檔時應建立範例設定檔', () => {
+    // 移除 Discord 設定檔
     if (fs.existsSync(originalConfigPath)) {
       fs.unlinkSync(originalConfigPath);
     }
 
-    // Clear require cache to force reload
+    // 清除 require 快取以強制重新載入
     const configLoaderPath = path.join(__dirname, '..', 'src', 'plugins', 'discord', 'configLoader.js');
     delete require.cache[require.resolve(configLoaderPath)];
 
-    // Attempting to load should create example config
+    // 嘗試載入時應建立範例設定檔
     expect(() => {
       require('../src/plugins/discord/configLoader');
     }).toThrow('設定檔不存在');
 
-    // Check that example was created
+    // 檢查範例檔案是否已建立
     const examplePath = path.join(__dirname, '..', 'src', 'plugins', 'discord', 'config.example.js');
     expect(fs.existsSync(examplePath)).toBe(true);
 
     const exampleContent = fs.readFileSync(examplePath, 'utf8');
     expect(exampleContent).toContain('Discord 設定檔範例');
-    expect(exampleContent).toContain('請填入您的Discord Bot Token');
+    expect(exampleContent).toContain('YOUR_BOT_TOKEN_HERE');
   });
 
-  test('Discord plugin should validate required fields', () => {
-    // Create invalid config
+  test('Discord 插件應驗證必要欄位', () => {
+    // 建立不合法的設定檔
     const invalidConfig = {
-      token: '', // Empty value
+      token: '', // 空值
       applicationId: 'test-app-id',
       guildId: 'test-guild-id'
-      // Missing channelId
+      // 缺少 channelId
     };
     
     fs.writeFileSync(originalConfigPath, `module.exports = ${JSON.stringify(invalidConfig, null, 2)};`);
 
-    // Clear require cache
+    // 清除 require 快取
     const configLoaderPath = path.join(__dirname, '..', 'src', 'plugins', 'discord', 'configLoader.js');
     delete require.cache[require.resolve(configLoaderPath)];
 
@@ -65,23 +66,23 @@ describe('Configuration Integration Tests', () => {
     }).toThrow('設定檔驗證失敗');
   });
 
-  test('History manager should use configurable settings', () => {
+  test('歷史管理器應使用可設定的參數', async () => {
     const historyManager = require('../src/core/historyManager');
     
-    // Test default configuration is loaded
+    // 測試預設設定是否載入
     expect(historyManager.config).toBeDefined();
     expect(historyManager.config.maxMessages).toBe(100);
     expect(historyManager.config.expireDays).toBe(7);
     
-    // Test statistics functionality
-    const stats = historyManager.getStats();
+    // 測試統計功能
+    const stats = await historyManager.getStats();
     expect(stats).toHaveProperty('config');
     expect(stats).toHaveProperty('cacheSize');
     expect(stats).toHaveProperty('historyFiles');
     expect(stats).toHaveProperty('totalSize');
   });
 
-  test('Example configurations should be created correctly', () => {
+  test('範例設定檔應正確建立', () => {
     const configManager = require('../src/utils/configManager');
     const testDir = '/tmp/config-integration-test';
     const testPath = path.join(testDir, 'test-example.js');
@@ -105,7 +106,7 @@ describe('Configuration Integration Tests', () => {
     expect(content).toContain('請填入您的API密鑰');
     expect(content).toContain('所有標示為 "請填入" 的值都必須設定');
 
-    // Clean up
+    // 清理測試資料夾
     fs.rmSync(testDir, { recursive: true, force: true });
   });
 });

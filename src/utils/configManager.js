@@ -40,8 +40,9 @@ class ConfigManager {
       try {
         // 確保使用絕對路徑並清除快取
         const absolutePath = path.resolve(configPath);
-        delete require.cache[absolutePath];
-        config = require(absolutePath);
+        const moduleKey = require.resolve(absolutePath);
+        delete require.cache[moduleKey];     // ← 正確刪除 require.cache
+        config = require(moduleKey);
       } catch (parseError) {
         const error = new Error(`[${pluginName}] 設定檔格式錯誤: ${parseError.message}`);
         error.code = 'CONFIG_PARSE_ERROR';
@@ -93,7 +94,7 @@ class ConfigManager {
     // 檢查必要欄位
     if (schema.required) {
       for (const field of schema.required) {
-        if (!config.hasOwnProperty(field)) {
+        if (!Object.prototype.hasOwnProperty.call(config, field)) {
           errors.push(`  - 缺少必要欄位: ${field}`);
         } else if (this.isEmpty(config[field])) {
           errors.push(`  - 欄位 ${field} 不可為空值`);

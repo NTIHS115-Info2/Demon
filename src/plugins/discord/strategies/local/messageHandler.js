@@ -41,13 +41,6 @@ async function replyBySentence(msg, text, speakerName) {
   return new Promise((resolve, reject) => {
     const onData = chunk => {
       buffer += chunk;
-      // let idx;
-      // // 持續檢查當前緩衝區是否包含標點
-      // while ((idx = buffer.search(regex)) !== -1) {
-      //   const part = buffer.slice(0, idx + 1);
-      //   buffer = buffer.slice(idx + 1);
-      //   send(part);
-      // }
     };
     const onEnd = () => {
       send(buffer);
@@ -146,8 +139,12 @@ async function handleReplyMessage(msg, uid = OWNER_ID) {
  * @param {object} options { channelId }
  */
 function attach(client, options = {}) {
-  // 可選擇限制監聽的頻道 ID，預設空值代表全域監聽
-  const targetChannel = options.channelId || config.channelId;
+  let targetChannel = null;
+  // 可選擇限制監聽的頻道 ID，global 代表全域監聽
+  if (config.channelId !== 'global' || options.channelId !== 'global') {
+    targetChannel = options.channelId || config.channelId;
+  }
+  
   const allowId = options.userId || OWNER_ID;
 
   logger.info(`[DISCORD] 附加訊息監聽器 - 目標頻道: ${targetChannel || '全域'}, 擁有者: ${allowId}`);

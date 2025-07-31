@@ -13,6 +13,8 @@ index.js
 
 src/plugins/discord/config.js
 
+__test__/localPass
+
 # Additional configuration and temporary files
 *.log
 .env

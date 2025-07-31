@@ -30,16 +30,18 @@ async function register(options = {}) {
   const data = commands.map(cmd => cmd.toJSON());
 
   try {
-    if (guildId) {
+
+    if (guildId == 'global') {
+      await rest.put(Routes.applicationCommands(applicationId), { body: data });
+      logger.info(`[DISCORD] 全域 Slash 指令註冊完成 (${data.length} 個指令)`);
+    } else {
       await rest.put(
         Routes.applicationGuildCommands(applicationId, guildId),
         { body: data }
       );
       logger.info(`[DISCORD] Guild Slash 指令註冊完成 (${data.length} 個指令)`);
-    } else {
-      await rest.put(Routes.applicationCommands(applicationId), { body: data });
-      logger.info(`[DISCORD] 全域 Slash 指令註冊完成 (${data.length} 個指令)`);
     }
+    
   } catch (e) {
     // 避免記錄可能包含敏感資訊的完整錯誤
     const safeError = e.code ? `Discord API 錯誤 (${e.code})` : '註冊指令時發生未知錯誤';

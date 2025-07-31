@@ -92,25 +92,17 @@ describe('historyManager', () => {
   });
 
   test('裁剪機制 - 筆數限制', async () => {
-    // 暫時修改 maxMessages 限制為測試用
-    const originalMax = historyManager.maxMessages;
-    historyManager.maxMessages = 3;
-    
-    try {
-      // 新增 5 筆紀錄
-      for (let i = 0; i < 5; i++) {
-        await historyManager.appendMessage(userId, 'user', `msg${i}`);
-      }
-      
-      // 應該只保留最後 3 筆
-      const hist = await historyManager.getHistory(userId);
-      expect(hist.length).toBe(3);
-      expect(hist[0].content).toBe('msg2');
-      expect(hist[2].content).toBe('msg4');
-    } finally {
-      // 還原設定
-      historyManager.maxMessages = originalMax;
+
+    // 新增 200 筆紀錄
+    for (let i = 0; i < 200; i++) {
+      await historyManager.appendMessage(userId, 'user', `msg${i}`);
     }
+    
+    // 應該只保留最後 100 筆
+    const hist = await historyManager.getHistory(userId);
+    expect(hist.length).toBe(100);
+    expect(hist[99].content).toBe('msg199');
+    expect(hist[98].content).toBe('msg198');
   });
 
   test('錯誤處理 - 讀取失敗不中斷服務', async () => {

@@ -189,11 +189,12 @@ class HistoryManager {
    * @param {number} limit 限制筆數
    * @returns {Promise<Array<{role:string,content:string,timestamp:number}>>}
    */
-  async getHistory(userId, limit = 20) {
+  async getHistory(userId, limit = null) {
     await this._load(userId);
     this._prune(userId);
     await this._save(userId);
     const arr = this.cache.get(userId) || [];
+    if (!limit || limit <= 0) return arr;
     const start = Math.max(0, arr.length - limit);
     return arr.slice(start);
   }
@@ -225,7 +226,7 @@ class HistoryManager {
    * 獲取歷史管理器統計資訊
    * @returns {object} 統計資訊
    */
-  getStats() {
+  async getStats() {
     const stats = {
       config: this.config,
       cacheSize: this.cache.size,

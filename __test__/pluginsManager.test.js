@@ -238,6 +238,7 @@ describe('PluginsManager 核心功能', () => {
 
     test('send 方法應正確傳送資料給插件', async () => {
       mockPlugin1.send = jest.fn().mockResolvedValue('success');
+      mockPlugin1.state.mockResolvedValue(1); // 模擬插件已上線
       
       const result = await PluginsManager.send('plugin1', {test: 'data'});
       expect(result).toBe('success');

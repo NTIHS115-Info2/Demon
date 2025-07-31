@@ -45,9 +45,10 @@ class PluginsManager {
   /**
    * 載入指定名稱的插件
    * @param {string} name - 插件名稱
+   * @param {string} mode - 插件啟動模式（預設為 'auto'）
    * @throws {Error} 當找不到插件的 index.js 檔案時拋出錯誤
    */
-  async loadPlugin(name) {
+  async loadPlugin(name , mode = 'auto') {
     const pluginPath = path.join(this.rootPath, name, "index.js");
     if (fs.existsSync(pluginPath)) {
       const plugin = require(pluginPath);
@@ -59,7 +60,7 @@ class PluginsManager {
       // 若插件未定義 priority 則給予預設值 0
       if (typeof plugin.priority !== 'number') plugin.priority = 0;
 
-      plugin.updateStrategy();  // 確保策略已更新
+      plugin.updateStrategy(mode);  // 確保策略已更新
       const id = this.normalizeName(name);
       this.plugins.set(id, plugin); // 儲存插件
       if (plugin.pluginType === 'LLM') {
@@ -109,6 +110,11 @@ class PluginsManager {
     const plugin = this.plugins.get(id);
     if (!plugin) {
       Logger.warn(`[PluginManager] 插件 ${id} 尚未載入，無法傳送資料`);
+      return false;
+    }
+
+    if (await plugin.state() == 0) {
+      Logger.warn(`[PluginManager] 插件 ${id} 當前狀態為離線，無法傳送資料`);
       return false;
     }
 
@@ -215,6 +221,34 @@ class PluginsManager {
     arr.sort((a, b) => (b[1].priority || 0) - (a[1].priority || 0));
     for (const [name] of arr) {
       await this.queueOnline(name, options);
+    }
+  }
+
+  /**
+   * 啟動指定插件
+   * @param {string} name - 插件名稱
+   * @returns {Promise<boolean>} 成功返回 true，失敗返回 false
+   */
+  async offline(name) {
+    const id = this.normalizeName(name);
+    const plugin = this.plugins.get(id);
+    if (!plugin?.offline) {
+      Logger.warn(`[PluginManager] 插件 ${id} 尚未載入或不支援離線`);
+      return false;
+    }
+
+    if (await plugin.state() === 0) {
+      Logger.warn(`[PluginManager] 插件 ${id} 已經處於離線狀態`);
+      return true; // 已經離線，無需再次關閉
+    }
+
+    try {
+      await plugin.offline();
+      Logger.info(`[PluginManager] 成功關閉插件：${id}`);
+      return true;
+    } catch (err) {
+      Logger.error(`[PluginManager] 關閉插件 ${id} 失敗：${err.message}`);
+      return false;
     }
   }
 

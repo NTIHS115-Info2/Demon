@@ -2,34 +2,33 @@ const configManager = require('../src/utils/configManager');
 const fs = require('fs');
 const path = require('path');
 
-// 創建臨時測試目錄
-const TEST_DIR = path.join('/tmp', 'demon-config-test');
-const TEST_CONFIG_PATH = path.join(TEST_DIR, 'test-config.js');
+let TEST_DIR;
+let TEST_CONFIG_PATH;
+let t = 0;
 
 describe('configManager', () => {
-  beforeAll(() => {
-    // 確保測試目錄存在
-    if (!fs.existsSync(TEST_DIR)) {
-      fs.mkdirSync(TEST_DIR, { recursive: true });
-    }
-  });
-
-  afterAll(() => {
-    // 清理測試檔案
-    if (fs.existsSync(TEST_DIR)) {
-      fs.rmSync(TEST_DIR, { recursive: true, force: true });
-    }
-  });
 
   beforeEach(() => {
+    // 動態設定並建立測試根目錄
+    TEST_DIR = path.join('/tmp', 'demon-config-test', `test-${t++}`);
+    fs.mkdirSync(TEST_DIR, { recursive: true });
+
+    TEST_CONFIG_PATH = path.join(TEST_DIR, 'test-config.js');
+    
     // 清除快取
     configManager.clearCache();
     
-    // 清理測試檔案
+    // 若殘留舊檔案，先移除
     if (fs.existsSync(TEST_CONFIG_PATH)) {
       fs.unlinkSync(TEST_CONFIG_PATH);
     }
   });
+
+  afterEach(() => {
+    // 測試結束後移除整個測試目錄
+    fs.rmSync(TEST_DIR, { recursive: true, force: true });
+  });
+
 
   test('載入並驗證有效的設定檔', () => {
     // 創建測試設定檔

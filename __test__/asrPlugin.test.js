@@ -41,7 +41,7 @@ jest.mock('python-shell', () => {
 }, { virtual: true });
 
 const { PythonShell } = require('python-shell');
-const asrLocal = require('../../src/plugins/asr/strategies/local');
+const asrLocal = require('../src/plugins/asr/strategies/local');
 
 describe('ASR 本地策略', () => {
   beforeEach(async () => {

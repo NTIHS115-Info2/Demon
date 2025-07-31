@@ -3,11 +3,11 @@
 // 所有標示為 "請填入" 的值都必須設定
 
 module.exports = {
-  "token": "請填入您的Discord Bot Token",
-  "applicationId": "請填入您的應用程式ID",
-  "guildId": "請填入您的伺服器ID",
-  "channelId": "請填入您的頻道ID",
-  "userId": "請填入您的使用者ID或留空",
+  "token": "YOUR_BOT_TOKEN_HERE",
+  "applicationId": "YOUR_APPLICATION_ID_HERE",
+  "guildId": "YOUR_GUILD_ID_HERE",
+  "channelId": "YOUR_CHANNEL_ID_HERE",
+  "userId": "YOUR_USER_ID_HERE",
   "intents": [
     "Guilds",
     "GuildMessages",

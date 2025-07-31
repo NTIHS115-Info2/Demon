@@ -1,5 +1,8 @@
 const path = require('path');
 const configManager = require('../../utils/configManager');
+const Logger = require('../../utils/logger');
+
+const logger = new Logger('configManager.log');
 
 // Discord 設定檔驗證綱要
 const DISCORD_CONFIG_SCHEMA = {
@@ -19,11 +22,11 @@ const EXAMPLE_PATH = path.join(__dirname, 'config.example.js');
 
 // 範例設定內容
 const EXAMPLE_CONFIG = {
-  "token": "請填入您的Discord Bot Token",
-  "applicationId": "請填入您的應用程式ID", 
-  "guildId": "請填入您的伺服器ID",
-  "channelId": "請填入您的頻道ID",
-  "userId": "請填入您的使用者ID或留空",
+  "token": "YOUR_BOT_TOKEN_HERE", // Replace with your Discord Bot Token or use process.env.DISCORD_BOT_TOKEN
+  "applicationId": "YOUR_APPLICATION_ID_HERE", // Replace with your Application ID or use process.env.APPLICATION_ID
+  "guildId": "YOUR_GUILD_ID_HERE", // Replace with your Guild ID or use process.env.GUILD_ID
+  "channelId": "YOUR_CHANNEL_ID_HERE", // Replace with your Channel ID or use process.env.CHANNEL_ID
+  "userId": "YOUR_USER_ID_HERE", // Replace with your User ID or leave empty, or use process.env.USER_ID
   "intents": ["Guilds", "GuildMessages", "MessageContent"],
   "reconnect": {
     "maxRetries": 5,
@@ -43,12 +46,12 @@ function loadDiscordConfig() {
       // 如果設定檔不存在，創建範例設定檔
       try {
         configManager.createExampleConfig(EXAMPLE_PATH, EXAMPLE_CONFIG, 'Discord');
-        console.error(`\n請設定 Discord 設定檔:`);
-        console.error(`1. 複製 ${EXAMPLE_PATH} 為 ${CONFIG_PATH}`);
-        console.error(`2. 編輯 ${CONFIG_PATH} 並填入正確的值`);
-        console.error(`3. 重新啟動應用程式\n`);
+        logger.error(`\n請設定 Discord 設定檔:`);
+        logger.error(`1. 複製 ${EXAMPLE_PATH} 為 ${CONFIG_PATH}`);
+        logger.error(`2. 編輯 ${CONFIG_PATH} 並填入正確的值`);
+        logger.error(`3. 重新啟動應用程式\n`);
       } catch (createError) {
-        console.error('無法創建範例設定檔:', createError.message);
+        logger.error('無法創建範例設定檔:', createError.message);
       }
     }
     throw error;

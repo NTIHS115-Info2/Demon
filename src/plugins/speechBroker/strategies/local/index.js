@@ -33,9 +33,11 @@ const PUNCTUATION_MAP = {
 // 匹配中英文句尾符號（不包含emoji，emoji只在清理時移除）
 const SENTENCE_ENDINGS = /[。！？?!~～\uFF01\uFF1F\u3002]/;
 
+const MAX_EXPRESSION_LENGTH = 10; // 表情最大長度，避免過長的表情干擾
+
 // 移除表情標記，例如 (害羞)、(微笑)，但保留數字、數學或其他實用內容
 // 表情通常是純中文字符，不包含數字、符號或英文
-const EXPRESSION_PATTERN = /[\(（]([\u4e00-\u9fff]{1,6})[\)）]/g;
+const EXPRESSION_PATTERN = new RegExp(`[\(（]([\u4e00-\u9fff]{1,${MAX_EXPRESSION_LENGTH}})[\)）]`, 'g');
 
 /**
  * 清理字串片段，去除表情並統一標點

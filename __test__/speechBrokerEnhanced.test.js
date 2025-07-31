@@ -22,7 +22,7 @@ jest.mock('../src/core/pluginsManager.js', () => ({
 
 const talker = require('../src/core/TalkToDemon.js');
 const PM = require('../src/core/pluginsManager.js');
-const speechBrokerLocal = require('../src/plugins/speechBroker/strategies/local');
+const speechBrokerLocal = require('../src/plugins/speechBroker/strategies/local/index.js');
 
 // 輔助函數：等待異步操作完成
 const waitForAsync = () => new Promise(resolve => setTimeout(resolve, 50));

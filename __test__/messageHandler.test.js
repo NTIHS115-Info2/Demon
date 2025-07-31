@@ -1,17 +1,18 @@
-// 模擬 TalkToDemon
-jest.mock('../src/core/TalkToDemon', () => {
-  const { EventEmitter } = require('events');
+// __test__/messageHandler.test.js
+jest.mock(require.resolve('../src/core/TalkToDemon'), () => {
+  const { EventEmitter } = require('events');   // ← factory 內部自行引入
   const emitter = new EventEmitter();
+
   emitter.talk = jest.fn(() => {
     emitter.emit('data', '你好。');
     emitter.emit('data', '再見。');
     emitter.emit('end');
   });
-  return emitter;
-}, { virtual: true });
-const talker = require('../src/core/TalkToDemon');
 
-// 模擬 Discord 設定檔，避免測試時找不到檔案
+  return emitter;             // 匯出同一個 EventEmitter 實例
+});
+
+// 假的 Discord 設定
 jest.mock('../src/plugins/discord/config', () => ({
   token: 't',
   applicationId: 'a',
@@ -20,26 +21,29 @@ jest.mock('../src/plugins/discord/config', () => ({
   userId: 'cookice'
 }), { virtual: true });
 
+// 之後 **再** 用同一條路徑取用 → 會拿到同一個 mock
+const talker  = require(require.resolve('../src/core/TalkToDemon'));
 const handler = require('../src/plugins/discord/strategies/local/messageHandler');
 
 describe('Discord MessageHandler', () => {
-  beforeEach(() => { jest.clearAllMocks(); });
+  beforeEach(() => jest.clearAllMocks());
+
   test('handleDirectMessage 僅回應指定使用者', async () => {
-    const msg = { content:'hi', author:{ id:'cookice' }, reply: jest.fn().mockResolvedValue(), channel:{ type:'DM' } };
+    const msg = { content:'hi', author:{ id:'cookice' }, reply: jest.fn(), channel:{ type:'DM' } };
     await handler.handleDirectMessage(msg, 'cookice');
     expect(talker.talk).toHaveBeenCalledWith('爸爸', 'hi');
     expect(msg.reply).toHaveBeenCalledWith('你好。再見。');
   });
 
   test('handleDirectMessage 拒絕陌生人', async () => {
-    const msg = { content:'hi', author:{ id:'other' }, reply: jest.fn().mockResolvedValue(), channel:{ type:'DM' } };
+    const msg = { content:'hi', author:{ id:'other' }, reply: jest.fn(), channel:{ type:'DM' } };
     await handler.handleDirectMessage(msg, 'cookice');
     expect(talker.talk).not.toHaveBeenCalled();
     expect(msg.reply).toHaveBeenCalledWith('我還學不會跟別人說話');
   });
 
   test('handleMentionMessage 會移除提及內容', async () => {
-    const msg = { content:'<@bot> hello', author:{ id:'cookice' }, reply: jest.fn().mockResolvedValue(), channel:{ type:'GUILD_TEXT' } };
+    const msg = { content:'<@bot> hello', author:{ id:'cookice' }, reply: jest.fn(), channel:{ type:'GUILD_TEXT' } };
     await handler.handleMentionMessage(msg, 'bot', 'cookice');
     expect(talker.talk).toHaveBeenCalledWith('爸爸', 'hello');
   });

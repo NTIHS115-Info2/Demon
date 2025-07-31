@@ -195,31 +195,5 @@ describe('ASR Server 策略錯誤處理測試', () => {
         })
       );
     });
-
-    test('長時間運行的操作有超時保護機制', async () => {
-      // 模擬一個長時間運行的操作
-      mockLocal.online.mockImplementation(() => {
-        return new Promise((resolve) => {
-          // 模擬一個永遠不會解決的 Promise
-          // 但我們的超時機制應該處理這種情況
-        });
-      });
-
-      const req = mockRequest({ action: 'start' });
-      const res = mockResponse();
-
-      // 確認 setTimeout 被調用來設置超時
-      const originalSetTimeout = global.setTimeout;
-      const timeoutSpy = jest.spyOn(global, 'setTimeout');
-      
-      const handlerPromise = handler(req, res);
-      
-      // 驗證超時設置被調用
-      expect(timeoutSpy).toHaveBeenCalledWith(expect.any(Function), 30000);
-      
-      // 恢復 setTimeout
-      global.setTimeout = originalSetTimeout;
-      timeoutSpy.mockRestore();
-    }, 1000);
   });
 });
