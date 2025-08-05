@@ -1,5 +1,5 @@
 {
-  "modelPath": "E:/ai-training/Demon/Server/llama/model/gemma-3-4b-it-q4_0.gguf",
+  "modelPath": "Server/llama/model/gemma-3-4b-it-q4_0.gguf",
   "params": {
     "ctx-size": 16384,
     "n-gpu-layers": 35,

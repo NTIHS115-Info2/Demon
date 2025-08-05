@@ -38,9 +38,8 @@ class ConfigManager {
       // 讀取設定檔
       let config;
       try {
-        // 確保使用絕對路徑並清除快取
-        const absolutePath = path.resolve(configPath);
-        const moduleKey = require.resolve(absolutePath);
+        // 使用專案根目錄的相對路徑並清除快取
+        const moduleKey = require.resolve(configPath, { paths: [process.cwd()] });
         delete require.cache[moduleKey];     // ← 正確刪除 require.cache
         config = require(moduleKey);
       } catch (parseError) {

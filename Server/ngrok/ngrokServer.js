@@ -29,8 +29,9 @@ class NgrokServerManager {
     // 合併設定檔和傳入參數
     const mergedOptions = { ...config, ...options };
     
-    // ngrok 執行檔路徑，預設為與本檔案同目錄的 ngrok.exe
-    this.binPath = mergedOptions.binPath || path.resolve(__dirname, 'ngrok.exe');
+    // ngrok 執行檔路徑，預設為相對於專案根目錄的 ngrok.exe
+    // 避免硬編碼絕對路徑，方便搬移與測試
+    this.binPath = mergedOptions.binPath || path.join('Server', 'ngrok', 'ngrok.exe');
     // 本地監聽埠號
     this.port = mergedOptions.port || 3000;
     // 可自訂執行指令，例如 http、tcp 等
@@ -58,7 +59,8 @@ class NgrokServerManager {
    */
   loadConfig() {
     try {
-      const configPath = path.resolve(__dirname, '..', '..', 'config', 'ngrok.js');
+      // 以專案根目錄為基準的相對路徑
+      const configPath = path.join('config', 'ngrok.js');
       if (fs.existsSync(configPath)) {
         return configManager.loadAndValidate(configPath, NGROK_CONFIG_SCHEMA, 'Ngrok');
       }
@@ -76,7 +78,8 @@ class NgrokServerManager {
    */
   createExampleConfig() {
     try {
-      const configDir = path.resolve(__dirname, '..', '..', 'config');
+      // 以相對路徑建立範例設定檔所在目錄
+      const configDir = path.join('config');
       const examplePath = path.join(configDir, 'ngrok.example.js');
       
       const exampleConfig = {

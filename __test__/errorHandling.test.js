@@ -152,7 +152,8 @@ describe('日誌檔案操作', () => {
   test('getLogPath 應該回傳正確路徑', () => {
     const returnedPath = logger.getLogPath();
     expect(returnedPath).toBe(logPath);
-    expect(path.isAbsolute(returnedPath)).toBe(true);
+    // 相對路徑不應為絕對路徑
+    expect(path.isAbsolute(returnedPath)).toBe(false);
   });
 
   test('logRaw 應該記錄原始訊息', () => {

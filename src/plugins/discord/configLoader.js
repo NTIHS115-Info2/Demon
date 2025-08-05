@@ -17,8 +17,9 @@ const DISCORD_CONFIG_SCHEMA = {
 };
 
 // 設定檔路徑
-const CONFIG_PATH = path.join(__dirname, 'config.js');
-const EXAMPLE_PATH = path.join(__dirname, 'config.example.js');
+// 以專案根目錄為基準的相對路徑
+const CONFIG_PATH = path.join('src', 'plugins', 'discord', 'config.js');
+const EXAMPLE_PATH = path.join('src', 'plugins', 'discord', 'config.example.js');
 
 // 範例設定內容
 const EXAMPLE_CONFIG = {

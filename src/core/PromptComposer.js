@@ -1,3 +1,4 @@
+const path = require('path');
 const fileEditer = require('../tools/fileEditer');
 const Logger = require('../utils/logger');
 
@@ -38,7 +39,8 @@ function validateMessage(message) {
  */
 async function GetDefaultSystemPrompt() {
   try {
-    const DefaultSystemPrompt = await fileEditer.GetFilesContent(__dirname + '/soulPresets');
+    // 使用相對路徑載入預設系統提示
+    const DefaultSystemPrompt = await fileEditer.GetFilesContent(path.join('src', 'core', 'soulPresets'));
 
     if (!Array.isArray(DefaultSystemPrompt)) {
       throw new Error('系統提示檔案讀取結果格式錯誤');

@@ -20,27 +20,36 @@ class ErrorDemoModule {
 
         // 示範 1: 檔案不存在錯誤
         try {
-            const nonExistentFile = path.join(__dirname, 'non-existent-file.txt');
+            const nonExistentFile = path.join('src', 'utils', 'non-existent-file.txt');
             await fs.readFile(nonExistentFile, 'utf8');
         } catch (error) {
             logger.error(`檔案讀取失敗: ${error.message}`);
             logger.info('正確處理: 檔案不存在錯誤已被捕獲');
         }
 
-        // 示範 2: 權限錯誤 (嘗試寫入根目錄)
+        // 示範 2: 權限錯誤 (嘗試寫入唯讀資料夾)
+        const readOnlyDir = path.join('read-only-demo');
         try {
-            await fs.writeFile('/root/test.txt', 'test content');
+            // 建立唯讀資料夾
+            await fs.mkdir(readOnlyDir, { recursive: true, mode: 0o444 });
+            await fs.writeFile(path.join(readOnlyDir, 'test.txt'), 'test content');
         } catch (error) {
             logger.error(`檔案寫入失敗: ${error.message}`);
             logger.info('正確處理: 權限錯誤已被捕獲');
         }
 
-        // 示範 3: 目錄操作錯誤
+        // 示範 3: 目錄操作錯誤 (在唯讀資料夾下建立子目錄)
         try {
-            await fs.mkdir('/root/test-dir');
+            await fs.mkdir(path.join(readOnlyDir, 'test-dir'));
         } catch (error) {
             logger.error(`目錄建立失敗: ${error.message}`);
             logger.info('正確處理: 目錄操作錯誤已被捕獲');
+        } finally {
+            // 還原權限並清理示範資料夾
+            try {
+                await fs.chmod(readOnlyDir, 0o755);
+                await fs.rm(readOnlyDir, { recursive: true, force: true });
+            } catch (_) {}
         }
 
         // 示範 4: JSON 解析錯誤

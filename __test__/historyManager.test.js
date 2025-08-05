@@ -4,7 +4,8 @@ const path = require('path');
 const historyManager = require('../src/core/historyManager');
 
 const userId = 'jestUser';
-const filePath = path.resolve(__dirname, '..', 'history', `${userId}.json`);
+// 使用相對路徑指向歷史檔案
+const filePath = path.join('history', `${userId}.json`);
 
 describe('historyManager', () => {
   beforeEach(async () => {

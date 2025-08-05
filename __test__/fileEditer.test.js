@@ -4,7 +4,8 @@ const fs = require('fs');
 const path = require('path');
 const fileEditer = require('../src/tools/fileEditer');
 
-const TEST_DIR = path.join(__dirname, 'fileEditerTestDir');
+// 使用相對路徑建立測試資料夾
+const TEST_DIR = path.join('__test__', 'fileEditerTestDir');
 const FILE1 = path.join(TEST_DIR, 'test.txt');
 const FILE2 = path.join(TEST_DIR, 'test2.txt');
 

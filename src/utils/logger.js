@@ -76,8 +76,9 @@ class Logger {
       initialized = true;
 
       const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-      if(!__baseLogPath) __baseLogPath = path.resolve(__dirname, '..', '..', 'logs')
-      globalLogPath = path.resolve(__baseLogPath, timestamp);
+      // 使用相對路徑設定 log 基底資料夾，避免依賴絕對位置
+      if(!__baseLogPath) __baseLogPath = path.join('logs');
+      globalLogPath = path.join(__baseLogPath, timestamp);
       fs.mkdirSync(globalLogPath, { recursive: true });
 
       // 壓縮上一份 log
@@ -117,7 +118,8 @@ class Logger {
     if (streamMap.has(logFileName)) {
       this.logStream = streamMap.get(logFileName);
     } else {
-      const filePath = path.resolve(globalLogPath, logFileName);
+      // 以相對路徑建立 log 檔案
+      const filePath = path.join(globalLogPath, logFileName);
       const stream = fs.createWriteStream(filePath, { flags: 'a' });
       streamMap.set(logFileName, stream);
       this.logStream = stream;

@@ -3,8 +3,8 @@ const path = require('path');
 
 // 設定檔整合測試
 describe('設定檔整合測試', () => {
-  const originalConfigPath = path.join(__dirname, '..', 'src', 'plugins', 'discord', 'config.js');
-  const backupConfigPath = path.join(__dirname, '..', 'src', 'plugins', 'discord', 'config.js.backup');
+  const originalConfigPath = path.join('src', 'plugins', 'discord', 'config.js');
+  const backupConfigPath = path.join('src', 'plugins', 'discord', 'config.js.backup');
 
   beforeAll(() => {
     // 備份原本的 Discord 設定檔
@@ -29,8 +29,8 @@ describe('設定檔整合測試', () => {
     }
 
     // 清除 require 快取以強制重新載入
-    const configLoaderPath = path.join(__dirname, '..', 'src', 'plugins', 'discord', 'configLoader.js');
-    delete require.cache[require.resolve(configLoaderPath)];
+    const configLoaderPath = path.join('src', 'plugins', 'discord', 'configLoader.js');
+    delete require.cache[require.resolve(configLoaderPath, { paths: [process.cwd()] })];
 
     // 嘗試載入時應建立範例設定檔
     expect(() => {
@@ -38,7 +38,7 @@ describe('設定檔整合測試', () => {
     }).toThrow('設定檔不存在');
 
     // 檢查範例檔案是否已建立
-    const examplePath = path.join(__dirname, '..', 'src', 'plugins', 'discord', 'config.example.js');
+    const examplePath = path.join('src', 'plugins', 'discord', 'config.example.js');
     expect(fs.existsSync(examplePath)).toBe(true);
 
     const exampleContent = fs.readFileSync(examplePath, 'utf8');
@@ -58,8 +58,8 @@ describe('設定檔整合測試', () => {
     fs.writeFileSync(originalConfigPath, `module.exports = ${JSON.stringify(invalidConfig, null, 2)};`);
 
     // 清除 require 快取
-    const configLoaderPath = path.join(__dirname, '..', 'src', 'plugins', 'discord', 'configLoader.js');
-    delete require.cache[require.resolve(configLoaderPath)];
+    const configLoaderPath = path.join('src', 'plugins', 'discord', 'configLoader.js');
+    delete require.cache[require.resolve(configLoaderPath, { paths: [process.cwd()] })];
 
     expect(() => {
       require('../src/plugins/discord/configLoader');
@@ -84,7 +84,7 @@ describe('設定檔整合測試', () => {
 
   test('範例設定檔應正確建立', () => {
     const configManager = require('../src/utils/configManager');
-    const testDir = '/tmp/config-integration-test';
+    const testDir = path.join('tmp', 'config-integration-test');
     const testPath = path.join(testDir, 'test-example.js');
     
     if (!fs.existsSync(testDir)) {

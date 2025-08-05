@@ -36,7 +36,8 @@ const DEFAULT_CONFIG = {
  * 依照使用者 ID 儲存與讀取對話紀錄，支援自動裁剪與備份
  */
 class HistoryManager {
-  constructor(historyDir = path.resolve(__dirname, '..', '..', 'history')) {
+  constructor(historyDir = path.join('history')) {
+    // 使用相對路徑以提升移植性
     this.historyDir = historyDir;
     this.cache = new Map();
     
@@ -57,7 +58,8 @@ class HistoryManager {
    */
   loadConfig() {
     try {
-      const configPath = path.resolve(__dirname, '..', '..', 'config', 'history.js');
+      // 以專案根目錄為基準的相對路徑
+      const configPath = path.join('config', 'history.js');
       if (fs.existsSync(configPath)) {
         return configManager.loadAndValidate(configPath, HISTORY_CONFIG_SCHEMA, 'HistoryManager');
       }

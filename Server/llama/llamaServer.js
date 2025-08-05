@@ -8,8 +8,9 @@ const log = new Logger('llama-server.log');
 
 class LlamaServerManager {
   constructor(options = {}) {
-    this.binPath = options.binPath || path.resolve(__dirname, 'llama_cpp_bin' ,'llama-server.exe');
-    this.settingsDir = options.settingsDir || path.resolve(__dirname,'settings');
+    // 以相對路徑設定執行檔與設定目錄，避免依賴絕對路徑
+    this.binPath = options.binPath || path.join('Server', 'llama', 'llama_cpp_bin', 'llama-server.exe');
+    this.settingsDir = options.settingsDir || path.join('Server', 'llama', 'settings');
     this.process = null;
     this.running = false;
     this.currentPreset = '';

@@ -6,7 +6,8 @@ const Logger = require('../../src/utils/logger');
 const SetLoggerBasePath = require('../../src/utils/logger').SetLoggerBasePath;
 
 describe('Logger 模組功能', () => {
-  const LOG_DIR = path.join(__dirname, '..', 'logs', 'tlogs');
+  // 使用相對路徑建立測試用 log 目錄
+  const LOG_DIR = path.join('logs', 'tlogs');
   beforeAll(() => {
     if (!fs.existsSync(LOG_DIR)) fs.mkdirSync(LOG_DIR, { recursive: true });
     SetLoggerBasePath(LOG_DIR);

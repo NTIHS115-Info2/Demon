@@ -1,6 +1,7 @@
 const path = require('path');
 const fs = require('fs');
-const configManager = require(path.resolve(__dirname, '..', '..', 'src', 'utils', 'configManager'));
+// 使用相對於專案根目錄的路徑載入設定管理器
+const configManager = require('../../src/utils/configManager');
 
 // Llama 設定檔驗證綱要
 const LLAMA_CONFIG_SCHEMA = {

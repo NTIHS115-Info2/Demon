@@ -15,8 +15,8 @@ class PluginsManager {
    * @param {string} rootPath - 插件根目錄的路徑
    */
   constructor() {
-    // 使用相對於當前檔案位置的 plugins 目錄，避免硬編碼絕對路徑
-    this.rootPath = path.resolve(__dirname, '..', 'plugins');
+    // 使用相對於專案根目錄的 plugins 目錄，避免硬編碼絕對路徑
+    this.rootPath = path.join('src', 'plugins');
     // 插件容器，key 為插件名稱，value 為插件實例
     this.plugins = new Map();           // 已載入的插件
     this.llmPlugins = new Map();        // 額外紀錄 LLM 類型插件方便查詢
@@ -49,7 +49,8 @@ class PluginsManager {
    * @throws {Error} 當找不到插件的 index.js 檔案時拋出錯誤
    */
   async loadPlugin(name , mode = 'auto') {
-    const pluginPath = path.join(this.rootPath, name, "index.js");
+    // 透過 process.cwd() 轉為絕對路徑，維持相對指定的彈性
+    const pluginPath = path.join(process.cwd(), this.rootPath, name, 'index.js');
     if (fs.existsSync(pluginPath)) {
       const plugin = require(pluginPath);
 
