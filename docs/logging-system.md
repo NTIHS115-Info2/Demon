@@ -10,7 +10,7 @@
 
 1. **Logger 類別** (`src/utils/logger.js`)
    - 多檔案日誌記錄
-   - 自動日誌壓縮和歸檔
+   - 自動日誌壓縮與清理
    - 敏感資訊過濾
    - 可配置的控制台輸出
 
@@ -80,13 +80,11 @@ if (Logger.hasSensitiveInfo(message)) {
 
 ```
 logs/
-├── 2024-01-15T10-30-00-000Z/          # 當前執行的日誌目錄
-│   ├── global-errors.log              # 全域錯誤日誌
-│   ├── LlamaServerManager.log         # 各模組日誌
-│   ├── LlamaRemote.log
-│   └── error-demo.log
-├── 2024-01-14T09-15-00-000Z.tar.gz    # 已壓縮的歷史日誌
-└── 2024-01-13T08-45-00-000Z.tar.gz
+└── 2024-01-15T10-30-00-000Z/          # 當前執行的日誌目錄
+    ├── global-errors.log              # 全域錯誤日誌
+    ├── LlamaServerManager.log         # 各模組日誌
+    ├── LlamaRemote.log
+    └── error-demo.log
 ```
 
 ### 日誌格式
@@ -193,8 +191,7 @@ const safeAsyncFunction = GlobalErrorHandler.wrapAsync(async (param) => {
 ### 日誌檔案監控
 
 - 日誌檔案自動按執行時間建立目錄
-- 舊日誌自動壓縮為 `.tar.gz` 格式
-- 建議定期清理過舊的壓縮日誌檔案
+- 舊日誌在壓縮後即刪除壓縮檔，避免累積佔用空間
 
 ### 錯誤分析
 

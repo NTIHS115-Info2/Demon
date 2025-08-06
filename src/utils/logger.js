@@ -95,18 +95,36 @@ class Logger {
           const lastPath = path.join(__baseLogPath, lastFolder.name);
           const archivePath = `${lastPath}.tar.gz`;
 
-          // ✅ 壓縮上次 log 資料夾
-          tar.c({ gzip: true, file: archivePath, cwd: __baseLogPath , sync: true }, [lastFolder.name])
-            .then(() => {
-              fs.rmSync(lastPath, { recursive: true, force: true });
-              if(UseConsoleLog) console.log(`[Logger] 已壓縮上次 log 為：${archivePath}`);
-            })
-            .catch(err => {
-              if(UseConsoleLog) console.log(`[Logger] log 壓縮失敗：${err.message}`);
-            });
+          try {
+            // ✅ 壓縮上一份 log 資料夾
+            tar.c({ gzip: true, file: archivePath, cwd: __baseLogPath, sync: true }, [lastFolder.name]);
+
+            // ✅ 壓縮成功後移除原始資料夾
+            fs.rmSync(lastPath, { recursive: true, force: true });
+
+            // ✅ 壓縮檔案不保留，避免空間占用
+            fs.rmSync(archivePath, { force: true });
+
+            if (UseConsoleLog) {
+              console.log(`[Logger] 已壓縮並清除上次 log：${archivePath}`);
+            }
+          } catch (err) {
+            if (UseConsoleLog) {
+              console.log(`[Logger] log 壓縮或清除失敗：${err.message}`);
+            }
+          }
         }
       } catch (err) {
         if(UseConsoleLog) console.warn('[Logger] 初始化期間壓縮失敗，但主流程繼續：', err.message);
+      }
+    } else if (!fs.existsSync(globalLogPath)) {
+      // 如果資料夾被外部刪除，重新建立，確保 Logger 正常運作
+      try {
+        fs.mkdirSync(globalLogPath, { recursive: true });
+      } catch (err) {
+        if (UseConsoleLog) {
+          console.warn(`[Logger] 無法重新建立 log 資料夾：${err.message}`);
+        }
       }
     }
 
