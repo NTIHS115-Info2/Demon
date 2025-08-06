@@ -99,18 +99,15 @@ class Logger {
             // ✅ 壓縮上一份 log 資料夾
             tar.c({ gzip: true, file: archivePath, cwd: __baseLogPath, sync: true }, [lastFolder.name]);
 
-            // ✅ 壓縮成功後移除原始資料夾
+            // ✅ 壓縮成功後移除原始資料夾，保留壓縮檔作為備份
             fs.rmSync(lastPath, { recursive: true, force: true });
 
-            // ✅ 壓縮檔案不保留，避免空間占用
-            fs.rmSync(archivePath, { force: true });
-
             if (UseConsoleLog) {
-              console.log(`[Logger] 已壓縮並清除上次 log：${archivePath}`);
+              console.log(`[Logger] 已壓縮並刪除原始資料夾，保留壓縮檔：${archivePath}`);
             }
           } catch (err) {
             if (UseConsoleLog) {
-              console.log(`[Logger] log 壓縮或清除失敗：${err.message}`);
+              console.log(`[Logger] log 壓縮或刪除原始檔失敗：${err.message}`);
             }
           }
         }
