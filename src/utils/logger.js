@@ -95,14 +95,14 @@ class Logger {
           const archivePath = `${lastPath}.tar.gz`;
 
           // ✅ 壓縮上次 log 資料夾
-          tar.c({ gzip: true, file: archivePath, cwd: __baseLogPath , sync: true }, [lastFolder.name])
-            .then(() => {
-              fs.rmSync(lastPath, { recursive: true, force: true });
-              if(UseConsoleLog) console.log(`[Logger] 已壓縮上次 log 為：${archivePath}`);
-            })
-            .catch(err => {
-              if(UseConsoleLog) console.log(`[Logger] log 壓縮失敗：${err.message}`);
-            });
+          try {
+            tar.c({ gzip: true, file: archivePath, cwd: __baseLogPath , sync: true }, [lastFolder.name]);
+            // 壓縮成功後刪除原資料夾
+            fs.rmSync(lastPath, { recursive: true, force: true });
+            if(UseConsoleLog) console.log(`[Logger] 已壓縮上次 log 為：${archivePath}`);
+          } catch (err) {
+            if(UseConsoleLog) console.log(`[Logger] log 壓縮失敗：${err.message}`);
+          }
         }
       } catch (err) {
         if(UseConsoleLog) console.warn('[Logger] 初始化期間壓縮失敗，但主流程繼續：', err.message);
