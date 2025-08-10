@@ -114,7 +114,7 @@ async function routeOutput(text, options = {}) {
  * @param {object} toolData
  * @param {{emitWaiting:Function,timeout:number}} param1
  */
-async function handleTool(toolData, { emitWaiting = () => {}, timeout = 1500 } = {}) {
+async function handleTool(toolData, { emitWaiting = () => {}, timeout = 10000 } = {}) {
   logger.info(`開始處理工具呼叫: ${toolData.toolName}`);
   
   const plugin = PM.getLLMPlugin(toolData.toolName) || PM.plugins.get(toolData.toolName);
@@ -132,7 +132,7 @@ async function handleTool(toolData, { emitWaiting = () => {}, timeout = 1500 } =
     logger.info(`執行工具 ${toolData.toolName}，參數: ${JSON.stringify(toolData)}`);
     
     const result = await Promise.race([
-      PM.send(toolData.toolName, toolData),
+      PM.send(toolData.toolName, toolData.input),
       new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), timeout))
     ]);
     

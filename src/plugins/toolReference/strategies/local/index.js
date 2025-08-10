@@ -139,29 +139,6 @@ module.exports = {
       const pluginsPath = path.resolve(__dirname, '../../..');
       descriptionCache = readDescriptions(pluginsPath);
     }
-    return descriptionCache;
+    return JSON.stringify(descriptionCache);
   },
-
-  /**
-   * 獲取工具描述統計資訊
-   * @returns {object}
-   */
-  async getStats() {
-    const descriptions = await this.send();
-    const stats = {
-      totalPlugins: Object.keys(descriptions).length,
-      pluginsByType: {},
-      pluginNames: Object.keys(descriptions)
-    };
-
-    for (const [pluginName, desc] of Object.entries(descriptions)) {
-      const type = desc.type || 'unknown';
-      if (!stats.pluginsByType[type]) {
-        stats.pluginsByType[type] = 0;
-      }
-      stats.pluginsByType[type]++;
-    }
-
-    return stats;
-  }
 };

@@ -181,3 +181,14 @@
 # [v.1.0.1]
 ### Fix
 - 修復log壓縮後不會把原本檔案刪除的問題
+
+# [v.1.1]
+### New
+- 在PromptComposer中新增工具清單的注入
+### Fix
+- 修復plugins/toolReference內部的輸出問題，原有腳本會輸出object物件，如今會輸出JSON
+- 刪除plugins/toolReference內部有存在不被允許的function定義(getState)
+- 修復toolOutputRouter內部的工具呼叫錯誤，原本會將整個tooldata當作input傳入，如今改為tooldata.input
+- 修復文案中的說明錯誤
+### Change
+- 修改toolOutputRouter內部工具執行超時預設值，從1.5秒改成10秒

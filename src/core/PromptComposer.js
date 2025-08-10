@@ -1,4 +1,7 @@
 const fileEditer = require('../tools/fileEditer');
+
+const PM = require('./pluginsManager');
+
 const Logger = require('../utils/logger');
 
 const logger = new Logger('PromptComposer');
@@ -44,12 +47,16 @@ async function GetDefaultSystemPrompt() {
       throw new Error('系統提示檔案讀取結果格式錯誤');
     }
 
+    const DefaultToolList = `\n=== 以下為工具清單 ===${await PM.send('toolReference')}=== 工具清單結束 ===`;
+
     let result = '';
     DefaultSystemPrompt.forEach(element => {
       if (typeof element === 'string') {
         result += element + '\n';
       }
     });
+
+    result += DefaultToolList; // 加入工具清單
 
     if (!result.trim()) {
       logger.warn('系統提示內容為空，使用預設提示');

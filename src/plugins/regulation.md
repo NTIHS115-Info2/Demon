@@ -51,9 +51,10 @@
   - 調用格式範例（JSON 格式）
   - 回傳格式範例
   - 可選輸入欄位與限制
+詳情見docs/tool-description-schema.md
 
 ## 調用方式與設計原則
 - LLM 不直接呼叫 `send()`，而是透過 prompt 中插入 JSON 請求，並由系統中介程式擷取後轉交插件執行 `send(option)`
 - 插件只需要如同一般插件般實作 `send()` 函式，無需處理 LLM 結構
 - LLM 插件會透過 `pluginsManager` 額外輸出其工具說明資訊，用來建立 LLM 工具索引
-  - 僅當插件提供 `tool-description.json`，才會被註冊為 LLM 工具插件
+  - 僅當插件提供 `tool-description.json`，並標明`pluginType: 'LLM'`，才會被註冊為 LLM 工具插件
