@@ -8,9 +8,11 @@
 {
   "toolName": "exampleTool",
   "description": "工具用途簡述",
-  "input" : "範例輸入"
+"input" : "範例輸入"
 }
 ```
 - `toolName`：工具名稱，需與插件一致。
 - `description`：功能說明。
 - `input`：輸入範例。
+
+> 注意：實際呼叫工具時，JSON 物件僅允許包含 `toolName` 與 `input` 兩個欄位，以避免被視為一般資料。

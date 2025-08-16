@@ -22,11 +22,19 @@ function findToolJSON(buffer) {
       const slice = buffer.slice(start, i + 1);
       try {
         const obj = JSON.parse(slice);
-        if (obj && obj.toolName) {
+        // 僅當物件同時包含 toolName 與 input 欄位時才視為工具呼叫，
+        // 以避免引用其他 JSON 片段時被誤判。
+        if (
+          obj &&
+          typeof obj === 'object' &&
+          typeof obj.toolName === 'string' &&
+          Object.prototype.hasOwnProperty.call(obj, 'input') &&
+          Object.keys(obj).every(k => ['toolName', 'input'].includes(k))
+        ) {
           return { data: obj, start, end: i + 1 };
         }
-      } catch (_) {
-        // 非完整 JSON，繼續檢查下一個可能的結尾
+      } catch (err) {
+        // 解析失敗屬正常情況，忽略錯誤繼續搜尋。
       }
     }
   }
@@ -120,6 +128,16 @@ async function handleTool(toolData, { emitWaiting = () => {}, timeout = 10000 } 
   const plugin = PM.getLLMPlugin(toolData.toolName) || PM.plugins.get(toolData.toolName);
   if (!plugin) {
     logger.warn(`找不到工具 ${toolData.toolName}`);
+    return await PromptComposer.createToolMessage({
+      called: true,
+      toolName: toolData.toolName,
+      success: false
+    });
+  }
+
+  // 確認 input 欄位存在，避免傳遞不完整的參數
+  if (!Object.prototype.hasOwnProperty.call(toolData, 'input')) {
+    logger.warn(`工具 ${toolData.toolName} 呼叫缺少 input 欄位`);
     return await PromptComposer.createToolMessage({
       called: true,
       toolName: toolData.toolName,

@@ -192,3 +192,12 @@
 - 修復文案中的說明錯誤
 ### Change
 - 修改toolOutputRouter內部工具執行超時預設值，從1.5秒改成10秒
+
+# [v.1.1.1]
+### Fix
+- 調整 toolOutputRouter.findToolJSON 僅辨識包含 toolName 與 input 的 JSON，避免誤判
+- 當工具呼叫缺少 input 欄位時回傳失敗並記錄警告
+### Test
+- 更新 toolOutputRouter 相關測試以符合新的 JSON 格式
+- 新增測試：當 JSON 包含額外欄位時不應被識別為工具呼叫
+

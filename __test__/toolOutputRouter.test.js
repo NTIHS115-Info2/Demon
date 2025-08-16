@@ -12,7 +12,7 @@ describe('toolOutputRouter', () => {
   });
 
   test('解析正確 JSON 並注入回 LLM', async () => {
-    const output = JSON.stringify({ toolName: 'mock', text: 'hi' });
+    const output = JSON.stringify({ toolName: 'mock', input: { text: 'hi' } });
     const res = await router.routeOutput(output, { emitWaiting: () => {}, timeout: 500 });
     expect(res.handled).toBe(true);
     expect(res.content).toContain('結果為: HI');
@@ -24,9 +24,17 @@ describe('toolOutputRouter', () => {
     expect(res.content).toBe('not json');
   });
 
+  test('包含其他欄位的 JSON 應視為一般文字', async () => {
+    // JSON 物件含有額外欄位時，應被視為純文字而非工具呼叫
+    const output = JSON.stringify({ toolName: 'mock', input: { text: 'hi' }, extra: 1 });
+    const res = await router.routeOutput(output);
+    expect(res.handled).toBe(false);
+    expect(res.content).toBe(output);
+  });
+
   test('工具失敗時注入失敗狀態', async () => {
     PM.plugins.get('mock').send.mockRejectedValueOnce(new Error('fail'));
-    const output = JSON.stringify({ toolName: 'mock', text: 'hi' });
+    const output = JSON.stringify({ toolName: 'mock', input: { text: 'hi' } });
     const res = await router.routeOutput(output, { emitWaiting: () => {} });
     expect(res.handled).toBe(true);
     expect(res.content).toContain('執行失敗');
@@ -34,7 +42,7 @@ describe('toolOutputRouter', () => {
 
   test('工具逾時處理', async () => {
     PM.plugins.get('mock').send.mockImplementationOnce(() => new Promise(r => setTimeout(() => r('OK'), 2000)));
-    const output = JSON.stringify({ toolName: 'mock', text: 'hi' });
+    const output = JSON.stringify({ toolName: 'mock', input: { text: 'hi' } });
     const res = await router.routeOutput(output, { emitWaiting: () => {}, timeout: 100 });
     expect(res.handled).toBe(true);
     expect(res.content).toContain('執行失敗');
@@ -44,20 +52,29 @@ describe('toolOutputRouter', () => {
     const consoleSpy = jest.spyOn(console, 'log').mockImplementation();
     PM.plugins.get('mock').send.mockImplementationOnce(() => new Promise(r => setTimeout(() => r('OK'), 2000)));
     
-    const output = JSON.stringify({ toolName: 'mock', text: 'timeout-test' });
+    const output = JSON.stringify({ toolName: 'mock', input: { text: 'timeout-test' } });
     await router.routeOutput(output, { timeout: 50 });
-    
+
     // 透過檢查是否有相關的錯誤日誌來驗證逾時處理
-    expect(PM.plugins.get('mock').send).toHaveBeenCalledWith({ toolName: 'mock', text: 'timeout-test' });
+    expect(PM.plugins.get('mock').send).toHaveBeenCalledWith({ text: 'timeout-test' });
     
     consoleSpy.mockRestore();
   });
 
-  test('findToolJSON 可於自然語言中擷取 JSON', () => {
-    const text = 'hello ' + JSON.stringify({ toolName: 'mock', text: 'hi' }) + ' world';
-    const found = router.findToolJSON(text);
-    expect(found.data.toolName).toBe('mock');
-    expect(text.slice(0, found.start)).toBe('hello ');
+  describe('findToolJSON 功能', () => {
+    test('可於自然語言中擷取 JSON', () => {
+      const text = 'hello ' + JSON.stringify({ toolName: 'mock', input: { text: 'hi' } }) + ' world';
+      const found = router.findToolJSON(text);
+      expect(found.data.toolName).toBe('mock');
+      expect(text.slice(0, found.start)).toBe('hello ');
+    });
+
+    test('包含其他欄位時不視為工具呼叫', () => {
+      // 若 JSON 物件含有非允許欄位，函式應回傳 null
+      const text = JSON.stringify({ toolName: 'mock', input: { text: 'hi' }, extra: true });
+      const found = router.findToolJSON(text);
+      expect(found).toBeNull();
+    });
   });
 
   test('處理多個工具呼叫', async () => {
@@ -74,10 +91,10 @@ describe('toolOutputRouter', () => {
     PM.llmPlugins.set('tool1', PM.plugins.get('tool1'));
     PM.llmPlugins.set('tool2', PM.plugins.get('tool2'));
     
-    const output = 'Before ' + 
-      JSON.stringify({ toolName: 'tool1', text: 'hello' }) + 
+    const output = 'Before ' +
+      JSON.stringify({ toolName: 'tool1', input: { text: 'hello' } }) +
       ' middle ' +
-      JSON.stringify({ toolName: 'tool2', text: 'world' }) +
+      JSON.stringify({ toolName: 'tool2', input: { text: 'world' } }) +
       ' after';
     
     const res = await router.routeOutput(output);
@@ -98,10 +115,10 @@ describe('toolOutputRouter', () => {
     streamRouter.on('tool', msg => { toolCount++; output += msg.content; });
     
     await streamRouter.feed('Start ');
-    await streamRouter.feed('{"toolName":"mock",');
-    await streamRouter.feed('"text":"test1"} ');
+    await streamRouter.feed('{"toolName":"mock","input":');
+    await streamRouter.feed('{"text":"test1"}} ');
     await streamRouter.feed('Middle ');
-    await streamRouter.feed('{"toolName":"mock","text":"test2"} ');
+    await streamRouter.feed('{"toolName":"mock","input":{"text":"test2"}} ');
     await streamRouter.feed('End');
     await streamRouter.flush();
     
