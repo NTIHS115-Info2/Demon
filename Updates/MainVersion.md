@@ -216,3 +216,13 @@
 # [v.1.2.2]
 ### Fix
 - 將exclusive模式下的模型 由4b改為12b
+
+# [v.1.2.3]
+### New
+- TalkToDemon 新增status事件，當狀態改變時會觸發，是用來給工具事件判斷使用的
+- Discord 的回覆，針對了status的改變進行輸出調整
+- logger 的子函數新增safeStringify，用來安全地將物件轉為字串
+### Fix
+- 修復toolOutputRouter錯誤的工具判斷，修改為更正確且嚴謹的判斷方式
+### Change
+- TimeService中的工具描述，從中文修改為英文

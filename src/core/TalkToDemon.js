@@ -111,6 +111,8 @@ class TalkToDemonManager extends EventEmitter {
     this.toolResultBuffer = [];       // 工具訊息暫存
     this.waitingForTool   = false;    // 是否正等待工具完成
     this._needCleanup     = false;    // 工具結果是否待清除
+    this.phaseId       = 0;   // 同一任務（工具前/後）同一 phase
+    this._waitingHold  = false; // 鎖住 waiting=true 直到該輪 end
   }
 
   /*─── 工具函式 ──────────────────────────────────────────*/
@@ -164,6 +166,8 @@ class TalkToDemonManager extends EventEmitter {
   /*─── 核心：執行下一個任務 ───────────────────────────────*/
   async _processNext(task) {
     this.processing   = true;
+    // phase 控制：使用者新請求 phase+1；工具回合沿用同一 phase
+    if (!task._keepPhase) this.phaseId++;
     this.currentTask  = task;
 
     // 讀取持久化歷史，失敗時以空陣列處理
@@ -192,7 +196,8 @@ class TalkToDemonManager extends EventEmitter {
     const handler = new LlamaStreamHandler(this.model);
     this.currentHandler = handler;
     const router = new toolOutputRouter.ToolStreamRouter();
-    router.on('waiting', s => this._setWaiting(s));
+    // 只轉發 waiting:true，避免工具完成時提前退回 false
+    router.on('waiting', s => { if (s) this._setWaiting(true, { reason: 'tool_busy' }); });
     let assistantBuf = '';
     let toolTriggered = false;
 
@@ -204,6 +209,10 @@ class TalkToDemonManager extends EventEmitter {
 
     // 若偵測到工具觸發，先暫存結果，稍後重新組合後送出
     router.on('tool', msg => {
+      // 觸發工具：本輪結束前都維持 waiting=true
+      this._waitingHold = true;
+      this._setWaiting(true, { reason: 'tool_detected' });
+
       toolTriggered = true;
       this.toolResultBuffer.push(msg);
       this._needCleanup = true;
@@ -221,7 +230,7 @@ class TalkToDemonManager extends EventEmitter {
 
       // 若觸發工具，需等待工具完成後重新組合訊息再請求模型
       if (toolTriggered) {
-        this._processNext({ message: this.currentTask.message });
+        this._processNext({ message: this.currentTask.message, _keepPhase: true });
         return;
       }
 
@@ -254,6 +263,11 @@ class TalkToDemonManager extends EventEmitter {
         handler.emit('error', err);
         return;
       }
+      // 若是工具回注的下一輪，先退回 waiting:false（在首個 data 之前）
+      if (task._keepPhase && this._waitingHold) {
+        this._setWaiting(false, { reason: 'post_tool_round_start' });
+        this._waitingHold = false;
+      }
       handler.start(messages);  // 啟動串流
     }).catch(err => {
       this.logger.error('[錯誤] 讀取服務狀態失敗: ' + err.message);
@@ -269,6 +283,8 @@ class TalkToDemonManager extends EventEmitter {
       this.logger.info('[手動中斷] 當前輸出被中止');
       this.currentHandler?.stop();
       this.gateBuffer = '';
+      this._waitingHold = false;
+      this._setWaiting(false, { reason: 'aborted' });
     } else {
       this.logger.info('[手動中斷失敗] 任務不可中斷');
     }
@@ -278,9 +294,9 @@ class TalkToDemonManager extends EventEmitter {
   getGateState() { return this.gateOpen ? 'open' : 'close'; }
   getWaitingState() { return this.waitingForTool ? 'waiting' : 'idle'; }
 
-  _setWaiting(state) {
+  _setWaiting(state, extra = {}) {
     this.waitingForTool = state;
-    if (state) this.emit('data', '我正在查詢，請稍等我一下～');
+    this.emit('status', { waiting: state, phaseId: this.phaseId, ...extra });
   }
 
   _pushChunk(chunk) {

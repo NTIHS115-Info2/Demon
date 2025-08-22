@@ -39,29 +39,39 @@ async function replyBySentence(msg, text, speakerName) {
   };
 
   return new Promise((resolve, reject) => {
+    let waitingTool = false
     const onData = chunk => {
       buffer += chunk;
     };
     const onEnd = () => {
       send(buffer);
-      cleanup();
-      resolve();
+      if(!waitingTool) {
+        cleanup();
+        resolve();
+      }
+      buffer = '';  // 清空緩衝區
     };
     const onError = err => {
       cleanup();
       logger.error('[DISCORD] TalkToDemon 錯誤: ' + err);
       reject(err);
     };
+    const onStatus = status => {
+      waitingTool = status.waiting;
+      logger.info('[DISCORD] TalkToDemon 狀態更新: ' + JSON.stringify(status));
+    };
 
     function cleanup(){
       talker.off('data', onData);
       talker.off('end', onEnd);
       talker.off('error', onError);
+      talker.off('status', onStatus);
     }
 
     talker.on('data', onData);
     talker.on('end', onEnd);
     talker.on('error', onError);
+    talker.on('status' , onStatus);
 
     // 使用傳入的說話者名稱，如果沒有提供則使用預設值
     const finalSpeakerName = speakerName || '爸爸';

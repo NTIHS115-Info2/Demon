@@ -206,6 +206,13 @@ class Logger {
     return SENSITIVE_PATTERNS.some(pattern => pattern.test(message));
   }
 
+  safeStringify(obj) {
+    try {
+      return JSON.stringify(obj, null, 2); // pretty print
+    } catch (e) {
+      return String(obj);
+    }
+  }
 }
 
 module.exports = Logger
