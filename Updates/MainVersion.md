@@ -212,3 +212,7 @@
 - 刪除部分插件中的 toolReference，原因為他們不是llmTool
 ### Change
 - 將模型的n-gpu-layers 由35改為50，確保硬體能滿載運行
+
+# [v.1.2.2]
+### Fix
+- 將exclusive模式下的模型 由4b改為12b
