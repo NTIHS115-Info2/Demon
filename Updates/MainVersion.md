@@ -201,3 +201,6 @@
 - 更新 toolOutputRouter 相關測試以符合新的 JSON 格式
 - 新增測試：當 JSON 包含額外欄位時不應被識別為工具呼叫
 
+# [v.1.2]
+### New
+- 新增 TimeService 這個 llm 工具，供llm使用
