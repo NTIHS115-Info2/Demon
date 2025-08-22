@@ -204,3 +204,11 @@
 # [v.1.2]
 ### New
 - 新增 TimeService 這個 llm 工具，供llm使用
+
+# [v.1.2.1]
+### Fix
+- 修復 TimeService 的描述格式檢查，確保使用 toolName 作為識別欄位
+### Delete
+- 刪除部分插件中的 toolReference，原因為他們不是llmTool
+### Change
+- 將模型的n-gpu-layers 由35改為50，確保硬體能滿載運行

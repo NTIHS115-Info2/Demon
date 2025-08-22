@@ -77,8 +77,8 @@ function readDescriptions(rootPath) {
       const parsed = JSON.parse(data);
       
       // 基本驗證工具描述格式
-      if (!parsed.name || !parsed.description) {
-        logger.warn(`插件 ${dir.name} 工具描述格式不完整，缺少 name 或 description 欄位`);
+      if (!parsed.toolName || !parsed.description) {
+        logger.warn(`插件 ${dir.name} 工具描述格式不完整，缺少 toolName 或 description 欄位`);
         continue;
       }
       
