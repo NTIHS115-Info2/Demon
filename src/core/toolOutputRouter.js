@@ -224,10 +224,26 @@ async function handleTool(toolData, { emitWaiting = () => {}, timeout = 10000 } 
     emitWaiting(true);
     logger.info(`執行工具 ${toolData.toolName}，參數: ${JSON.stringify(toolData)}`);
     
-    const result = await Promise.race([
-      PM.send(toolData.toolName, toolData.input),
-      new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), timeout))
-    ]);
+    // 建立工具執行與逾時計時，並於完成後清除計時器
+    const toolPromise = PM.send(toolData.toolName, toolData.input);
+    const timeoutPromise = new Promise((_, reject) => {
+      const id = setTimeout(() => reject(new Error('timeout')), timeout);
+      toolPromise.finally(() => clearTimeout(id));
+    });
+    const result = await Promise.race([toolPromise, timeoutPromise]);
+
+    // 若插件回傳包含 error 或 success 為 false，視為失敗並回傳錯誤
+    if (result && (result.error !== undefined || result.success === false)) {
+      const errMsg = result.error || '未知錯誤';
+      logger.warn(`工具 ${toolData.toolName} 回傳錯誤: ${errMsg}`);
+      return await PromptComposer.createToolMessage({
+        called: true,
+        toolName: toolData.toolName,
+        success: false,
+        error: errMsg,
+        value: result.value
+      });
+    }
 
     logger.info(`工具 ${toolData.toolName} 執行成功，結果: ${logger.safeStringify(result)}`);
     return await PromptComposer.createToolMessage({
@@ -239,11 +255,12 @@ async function handleTool(toolData, { emitWaiting = () => {}, timeout = 10000 } 
   } catch (e) {
     const isTimeout = e.message === 'timeout';
     logger.error(`執行工具 ${toolData.toolName} ${isTimeout ? '逾時' : '失敗'}: ${e.message}`);
-    
+
     return await PromptComposer.createToolMessage({
       called: true,
       toolName: toolData.toolName,
-      success: false
+      success: false,
+      error: e.message
     });
   } finally {
     emitWaiting(false);

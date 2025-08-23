@@ -76,7 +76,7 @@ async function GetDefaultSystemPrompt() {
 
 /**
  * 組合工具回傳內容
- * @param {{called?:boolean,toolName?:string,success?:boolean,result?:any}} state
+ * @param {{called?:boolean,toolName?:string,success?:boolean,result?:any,error?:string,value?:any}} state
  * @returns {Promise<string>}
  */
 async function composeToolPrompt(state = {}) {
@@ -94,12 +94,22 @@ async function composeToolPrompt(state = {}) {
       info += `工具 ${state.toolName} 已執行。`;
       
       if (state.success === true && state.result !== undefined) {
-        const resultStr = typeof state.result === 'string' 
-          ? state.result 
+        // 成功時輸出結果內容
+        const resultStr = typeof state.result === 'string'
+          ? state.result
           : JSON.stringify(state.result);
         info += `結果為: ${resultStr}`;
       } else if (state.success === false) {
-        info += '執行失敗或逾時。';
+        // 失敗時輸出錯誤訊息，並於有值時附帶 value
+        const errMsg = state.error || '未知錯誤';
+        info += `執行失敗：${errMsg}`;
+        if (state.value !== undefined) {
+          const valStr = typeof state.value === 'string'
+            ? state.value
+            : JSON.stringify(state.value);
+          info += `，附帶值: ${valStr}`;
+        }
+        info += '。';
       }
     }
     
@@ -112,7 +122,7 @@ async function composeToolPrompt(state = {}) {
 
 /**
  * 產生工具訊息物件
- * @param {object} state
+ * @param {{called?:boolean,toolName?:string,success?:boolean,result?:any,error?:string,value?:any}} state
  * @returns {Promise<{role:string,content:string,timestamp:number}>}
  */
 async function createToolMessage(state = {}) {

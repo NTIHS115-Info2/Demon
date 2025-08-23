@@ -63,3 +63,11 @@
 - ToolReference 插件依規範重構為策略化，新增 local 策略
 ## Fix
 - 加入錯誤處理避免讀取工具說明時崩潰
+
+### [dev0.9]
+## Update
+- toolOutputRouter 支援插件錯誤回傳，統一回注 `success: false` 與 `error`
+- PromptComposer 補充錯誤內容與可選 value 顯示
+- 更新 LLM 規範文件說明錯誤格式
+## Test
+- 新增插件錯誤回傳單元測試
