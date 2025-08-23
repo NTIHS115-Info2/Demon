@@ -226,3 +226,8 @@
 - 修復toolOutputRouter錯誤的工具判斷，修改為更正確且嚴謹的判斷方式
 ### Change
 - TimeService中的工具描述，從中文修改為英文
+
+# [v.1.2.4]
+### New
+- TimeService新增了時間差值的計算功能
+- LLMTool新增了error的使用規範以及功能

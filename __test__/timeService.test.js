@@ -19,7 +19,7 @@ describe('timeService 本地時間計算', () => {
     expect.assertions(1);
     try {
       const res = await timeService.send({ h: 1 });
-      expect(res).toEqual({ result: '2025-08-20 15:00:00 (UTC+8)' });
+      expect(res).toEqual({ result: '2025-08-20 15:00:00 (UTC+8)', resultType: 'time' });
     } catch (e) {
       console.error('測試失敗:', e);
       throw e;
@@ -30,7 +30,7 @@ describe('timeService 本地時間計算', () => {
     expect.assertions(1);
     try {
       const res = await timeService.send({ timezone: 9, D: 1, h: 2 });
-      expect(res).toEqual({ result: '2025-08-21 17:00:00 (UTC+9)' });
+      expect(res).toEqual({ result: '2025-08-21 17:00:00 (UTC+9)', resultType: 'time' });
     } catch (e) {
       console.error('測試失敗:', e);
       throw e;
@@ -41,7 +41,7 @@ describe('timeService 本地時間計算', () => {
     expect.assertions(1);
     try {
       const res = await timeService.send({ D: -2, m: -5 });
-      expect(res).toEqual({ result: '2025-08-18 13:55:00 (UTC+8)' });
+      expect(res).toEqual({ result: '2025-08-18 13:55:00 (UTC+8)', resultType: 'time' });
     } catch (e) {
       console.error('測試失敗:', e);
       throw e;
@@ -54,7 +54,7 @@ describe('timeService 本地時間計算', () => {
       // 將系統時間設定為閏年 2024-02-29
       jest.setSystemTime(new Date('2024-02-29T00:00:00Z'));
       const res = await timeService.send({ Y: 1 });
-      expect(res).toEqual({ result: '2025-02-28 08:00:00 (UTC+8)' });
+      expect(res).toEqual({ result: '2025-02-28 08:00:00 (UTC+8)', resultType: 'time' });
     } catch (e) {
       console.error('測試失敗:', e);
       throw e;
@@ -69,6 +69,43 @@ describe('timeService 本地時間計算', () => {
     try {
       const res = await timeService.send({ timezone: 8.5 });
       expect(res).toEqual({ error: 'timezone 必須為整數' });
+    } catch (e) {
+      console.error('測試失敗:', e);
+      throw e;
+    }
+  });
+
+  test('同時提供 baseTime 與 targetTime 並含偏移', async () => {
+    expect.assertions(1);
+    try {
+      const res = await timeService.send({
+        baseTime: '2025-08-23 12:00:00',
+        targetTime: '2025-08-23 15:30:00',
+        h: 1
+      });
+      expect(res).toEqual({ result: '00-00-00 02:30:00', resultType: 'time' });
+    } catch (e) {
+      console.error('測試失敗:', e);
+      throw e;
+    }
+  });
+
+  test('僅提供 targetTime 應與現在時間比較', async () => {
+    expect.assertions(1);
+    try {
+      const res = await timeService.send({ targetTime: '2025-08-23 15:30:00' });
+      expect(res).toEqual({ result: '00-00-03 01:30:00', resultType: 'time' });
+    } catch (e) {
+      console.error('測試失敗:', e);
+      throw e;
+    }
+  });
+
+  test('僅提供 baseTime 應回傳 IGNORED_BASE_ONLY', async () => {
+    expect.assertions(1);
+    try {
+      const res = await timeService.send({ baseTime: '2025-08-23 12:00:00' });
+      expect(res).toEqual({ error: 'IGNORED_BASE_ONLY' });
     } catch (e) {
       console.error('測試失敗:', e);
       throw e;

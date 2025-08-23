@@ -15,3 +15,9 @@
 ### [v0.4]
 ## Add
 - 加入閏年 2 月 29 日的日期修正與對應測試
+
+### [v0.5]
+## Add
+- 新增 `baseTime`、`targetTime` 欄位並支援時間差距計算
+- 回傳格式加入 `resultType` 欄位
+- 補強錯誤碼 `IGNORED_BASE_ONLY` 與相關單元測試

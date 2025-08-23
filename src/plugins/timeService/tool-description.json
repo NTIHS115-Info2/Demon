@@ -1,16 +1,22 @@
 {
   "toolName": "timeService",
-  "description": "A utility for time offset and timezone calculations. Default timezone is UTC+8. Leap year (February 29) is handled internally.",
+  "description": "A utility for time offset, timezone conversion, and time difference calculation. Default timezone is UTC+8. Handles leap year February 29 correctly.",
   "input": {
-    "timezone": "Integer, optional, default 8. The target timezone offset relative to UTC.",
-    "Y": "Integer, year offset. Can be positive or negative.",
-    "M": "Integer, month offset. Can be positive or negative.",
-    "D": "Integer, day offset. Can be positive or negative.",
-    "h": "Integer, hour offset. Can be positive or negative.",
-    "m": "Integer, minute offset. Can be positive or negative.",
-    "s": "Integer, second offset. Can be positive or negative."
+    "timezone": "Integer, optional. Default is 8. Represents the timezone offset relative to UTC.",
+    "Y": "Integer. Year offset, can be positive or negative.",
+    "M": "Integer. Month offset, can be positive or negative.",
+    "D": "Integer. Day offset, can be positive or negative.",
+    "h": "Integer. Hour offset, can be positive or negative.",
+    "m": "Integer. Minute offset, can be positive or negative.",
+    "s": "Integer. Second offset, can be positive or negative.",
+    "baseTime": "String, optional. Format: YYYY-MM-DD hh:mm:ss. Serves as the reference time point.",
+    "targetTime": "String, optional. Format: YYYY-MM-DD hh:mm:ss. The target time point for comparison."
   },
   "output": {
-    "result": "String. Formatted datetime in 'YYYY-MM-DD hh:mm:ss (UTC+X)'."
+    "success": "Boolean. True if successful, false if failed.",
+    "result": "String. Current time or time difference. Only available when success is true.",
+    "resultType": "String. Always 'time'. Only available when success is true.",
+    "error": "String. Error message if failed.",
+    "value": "Any type, optional. Additional data when failed."
   }
 }
