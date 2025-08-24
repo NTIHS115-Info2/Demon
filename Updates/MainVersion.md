@@ -231,3 +231,7 @@
 ### New
 - TimeService新增了時間差值的計算功能
 - LLMTool新增了error的使用規範以及功能
+
+# [v.1.2.4.1]
+### Fix
+- 修復 TimeService 錯誤的工具敘述
