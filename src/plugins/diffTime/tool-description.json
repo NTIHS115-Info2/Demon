@@ -1,0 +1,13 @@
+{
+  "toolName": "diffTime",
+  "description": "計算基準時間與目標時間差距的工具，僅需提供兩個時間點。",
+  "input": {
+    "baseTime": "字串，可選，格式 'YYYY-MM-DD hh:mm:ss'，未提供則使用現在時間（UTC+8）。",
+    "targetTime": "字串，必填，格式 'YYYY-MM-DD hh:mm:ss'。"
+  },
+  "output": {
+    "result": "字串，兩時間差距，格式 'YY-MM-DD hh:mm:ss'。",
+    "resultType": "字串，固定為 'time'。",
+    "error": "字串，僅在失敗時回傳。"
+  }
+}
