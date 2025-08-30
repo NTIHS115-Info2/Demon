@@ -1,13 +1,13 @@
 {
   "toolName": "diffTime",
-  "description": "計算基準時間與目標時間差距的工具，僅需提供兩個時間點。",
+  "description": "A tool for calculating the time difference between a starting time (baseTime) and a target time (targetTime). Both inputs must be absolute timestamps, not offsets.",
   "input": {
-    "baseTime": "字串，可選，格式 'YYYY-MM-DD hh:mm:ss'，未提供則使用現在時間（UTC+8）。",
-    "targetTime": "字串，必填，格式 'YYYY-MM-DD hh:mm:ss'。"
+    "baseTime": "String, optional. The starting timestamp for the calculation. Format: 'YYYY-MM-DD hh:mm:ss' (24-hour). If omitted, the system will use the current time (UTC+8) as the base. This field defines the 'from' time in the difference calculation.",
+    "targetTime": "String, required. The comparison timestamp. Format: 'YYYY-MM-DD hh:mm:ss' (24-hour). This field defines the 'to' time in the difference calculation. The result will represent the elapsed time from baseTime to targetTime."
   },
   "output": {
-    "result": "字串，兩時間差距，格式 'YY-MM-DD hh:mm:ss'。",
-    "resultType": "字串，固定為 'time'。",
-    "error": "字串，僅在失敗時回傳。"
+    "result": "String. The time difference between the two timestamps, formatted as 'YY-MM-DD hh:mm:ss' (years, months, days, hours, minutes, seconds).",
+    "resultType": "String. Always 'time'.",
+    "error": "String. Returned only when the operation fails, e.g., invalid time format."
   }
 }

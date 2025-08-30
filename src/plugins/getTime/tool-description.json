@@ -1,18 +1,18 @@
 {
   "toolName": "getTime",
-  "description": "取得當前時間並套用偏移與時區的工具。",
+  "description": "A tool for retrieving the current time with optional offsets and timezone adjustment.",
   "input": {
-    "timezone": "整數，可選，預設 8，表示與 UTC 的時差。",
-    "Y": "整數，可選，年份偏移。",
-    "M": "整數，可選，月份偏移。",
-    "D": "整數，可選，日期偏移。",
-    "h": "整數，可選，小時偏移。",
-    "m": "整數，可選，分鐘偏移。",
-    "s": "整數，可選，秒偏移。"
+    "timezone": "Integer, optional. Default = 8. Represents the hour offset from UTC.",
+    "Y": "Integer, optional. Year offset.",
+    "M": "Integer, optional. Month offset.",
+    "D": "Integer, optional. Day offset.",
+    "h": "Integer, optional. Hour offset.",
+    "m": "Integer, optional. Minute offset.",
+    "s": "Integer, optional. Second offset."
   },
   "output": {
-    "result": "字串，格式 'YYYY-MM-DD hh:mm:ss (UTC+X)'。",
-    "resultType": "字串，固定為 'time'。",
-    "error": "字串，僅在失敗時回傳。"
+    "result": "String. The computed time formatted as 'YYYY-MM-DD hh:mm:ss (UTC+X)'.",
+    "resultType": "String. Always 'time'.",
+    "error": "String. Returned only when the operation fails."
   }
 }
