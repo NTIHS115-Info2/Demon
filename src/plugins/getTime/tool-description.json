@@ -1,0 +1,18 @@
+{
+  "toolName": "getTime",
+  "description": "A tool for retrieving the current time with optional offsets and timezone adjustment.",
+  "input": {
+    "timezone": "Integer, optional. Default = 8. Represents the hour offset from UTC.",
+    "Y": "Integer, optional. Year offset.",
+    "M": "Integer, optional. Month offset.",
+    "D": "Integer, optional. Day offset.",
+    "h": "Integer, optional. Hour offset.",
+    "m": "Integer, optional. Minute offset.",
+    "s": "Integer, optional. Second offset."
+  },
+  "output": {
+    "result": "String. The computed time formatted as 'YYYY-MM-DD hh:mm:ss (UTC+X)'.",
+    "resultType": "String. Always 'time'.",
+    "error": "String. Returned only when the operation fails."
+  }
+}
