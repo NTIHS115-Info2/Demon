@@ -21,3 +21,7 @@
 - 新增 `baseTime`、`targetTime` 欄位並支援時間差距計算
 - 回傳格式加入 `resultType` 欄位
 - 補強錯誤碼 `IGNORED_BASE_ONLY` 與相關單元測試
+
+### [v0.6]
+## Change
+- 拆分為 `getTime` 與 `diffTime` 兩個 llmTool，原模組停止維護
