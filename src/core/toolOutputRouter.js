@@ -19,8 +19,8 @@ function findToolJSON(buffer) {
   let inCode   = false;   // 是否位於 Markdown 代碼區塊
 
   for (let i = 0; i < buffer.length; i++) {
-    // 先判斷 Markdown 代碼區塊界線
-    if (buffer.startsWith('```', i)) {
+    // 先判斷 Markdown 代碼區塊界線，但需忽略字串內的反引號
+    if (!inString && buffer.startsWith('```', i)) {
       inCode = !inCode;
       i += 2; // 跳過其餘兩個反引號
       continue;
