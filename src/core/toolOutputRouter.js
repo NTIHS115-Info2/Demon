@@ -115,13 +115,44 @@ function braceBalance(str) {
 function backtickState(str) {
   let inCode = false;
   let lastOpenIndex = -1;
+
+  // 小工具：判斷 ``` 是否在「視為行首」的位置
+  // 視為行首：真正行首 / 前置空白 / 區塊引用 '>'（可多重）/ 常見清單符號 -,*,+ 或數字. 之後可有空白
+  function atLogicalLineStart(s, idx) {
+    let j = idx - 1;
+    // 回到上一行結尾或字串開頭
+    while (j >= 0 && s[j] !== '\n' && s[j] !== '\r') j--;
+    j++; // 移到行首第一個字元
+    // 跳過空白
+    while (j < idx && (s[j] === ' ' || s[j] === '\t')) j++;
+    // 跳過區塊引用 '>'（可多個），每個之後可有空白
+    while (j < idx && s[j] === '>') {
+      j++;
+      while (j < idx && (s[j] === ' ' || s[j] === '\t')) j++;
+    }
+    // 跳過清單符號 -,*,+ 或數字.（可選），之後可有空白
+    if (j < idx && (s[j] === '-' || s[j] === '*' || s[j] === '+')) {
+      j++;
+      if (j < idx && (s[j] === ' ' || s[j] === '\t')) {
+        while (j < idx && (s[j] === ' ' || s[j] === '\t')) j++;
+      }
+    } else {
+      // 有序清單形式：digits + '.' + 空白*
+      let k = j;
+      let seenDigit = false;
+      while (k < idx && s[k] >= '0' && s[k] <= '9') { seenDigit = true; k++; }
+      if (seenDigit && k < idx && s[k] === '.') {
+        k++;
+        while (k < idx && (s[k] === ' ' || s[k] === '\t')) k++;
+        j = k;
+      }
+    }
+    return j === idx;
+  }
+
   for (let i = 0; i < str.length - 2; i++) {
-    if (str.slice(i, i + 3) === '```') {
-      // 檢查是否位於行首（允許前置空白）
-      let j = i - 1;
-      while (j >= 0 && (str[j] === ' ' || str[j] === '\t')) j--;
-      const atLineStart = j < 0 || str[j] === '\n' || str[j] === '\r';
-      if (atLineStart) {
+    if (str[i] === '`' && str[i+1] === '`' && str[i+2] === '`') {
+      if (atLogicalLineStart(str, i)) {
         if (!inCode) {
           inCode = true;
           lastOpenIndex = i;
@@ -132,20 +163,7 @@ function backtickState(str) {
       i += 2;
     }
   }
-  // 若仍在代碼區塊內，檢查內容是否為非工具的完整 JSON
-  if (inCode) {
-    try {
-      const after = str.slice(lastOpenIndex + 3);
-      const match = after.match(/^([a-zA-Z]*)[\t\r\n ]*/); // 語言標記
-      const rest  = after.slice(match ? match[0].length : 0);
-      const trimmed = rest.trim();
-      const tool = findToolJSON(trimmed);
-      JSON.parse(trimmed); // 若解析失敗，將落入 catch
-      if (!tool) inCode = false; // 非工具 JSON，放行
-    } catch (_) {
-      // 保留 inCode 狀態，等待後續資料補齊
-    }
-  }
+  // 不再根據內容（是否為工具 JSON）改變 inCode；只看 fence 配對。
   return { inCode, lastOpenIndex };
 }
 
