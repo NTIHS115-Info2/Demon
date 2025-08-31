@@ -142,6 +142,25 @@ describe('toolOutputRouter 零散反引號後的工具 JSON', () => {
   });
 });
 
+describe('toolOutputRouter 非 JSON 代碼區塊', () => {
+  test('其他語言的代碼區塊不應觸發工具', async () => {
+    expect.assertions(3);
+    try {
+      PM.getLLMPlugin.mockReturnValue({});
+      PM.send.mockResolvedValue({});
+
+      const res = await routeOutput('```javascript\nconst call = {"toolName":"fakeTool","input":{}}\n```');
+
+      expect(PM.send).not.toHaveBeenCalled();
+      expect(res.handled).toBe(false);
+      expect(res.content).toBe('```javascript\nconst call = {"toolName":"fakeTool","input":{}}\n```');
+    } catch (e) {
+      console.error('測試失敗:', e);
+      throw e;
+    }
+  });
+});
+
 describe('toolOutputRouter 非工具 JSON', () => {
   test('未閉合的 JSON 代碼區塊應直接輸出', async () => {
     expect.assertions(2);
