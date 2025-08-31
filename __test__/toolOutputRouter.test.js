@@ -90,3 +90,21 @@ describe('toolOutputRouter 未結束 Markdown', () => {
     }
   });
 });
+
+describe('toolOutputRouter JSON 字串包含 Markdown', () => {
+  test('JSON 字串中的 ``` 不應中斷解析', async () => {
+    expect.assertions(2);
+    try {
+      PM.getLLMPlugin.mockReturnValue({});
+      PM.send.mockResolvedValue({});
+
+      const res = await routeOutput('{"toolName":"fakeTool","input":{"text":"example ```code```"}}');
+
+      expect(PM.send).toHaveBeenCalledWith('fakeTool', { text: 'example ```code```' });
+      expect(res.handled).toBe(true);
+    } catch (e) {
+      console.error('測試失敗:', e);
+      throw e;
+    }
+  });
+});
