@@ -21,7 +21,11 @@ function findToolJSON(buffer) {
   for (let i = 0; i < buffer.length; i++) {
     // 先判斷 Markdown 代碼區塊界線，但需忽略字串內的反引號
     if (!inString && buffer.startsWith('```', i)) {
-      inCode = !inCode;
+      // 檢查是否位於行首（允許前置空白），否則視為零散反引號
+      let j = i - 1;
+      while (j >= 0 && (buffer[j] === ' ' || buffer[j] === '\t')) j--;
+      const atLineStart = j < 0 || buffer[j] === '\n' || buffer[j] === '\r';
+      if (atLineStart) inCode = !inCode; // 行首三重反引號視為 Markdown 代碼界線
       i += 2; // 跳過其餘兩個反引號
       continue;
     }
@@ -113,24 +117,22 @@ function backtickState(str) {
   let lastOpenIndex = -1;
   for (let i = 0; i < str.length - 2; i++) {
     if (str.slice(i, i + 3) === '```') {
-      if (!inCode) {
-        // 取得語言標記（允許 "```json" 或無標記）
-        const after = str.slice(i + 3);
-        const match = after.match(/^([a-zA-Z]*)[\t\r\n ]*/);
-        const lang  = (match && match[1] || '').toLowerCase();
-        const rest  = after.slice(match ? match[0].length : 0).trimStart();
-        if (lang === 'json' || (lang === '' && rest.startsWith('{'))) {
+      // 檢查是否位於行首（允許前置空白）
+      let j = i - 1;
+      while (j >= 0 && (str[j] === ' ' || str[j] === '\t')) j--;
+      const atLineStart = j < 0 || str[j] === '\n' || str[j] === '\r';
+      if (atLineStart) {
+        if (!inCode) {
           inCode = true;
           lastOpenIndex = i;
+        } else {
+          inCode = false;
         }
-      } else {
-        // 已在代碼區塊中，遇到結束反引號時關閉
-        inCode = false;
       }
       i += 2;
     }
   }
-  // 若仍在 JSON 代碼區塊內，檢查內容是否為非工具的完整 JSON
+  // 若仍在代碼區塊內，檢查內容是否為非工具的完整 JSON
   if (inCode) {
     try {
       const after = str.slice(lastOpenIndex + 3);
