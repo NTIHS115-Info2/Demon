@@ -124,6 +124,24 @@ describe('toolOutputRouter 文字含三重反引號', () => {
   });
 });
 
+describe('toolOutputRouter 零散反引號後的工具 JSON', () => {
+  test('文字中的 ``` 不應忽略後續工具 JSON', async () => {
+    expect.assertions(2);
+    try {
+      PM.getLLMPlugin.mockReturnValue({});
+      PM.send.mockResolvedValue({});
+
+      const res = await routeOutput('Use ``` to start a code block.\n{"toolName":"fakeTool","input":{}}');
+
+      expect(PM.send).toHaveBeenCalledWith('fakeTool', {});
+      expect(res.handled).toBe(true);
+    } catch (e) {
+      console.error('測試失敗:', e);
+      throw e;
+    }
+  });
+});
+
 describe('toolOutputRouter 非工具 JSON', () => {
   test('未閉合的 JSON 代碼區塊應直接輸出', async () => {
     expect.assertions(2);

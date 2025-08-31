@@ -21,7 +21,19 @@ function findToolJSON(buffer) {
   for (let i = 0; i < buffer.length; i++) {
     // 先判斷 Markdown 代碼區塊界線，但需忽略字串內的反引號
     if (!inString && buffer.startsWith('```', i)) {
-      inCode = !inCode;
+      if (inCode) {
+        // 已在代碼區塊內，遇到結束反引號時關閉
+        inCode = false;
+      } else {
+        const after = buffer.slice(i + 3);
+        const match = after.match(/^([a-zA-Z]*)[\t\r\n ]*/);
+        const lang  = (match && match[1] || '').toLowerCase();
+        const rest  = after.slice(match ? match[0].length : 0);
+        if (lang === 'json' || (lang === '' && rest.trimStart().startsWith('{'))) {
+          // 只有在可能為 JSON 代碼區塊時才進入 inCode 狀態
+          inCode = true;
+        }
+      }
       i += 2; // 跳過其餘兩個反引號
       continue;
     }
