@@ -113,9 +113,35 @@ function backtickState(str) {
   let lastOpenIndex = -1;
   for (let i = 0; i < str.length - 2; i++) {
     if (str.slice(i, i + 3) === '```') {
-      if (!inCode) lastOpenIndex = i;
-      inCode = !inCode;
+      if (!inCode) {
+        // 取得語言標記（允許 "```json" 或無標記）
+        const after = str.slice(i + 3);
+        const match = after.match(/^([a-zA-Z]*)[\t\r\n ]*/);
+        const lang  = (match && match[1] || '').toLowerCase();
+        const rest  = after.slice(match ? match[0].length : 0).trimStart();
+        if (lang === 'json' || (lang === '' && rest.startsWith('{'))) {
+          inCode = true;
+          lastOpenIndex = i;
+        }
+      } else {
+        // 已在代碼區塊中，遇到結束反引號時關閉
+        inCode = false;
+      }
       i += 2;
+    }
+  }
+  // 若仍在 JSON 代碼區塊內，檢查內容是否為非工具的完整 JSON
+  if (inCode) {
+    try {
+      const after = str.slice(lastOpenIndex + 3);
+      const match = after.match(/^([a-zA-Z]*)[\t\r\n ]*/); // 語言標記
+      const rest  = after.slice(match ? match[0].length : 0);
+      const trimmed = rest.trim();
+      const tool = findToolJSON(trimmed);
+      JSON.parse(trimmed); // 若解析失敗，將落入 catch
+      if (!tool) inCode = false; // 非工具 JSON，放行
+    } catch (_) {
+      // 保留 inCode 狀態，等待後續資料補齊
     }
   }
   return { inCode, lastOpenIndex };

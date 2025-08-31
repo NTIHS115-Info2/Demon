@@ -108,3 +108,33 @@ describe('toolOutputRouter JSON 字串包含 Markdown', () => {
     }
   });
 });
+
+describe('toolOutputRouter 文字含三重反引號', () => {
+  test('非 JSON 的 ``` 不應阻擋輸出', async () => {
+    expect.assertions(2);
+    try {
+      const res = await routeOutput('Use ``` to start a code block.');
+
+      expect(res.handled).toBe(false);
+      expect(res.content).toBe('Use ``` to start a code block.');
+    } catch (e) {
+      console.error('測試失敗:', e);
+      throw e;
+    }
+  });
+});
+
+describe('toolOutputRouter 非工具 JSON', () => {
+  test('未閉合的 JSON 代碼區塊應直接輸出', async () => {
+    expect.assertions(2);
+    try {
+      const res = await routeOutput('```json\n{"foo":1}');
+
+      expect(res.handled).toBe(false);
+      expect(res.content).toBe('```json\n{"foo":1}');
+    } catch (e) {
+      console.error('測試失敗:', e);
+      throw e;
+    }
+  });
+});
