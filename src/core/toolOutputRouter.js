@@ -114,12 +114,12 @@ function backtickState(str) {
   for (let i = 0; i < str.length - 2; i++) {
     if (str.slice(i, i + 3) === '```') {
       if (!inCode) {
-        // 檢查後續是否為 JSON（允許 "```json" 或直接接著 "{"）
-        const after  = str.slice(i + 3);
-        const match  = after.match(/^([a-zA-Z]*)[\t\r\n ]*/); // 取得語言標記
-        const lang   = (match && match[1] || '').toLowerCase();
-        const rest   = after.slice(match ? match[0].length : 0).trimStart();
-        if ((lang === '' || lang === 'json') && rest.startsWith('{')) {
+        // 取得語言標記（允許 "```json" 或無標記）
+        const after = str.slice(i + 3);
+        const match = after.match(/^([a-zA-Z]*)[\t\r\n ]*/);
+        const lang  = (match && match[1] || '').toLowerCase();
+        const rest  = after.slice(match ? match[0].length : 0).trimStart();
+        if (lang === 'json' || (lang === '' && rest.startsWith('{'))) {
           inCode = true;
           lastOpenIndex = i;
         }
