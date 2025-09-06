@@ -24,6 +24,7 @@ class PluginsManager {
     this.running = false;              // 佇列處理狀態
     this.maxConcurrent = 1;            // 每次僅啟動一個插件
     this.queuedPlugins = new Set();    // 追蹤目前在佇列中的插件，防止重複加入
+    this.exceptionLLM = new Set();     // LLM 插件啟動例外清單
   }
 
   // 統一處理插件名稱小寫
@@ -317,6 +318,77 @@ class PluginsManager {
    */
   getAllLLMPlugin() {
     return Array.from(this.llmPlugins.values());
+  }
+
+  /**
+   * 設定 LLM 插件啟動例外清單
+   * @param {Array<string>} list - 要排除啟動的插件名稱陣列
+   * @returns {boolean} 是否成功設定
+   */
+  SetExceptionLLMTool(list = []) {
+    try {
+      if (!Array.isArray(list)) {
+        throw new Error("傳入參數必須為陣列");
+      }
+
+      // 正規化名稱後存入 Set
+      this.exceptionLLM = new Set(
+        list.map(name => this.normalizeName(name))
+      );
+
+      Logger.info(
+        `[StartLLMTool] 已設定例外插件清單: ${Array.from(this.exceptionLLM).join(', ') || '無'}`
+      );
+      return true;
+    } catch (err) {
+      Logger.error(`[StartLLMTool] 設定例外清單失敗：${err.message}`);
+      return false;
+    }
+  }
+
+  /**
+   * 啟動所有非例外清單中的 LLM 插件
+   * @param {Object} options - 傳遞給插件的啟動選項
+   * @returns {Promise<{started:string[], skipped:string[]}>>}
+   */
+  async StartLLMTool(options = {}) {
+    const result = { started: [], skipped: [] };
+
+    const list = this.getAllLLMPlugin();
+    if (!Array.isArray(list)) {
+      Logger.error('[StartLLMTool] getAllLLMPlugin 回傳非陣列');
+      return result;
+    }
+
+    // 進行型別守衛，確保必要欄位存在
+    const plugins = list.filter(p =>
+      p && typeof p === 'object' &&
+      typeof p.pluginName === 'string' &&
+      typeof p.online === 'function'
+    );
+
+    // 依 priority 排序，高優先度優先啟動
+    plugins.sort((a, b) => (b.priority || 0) - (a.priority || 0));
+
+    for (const plugin of plugins) {
+      const name = this.normalizeName(plugin.pluginName);
+
+      if (this.exceptionLLM.has(name)) {
+        Logger.info(`[StartLLMTool] 插件 ${name} 在例外清單中，跳過啟動`);
+        result.skipped.push(name);
+        continue;
+      }
+
+      try {
+        await this.queueOnline(name, options);
+        Logger.info(`[StartLLMTool] 插件 ${name} 啟動完成`);
+        result.started.push(name);
+      } catch (err) {
+        Logger.error(`[StartLLMTool] 插件 ${name} 啟動失敗：${err.message}`);
+      }
+    }
+
+    return result;
   }
 
   /**
