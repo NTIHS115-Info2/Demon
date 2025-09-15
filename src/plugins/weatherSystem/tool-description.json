@@ -1,0 +1,56 @@
+{
+  "toolName": "weatherSystem",
+  "description": "取得台灣氣象資料，支援多種中央氣象署 API 查詢。若未指定參數，預設以臺南市為查詢地點。",
+  "apis": {
+    "GetWeather36h": "今明 36 小時天氣預報",
+    "GetWeatherWeekly": "一週天氣預報",
+    "GetTownWeather": "鄉鎮天氣預報",
+    "GetStationWeatherNow": "即時氣象站觀測",
+    "GetRainfallNow": "即時雨量觀測",
+    "GetUVIndex": "即時紫外線指數",
+    "GetEarthquakeReport": "地震報告",
+    "GetHeavyRainAlert": "豪雨特報",
+    "GetColdAlert": "低溫特報",
+    "GetTyphoonAlert": "颱風警報"
+  },
+  "apiParams": {
+    "GetWeather36h": {
+      "locationName": "縣市名稱（預設：臺南市）"
+    },
+    "GetWeatherWeekly": {
+      "locationName": "縣市名稱（預設：臺南市）"
+    },
+    "GetTownWeather": {
+      "locationName": "縣市名稱（預設：臺南市）",
+      "townName": "鄉鎮名稱（預設：中西區）"
+    },
+    "GetStationWeatherNow": {
+      "stationId": "測站 ID（預設：467410 臺南測站）"
+    },
+    "GetRainfallNow": {
+      "stationId": "雨量站 ID（預設：467410 臺南測站）"
+    },
+    "GetUVIndex": {
+      "locationName": "縣市名稱（預設：臺南市）"
+    },
+    "GetEarthquakeReport": {},
+    "GetHeavyRainAlert": {
+      "locationName": "縣市名稱（預設：臺南市）"
+    },
+    "GetColdAlert": {
+      "locationName": "縣市名稱（預設：臺南市）"
+    },
+    "GetTyphoonAlert": {
+      "locationName": "縣市名稱（預設：臺南市）"
+    }
+  },
+  "input": {
+    "apiName": "字串，指定要呼叫的 API 名稱，如 GetWeather36h。",
+    "params": "物件，可選，傳入查詢參數。"
+  },
+  "output": {
+    "result": "物件。API 回傳的 JSON 資料。",
+    "resultType": "字串，固定為 'json'。",
+    "error": "字串。發生錯誤時回傳。"
+  }
+}
