@@ -190,15 +190,15 @@ module.exports = {
       return { error: 'WeatherSystem 尚未上線' };
     }
     try {
-      if (!checkRateLimit()) {
-        return { error: '超過每分鐘 API 呼叫上限' };
-      }
       if (!apiKey) {
         return { error: '缺少 API 金鑰' };
       }
       const { apiName, params } = data;
       if (!apiName || !API_MAP[apiName]) {
         throw new Error('未知的 API 名稱');
+      }
+      if (!checkRateLimit()) {
+        return { error: '超過每分鐘 API 呼叫上限' };
       }
       // 合併預設參數與外部傳入參數，未指定時採用預設的臺南市設定
       const defaultParams = DEFAULT_PARAMS[apiName] || {};
