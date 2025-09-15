@@ -85,6 +85,11 @@ function requestWithRetry(url, retries = 1) {
             try {
               resolve(JSON.parse(data));
             } catch (e) {
+              if (remain > 0) {
+                logger.warn('JSON 解析失敗，重試中... ' + e.message);
+                attempt(remain - 1);
+                return;
+              }
               reject(new Error('JSON 解析失敗'));
             }
           } else if (remain > 0) {
@@ -92,6 +97,14 @@ function requestWithRetry(url, retries = 1) {
             attempt(remain - 1);
           } else {
             reject(new Error(`API 請求失敗，狀態碼 ${res.statusCode}`));
+          }
+        });
+        res.on('error', (err) => {
+          if (remain > 0) {
+            logger.warn('API 回應處理錯誤，重試中... ' + err.message);
+            attempt(remain - 1);
+          } else {
+            reject(err);
           }
         });
       });
