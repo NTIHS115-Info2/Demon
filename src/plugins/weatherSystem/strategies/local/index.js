@@ -183,9 +183,14 @@ module.exports = {
       if (!apiKey) {
         return { error: '缺少 API 金鑰' };
       }
+      const { apiName, params } = data;
+      if (!apiName || !API_MAP[apiName]) {
+        return { error: '未知的 API 名稱' };
+      }
       // 合併預設參數與外部傳入參數，未指定時採用預設的臺南市設定
-      const mergedParams = { ...DEFAULT_PARAMS[data.apiName], ...(data.params || {}) };
-      const url = buildUrl(data.apiName, mergedParams, apiKey);
+      const defaultParams = DEFAULT_PARAMS[apiName] || {};
+      const mergedParams = { ...defaultParams, ...(params || {}) };
+      const url = buildUrl(apiName, mergedParams, apiKey);
       const result = await requestWithRetry(url, 1);
       return { result, resultType: 'json' };
     } catch (e) {
