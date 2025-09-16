@@ -85,6 +85,11 @@ function requestWithRetry(url, retries = 1) {
             try {
               resolve(JSON.parse(data));
             } catch (e) {
+              if (remain > 0) {
+                logger.warn('JSON 解析失敗，重試中... ' + e.message);
+                attempt(remain - 1);
+                return;
+              }
               reject(new Error('JSON 解析失敗'));
             }
           } else if (remain > 0) {
@@ -92,6 +97,14 @@ function requestWithRetry(url, retries = 1) {
             attempt(remain - 1);
           } else {
             reject(new Error(`API 請求失敗，狀態碼 ${res.statusCode}`));
+          }
+        });
+        res.on('error', (err) => {
+          if (remain > 0) {
+            logger.warn('API 回應處理錯誤，重試中... ' + err.message);
+            attempt(remain - 1);
+          } else {
+            reject(err);
           }
         });
       });
@@ -177,15 +190,20 @@ module.exports = {
       return { error: 'WeatherSystem 尚未上線' };
     }
     try {
-      if (!checkRateLimit()) {
-        return { error: '超過每分鐘 API 呼叫上限' };
-      }
       if (!apiKey) {
         return { error: '缺少 API 金鑰' };
       }
+      const { apiName, params } = data;
+      if (!apiName || !API_MAP[apiName]) {
+        throw new Error('未知的 API 名稱');
+      }
+      if (!checkRateLimit()) {
+        return { error: '超過每分鐘 API 呼叫上限' };
+      }
       // 合併預設參數與外部傳入參數，未指定時採用預設的臺南市設定
-      const mergedParams = { ...DEFAULT_PARAMS[data.apiName], ...(data.params || {}) };
-      const url = buildUrl(data.apiName, mergedParams, apiKey);
+      const defaultParams = DEFAULT_PARAMS[apiName] || {};
+      const mergedParams = { ...defaultParams, ...(params || {}) };
+      const url = buildUrl(apiName, mergedParams, apiKey);
       const result = await requestWithRetry(url, 1);
       return { result, resultType: 'json' };
     } catch (e) {
