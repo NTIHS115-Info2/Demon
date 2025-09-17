@@ -303,6 +303,41 @@ class PluginsManager {
   }
 
   /**
+   * 載入所有LLM插件
+   */
+  loadAllLLMPlugins() {
+    Logger.info("正在嘗試載入所有 LLM 插件");
+    const pluginDirs = fs.readdirSync(this.rootPath).filter(dir => {
+      return fs.statSync(path.join(this.rootPath, dir)).isDirectory();
+    });
+
+    for (const dir of pluginDirs) {
+      try {
+        const pluginPath = path.join(this.rootPath, dir, "index.js");
+        if (fs.existsSync(pluginPath)) {
+          const plugin = require(pluginPath);
+          if (plugin.pluginType === 'LLM') {
+            if (!this.requestReview(plugin)) {
+              throw new Error(`插件 ${dir} 不符合要求，請檢查其實作`);
+            }
+            // 若插件未定義 priority 則給予預設值 0
+            if (typeof plugin.priority !== 'number') plugin.priority = 0;
+            plugin.updateStrategy('auto');  // 確保策略已更新
+            const id = this.normalizeName(dir);
+            this.plugins.set(id, plugin); // 儲存插件
+            this.llmPlugins.set(id, plugin);
+            Logger.info(`[PluginManager] 載入 LLM 插件 ${dir}`);
+          } else {
+            Logger.info(`[PluginManager] 插件 ${dir} 非 LLM 類型，跳過`);
+          } 
+        }
+      } catch (err) {
+        Logger.error(`[PluginManager] 載入插件 ${dir} 失敗：${err.message}`);
+      }
+    }
+  } 
+
+  /**
    * 取得指定名稱的 LLM 插件
    * @param {string} name
    * @returns {object|null}
@@ -353,6 +388,10 @@ class PluginsManager {
    */
   async StartLLMTool(options = {}) {
     const result = { started: [], skipped: [] };
+
+    // 確保已載入所有 LLM 插件
+    this.loadAllLLMPlugins();
+    
 
     const list = this.getAllLLMPlugin();
     if (!Array.isArray(list)) {

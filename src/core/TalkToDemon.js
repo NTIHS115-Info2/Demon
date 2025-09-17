@@ -7,6 +7,7 @@ const PM                        = require('./pluginsManager.js');
 const Logger                    = require('../utils/logger.js');
 const historyManager            = require('./historyManager');
 const toolOutputRouter          = require('./toolOutputRouter');
+const { log } = require('console');
 
 // 參數
 const MAX_HISTORY     = 50;
@@ -113,6 +114,8 @@ class TalkToDemonManager extends EventEmitter {
     this._needCleanup     = false;    // 工具結果是否待清除
     this.phaseId       = 0;   // 同一任務（工具前/後）同一 phase
     this._waitingHold  = false; // 鎖住 waiting=true 直到該輪 end
+    this._toolBusy     = false; // 工具執行中（由 Router waiting 事件驅動）
+    this._endDeferred  = false; // end-latch：忙碌時先到的 end 會延後處理
   }
 
   /*─── 工具函式 ──────────────────────────────────────────*/
@@ -196,8 +199,17 @@ class TalkToDemonManager extends EventEmitter {
     const handler = new LlamaStreamHandler(this.model);
     this.currentHandler = handler;
     const router = new toolOutputRouter.ToolStreamRouter();
-    // 只轉發 waiting:true，避免工具完成時提前退回 false
-    router.on('waiting', s => { if (s) this._setWaiting(true, { reason: 'tool_busy' }); });
+    // waiting:true/false 由 Router 發出，對應 工具開始/結束
+    router.on('waiting', s => {
+      this._toolBusy = !!s;
+      if (s) {
+        this._setWaiting(true, { reason: 'tool_busy' });
+        this.closeGate(); // 擋住第一輪「請等一下」之類的雜訊
+      } else {
+        this._setWaiting(false, { reason: 'tool_idle' });
+        this.openGate();  // 第二輪再正常輸出
+      }
+    });
     let assistantBuf = '';
     let toolTriggered = false;
 
@@ -207,15 +219,21 @@ class TalkToDemonManager extends EventEmitter {
       this._pushChunk(chunk);
     });
 
-    // 若偵測到工具觸發，先暫存結果，稍後重新組合後送出
+    // 工具已完成：msg 即工具回傳資料（Router 已保證）
     router.on('tool', msg => {
-      // 觸發工具：本輪結束前都維持 waiting=true
-      this._waitingHold = true;
-      this._setWaiting(true, { reason: 'tool_detected' });
-
       toolTriggered = true;
+      this._waitingHold = false;     // 不再強制 waiting
       this.toolResultBuffer.push(msg);
       this._needCleanup = true;
+
+      // 若 end 早一步來過 → 延後鎖已被設起，這裡直接開同一 phase 的第二輪
+      if (this._endDeferred) {
+        this._endDeferred = false;
+        this._processNext({ message: this.currentTask.message, _keepPhase: true });
+        return;
+      }
+      // 否則主動結束本輪串流，加速進入 end → 由 end 啟第二輪
+      try { this.currentHandler?.stop(); } catch {}
     });
 
     handler.on('data', chunk => {
@@ -224,15 +242,16 @@ class TalkToDemonManager extends EventEmitter {
 
     handler.on('end', async () => {
       router.flush();
+      // end-latch：若工具仍在忙（或結果尚未回來），延後收尾
+      if (this._toolBusy) {
+        this._endDeferred = true;
+        this.logger.info('[完成-deferred] 工具執行中，延後收尾與下一輪啟動');
+        return;
+      }
+
       this.emit('end');
       this.processing = false;
       this.logger.info('[完成] 對話回應完成');
-
-      // 若觸發工具，需等待工具完成後重新組合訊息再請求模型
-      if (toolTriggered) {
-        this._processNext({ message: this.currentTask.message, _keepPhase: true });
-        return;
-      }
 
       const text = assistantBuf.trim();
       if (text) {
@@ -246,6 +265,11 @@ class TalkToDemonManager extends EventEmitter {
         this.emit('data', text);
       }
       if (!toolTriggered) this._cleanupToolBuffer();
+      // 工具已完成且本輪自然 end（或被 stop 觸發 end）→ 啟動同一 phase 的第二輪
+      if (toolTriggered) {
+        this._processNext({ message: this.currentTask.message, _keepPhase: true });
+        return;
+      }
       if (this.pendingQueue.length > 0) {
         const nextTask = this.pendingQueue.shift();
         this._processNext(nextTask);
@@ -268,6 +292,8 @@ class TalkToDemonManager extends EventEmitter {
         this._setWaiting(false, { reason: 'post_tool_round_start' });
         this._waitingHold = false;
       }
+      // 讓 log 可讀：避免 [object Object]
+      try { this.logger.info('composeMessages=' + JSON.stringify(messages)); } catch {}
       handler.start(messages);  // 啟動串流
     }).catch(err => {
       this.logger.error('[錯誤] 讀取服務狀態失敗: ' + err.message);

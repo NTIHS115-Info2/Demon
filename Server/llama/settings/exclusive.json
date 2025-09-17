@@ -2,6 +2,8 @@
   "modelPath": "E:/ai-training/Demon/Server/llama/model/gemma-3-12b-it-q4_0.gguf",
   "params": {
     "ctx-size": 16384,
+    "main-gpu": 0,
+    "tensor-split" : [1.0],
     "n-gpu-layers": 50,
     "threads": 24,
     "batch-size": 512,

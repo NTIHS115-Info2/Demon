@@ -260,3 +260,8 @@
 # [v.1.3.1]
 ### Change
 - 將WeatherSystem-local的時間常數抽出，以變數定義使用
+
+# [v.1.3.2]
+### Fix
+- 修正 TalkToDemon 在工具觸發後的等待狀態管理
+- 修復 pluginsManager 載入LLM插件時的錯誤邏輯
