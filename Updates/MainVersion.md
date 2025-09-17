@@ -247,3 +247,16 @@
 # [v.1.2.7]
 ### New
 - 新增一鍵上線LLMTool的功能，可以一次啟動被排除工具以外的所有工具
+
+# [v.1.3]
+### New
+- 新增 WeatherSystem 插件，整合中央氣象署 10 種氣象資料並預設臺南市查詢參數
+- 新增 jsonParser 工具，提供 JSON 字串解析與資料清理能力
+### Change
+- WeatherSystem 改採本地策略並從 tokens/cwa.js 載入授權金鑰，同步加入錯誤處理與速率限制
+### Test
+- 補齊 WeatherSystem 本地策略單元測試，涵蓋缺少金鑰、速率限制與 JSON 解析等情境
+
+# [v.1.3.1]
+### Change
+- 將WeatherSystem-local的時間常數抽出，以變數定義使用

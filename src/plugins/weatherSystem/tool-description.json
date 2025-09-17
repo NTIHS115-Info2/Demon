@@ -1,0 +1,56 @@
+{
+  "toolName": "weatherSystem",
+  "description": "Retrieve weather information for Taiwan using multiple Central Weather Administration (CWA) APIs. If no parameters are specified, the default query location is 臺南市.",
+  "apis": {
+    "GetWeather36h": "36-hour weather forecast (今明 36 小時天氣預報)",
+    "GetWeatherWeekly": "7-day city-level weather forecast (一週天氣預報)",
+    "GetTownWeather": "7-day town-level weather forecast (鄉鎮天氣預報)",
+    "GetStationWeatherNow": "Real-time weather observation from a station (即時氣象站觀測)",
+    "GetRainfallNow": "Real-time rainfall observation (即時雨量觀測)",
+    "GetUVIndex": "Real-time UV index (即時紫外線指數)",
+    "GetEarthquakeReport": "Earthquake report (地震報告)",
+    "GetHeavyRainAlert": "Heavy rain advisory (豪雨特報)",
+    "GetColdAlert": "Cold weather advisory (低溫特報)",
+    "GetTyphoonAlert": "Typhoon alert (颱風警報)"
+  },
+  "apiParams": {
+    "GetWeather36h": {
+      "locationName": "City or county name. Default: 臺南市"
+    },
+    "GetWeatherWeekly": {
+      "locationName": "City or county name. Default: 臺南市"
+    },
+    "GetTownWeather": {
+      "locationName": "City or county name. Default: 臺南市",
+      "townName": "Town or district name. Default: 中西區"
+    },
+    "GetStationWeatherNow": {
+      "stationId": "Weather station ID. Default: 467410 (臺南測站)"
+    },
+    "GetRainfallNow": {
+      "stationId": "Rainfall station ID. Default: 467410 (臺南測站)"
+    },
+    "GetUVIndex": {
+      "locationName": "City or county name. Default: 臺南市"
+    },
+    "GetEarthquakeReport": {},
+    "GetHeavyRainAlert": {
+      "locationName": "City or county name. Default: 臺南市"
+    },
+    "GetColdAlert": {
+      "locationName": "City or county name. Default: 臺南市"
+    },
+    "GetTyphoonAlert": {
+      "locationName": "City or county name. Default: 臺南市"
+    }
+  },
+  "input": {
+    "apiName": "String. The API to call, e.g., GetWeather36h.",
+    "params": "Optional object. Key-value pairs of query parameters for the chosen API."
+  },
+  "output": {
+    "result": "Object. The JSON data returned by the API.",
+    "resultType": "String. Always 'json'.",
+    "error": "String. Returned if an error occurs."
+  }
+}
