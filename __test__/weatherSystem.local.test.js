@@ -1,5 +1,3 @@
-const fs = require('fs');
-const path = require('path');
 const { EventEmitter } = require('events');
 
 // 模擬 logger，避免測試時輸出大量日誌
@@ -11,51 +9,7 @@ jest.mock('../src/utils/logger', () => {
   }));
 });
 
-const TOKENS_DIR = path.join(__dirname, '..', 'tokens');
-const TOKENS_FILE = path.join(TOKENS_DIR, 'cwa.js');
-
-/**
- * 確保 tokens 目錄存在並建立對應檔案
- * @param {string} [apiKey]
- */
-function safeWriteTokenFile(apiKey) {
-  try {
-    fs.mkdirSync(TOKENS_DIR, { recursive: true });
-    const content = apiKey
-      ? `module.exports = { CWA_API_KEY: '${apiKey}' };\n`
-      : 'module.exports = {};\n';
-    fs.writeFileSync(TOKENS_FILE, content, 'utf8');
-  } catch (err) {
-    throw new Error(`建立 tokens/cwa.js 失敗：${err.message}`);
-  }
-}
-
-/**
- * 移除測試期間建立的 tokens 檔案
- */
-function safeRemoveTokenFile() {
-  try {
-    if (fs.existsSync(TOKENS_FILE)) {
-      fs.unlinkSync(TOKENS_FILE);
-    }
-  } catch (err) {
-    throw new Error(`清除 tokens/cwa.js 失敗：${err.message}`);
-  }
-}
-
-/**
- * 若 tokens 目錄為空則嘗試刪除（僅清理，失敗時不影響測試）
- */
-function safeCleanupTokensDir() {
-  try {
-    if (fs.existsSync(TOKENS_DIR) && fs.readdirSync(TOKENS_DIR).length === 0) {
-      fs.rmdirSync(TOKENS_DIR);
-    }
-  } catch (err) {
-    // 測試結束後的清理若失敗僅記錄於主控台即可
-    console.warn(`清理 tokens 目錄時出現非致命錯誤：${err.message}`);
-  }
-}
+const TOKEN_MODULE_PATH = '../tokens/cwa';
 
 /**
  * 建立 https.get 的模擬實作
@@ -119,14 +73,14 @@ function loadLocalStrategy({ responses = [], hasApiKey = true } = {}) {
   jest.resetModules();
   jest.clearAllMocks();
 
-  safeRemoveTokenFile();
-
-  if (hasApiKey) {
-    safeWriteTokenFile('TEST_API_KEY');
-  }
-
   const httpsGetMock = createHttpsGetMock(responses);
   jest.doMock('https', () => ({ get: httpsGetMock }));
+
+  jest.doMock(
+    TOKEN_MODULE_PATH,
+    () => (hasApiKey ? { CWA_API_KEY: 'TEST_API_KEY' } : {}),
+    { virtual: true }
+  );
 
   const strategy = require('../src/plugins/weatherSystem/strategies/local');
   return { strategy, httpsGetMock };
@@ -135,8 +89,7 @@ function loadLocalStrategy({ responses = [], hasApiKey = true } = {}) {
 afterEach(() => {
   jest.unmock('https');
   jest.restoreAllMocks();
-  safeRemoveTokenFile();
-  safeCleanupTokensDir();
+  jest.unmock(TOKEN_MODULE_PATH);
 });
 
 describe('WeatherSystem 本地策略', () => {
@@ -197,14 +150,16 @@ describe('WeatherSystem 本地策略', () => {
 
   test('收到無效 JSON 時應回傳解析錯誤', async () => {
     const responses = [
-      { statusCode: 200, body: 'not json' }
+      { statusCode: 200, body: 'not json' },
+      { statusCode: 200, body: 'still not json' }
     ];
-    const { strategy } = loadLocalStrategy({ responses });
+    const { strategy, httpsGetMock } = loadLocalStrategy({ responses });
 
     await strategy.online();
     const result = await strategy.send({ apiName: 'GetWeather36h' });
 
     expect(result).toEqual({ error: 'JSON 解析失敗' });
+    expect(httpsGetMock).toHaveBeenCalledTimes(2);
   });
 
   test('超過每分鐘速率限制時應阻止呼叫', async () => {
