@@ -19,6 +19,11 @@ let onlineState = false;
 
 // 每分鐘最多允許呼叫次數
 const MAX_CALLS_PER_MIN = 60;
+// API 請求逾時時間（毫秒）
+const REQUEST_TIMEOUT_MS = 5000;
+// 每分鐘時間窗口（毫秒）
+const RATE_LIMIT_WINDOW_MS = 60000;
+
 // 紀錄最近一分鐘內的呼叫時間戳記
 const callHistory = [];
 
@@ -116,7 +121,7 @@ function requestWithRetry(url, retries = 1) {
           reject(err);
         }
       });
-      req.setTimeout(5000, () => {
+      req.setTimeout(REQUEST_TIMEOUT_MS, () => {
         req.destroy(new Error('API 請求逾時'));
       });
     };
@@ -131,7 +136,7 @@ function requestWithRetry(url, retries = 1) {
 function checkRateLimit() {
   const now = Date.now();
   // 移除一分鐘前的紀錄
-  while (callHistory.length && now - callHistory[0] > 60000) {
+  while (callHistory.length && now - callHistory[0] > RATE_LIMIT_WINDOW_MS) {
     callHistory.shift();
   }
   if (callHistory.length >= MAX_CALLS_PER_MIN) {

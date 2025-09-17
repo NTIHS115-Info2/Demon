@@ -48,17 +48,17 @@
 
 ## 🔌 目前已實作的 Plugins
 
-| Plugin 名稱         | 功能簡述                            |
-|----------------------|-------------------------------------|
-| `ASR`   | 即時語音辨識，支援斷句與清理        |
-| `TTS`        | 語音輸出，支援音量控制與語速切換    |
-| `llamaServer`     | 語言模型推理 |
-| `discord`   | 對於discord的使用支持(discord bot)  |
-| `speechBroker`       | 負責文字轉語音的中間處裡    |
-| `toolReference` | 針對所有Demon可以使用的工具的工具書  |
-| `getTime(llmTool)` | 取得並偏移時間的工具 |
-| `diffTime(llmTool)` | 計算時間差距的工具 |
-| `weatherSystem(llmTool)` | 用來獲取天氣相關資訊的工具|
+| Plugin 名稱         | 功能簡述                            | 版本 |
+|----------------------|-------------------------------------|---|
+| `ASR`   | 即時語音辨識，支援斷句與清理        ||
+| `TTS`        | 語音輸出，支援音量控制與語速切換    ||
+| `llamaServer`     | 語言模型推理 ||
+| `discord`   | 對於discord的使用支持(discord bot)  ||
+| `speechBroker`       | 負責文字轉語音的中間處裡    ||
+| `toolReference` | 針對所有Demon可以使用的工具的工具書  ||
+| `getTime(llmTool)` | 取得並偏移時間的工具 |v0.1.1|
+| `diffTime(llmTool)` | 計算時間差距的工具 |v0.1.1|
+| `weatherSystem(llmTool)` | 用來獲取天氣相關資訊的工具| v1.1|
 
 > 所有插件皆透過統一介面實作，可自行擴充、替換或關閉。
 

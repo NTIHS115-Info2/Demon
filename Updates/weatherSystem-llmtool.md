@@ -21,3 +21,7 @@
 ### [v0.5]
 ## Test
 - 新增 WeatherSystem 本地策略單元測試，驗證速率限制、錯誤處理與預設參數合併
+
+### [v1.1]
+## Change
+- 將WeatherSystem-local的時間常數抽出，以變數定義使用

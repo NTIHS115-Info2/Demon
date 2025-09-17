@@ -256,3 +256,7 @@
 - WeatherSystem 改採本地策略並從 tokens/cwa.js 載入授權金鑰，同步加入錯誤處理與速率限制
 ### Test
 - 補齊 WeatherSystem 本地策略單元測試，涵蓋缺少金鑰、速率限制與 JSON 解析等情境
+
+# [v.1.3.1]
+### Change
+- 將WeatherSystem-local的時間常數抽出，以變數定義使用
