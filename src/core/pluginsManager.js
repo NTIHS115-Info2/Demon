@@ -61,7 +61,9 @@ class PluginsManager {
       // 若插件未定義 priority 則給予預設值 0
       if (typeof plugin.priority !== 'number') plugin.priority = 0;
 
-      plugin.updateStrategy(mode);  // 確保策略已更新
+      if (typeof plugin.updateStrategy === 'function') {
+        plugin.updateStrategy(mode);  // 確保策略已更新
+      }
       const id = this.normalizeName(name);
       this.plugins.set(id, plugin); // 儲存插件
       if (plugin.pluginType === 'LLM') {

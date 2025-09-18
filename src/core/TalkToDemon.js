@@ -211,6 +211,7 @@ class TalkToDemonManager extends EventEmitter {
     });
     let assistantBuf = '';
     let toolTriggered = false;
+    let postToolAbort = false;
 
     // 收到一般串流資料時直接輸出，同時累積至回應緩衝
     router.on('data', chunk => {
@@ -232,6 +233,7 @@ class TalkToDemonManager extends EventEmitter {
         return;
       }
       // 否則主動結束本輪串流，加速進入 end → 由 end 啟第二輪
+      postToolAbort = true;
       try { this.currentHandler?.stop(); } catch {}
     });
 
@@ -276,7 +278,15 @@ class TalkToDemonManager extends EventEmitter {
     });
 
     handler.on('error',  err => this.emit('error', err));
-    handler.on('abort', () => this.emit('abort'));
+    handler.on('abort', () => {
+      this.emit('abort');
+      if (postToolAbort) {
+        postToolAbort = false;
+        this.processing = false;
+        this.logger.info('[中止] 工具結果到達，重新啟動回合');
+        this._processNext({ message: this.currentTask.message, _keepPhase: true });
+      }
+    });
 
     // 確認插件服務狀態
     PM.getPluginState('llamaServer').then(state => {
