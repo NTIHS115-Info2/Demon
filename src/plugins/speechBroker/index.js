@@ -7,7 +7,6 @@ let strategy = null;
 
 
 module.exports = {
-  priority: 0,
   // 更新策略，目前僅支援 local
   async updateStrategy() {
     logger.info('SpeechBroker 策略更新中...');

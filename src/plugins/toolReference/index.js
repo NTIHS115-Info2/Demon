@@ -6,9 +6,6 @@ let strategy = null;
 let mode = 'local';
 
 module.exports = {
-  pluginName: 'toolReference',
-  pluginType: 'LLM',
-  priority: 0,
 
   /**
    * 更新策略，目前僅支援 local
