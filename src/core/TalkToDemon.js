@@ -292,7 +292,7 @@ class TalkToDemonManager extends EventEmitter {
         this._waitingHold = false;
       }
       // 讓 log 可讀：避免 [object Object]
-      try { this.logger.info('composeMessages=' + JSON.stringify(messages)); } catch {}
+      try { this.logger.info('composeMessages=' + JSON.stringify(messages)); } catch (err) { this.logger.error('[錯誤] composeMessages 序列化失敗: ' + err.message); }
       handler.start(messages);  // 啟動串流
     }).catch(err => {
       this.logger.error('[錯誤] 讀取服務狀態失敗: ' + err.message);
