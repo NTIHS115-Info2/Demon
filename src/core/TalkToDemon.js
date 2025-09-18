@@ -7,7 +7,6 @@ const PM                        = require('./pluginsManager.js');
 const Logger                    = require('../utils/logger.js');
 const historyManager            = require('./historyManager');
 const toolOutputRouter          = require('./toolOutputRouter');
-const { log } = require('console');
 
 // 參數
 const MAX_HISTORY     = 50;
