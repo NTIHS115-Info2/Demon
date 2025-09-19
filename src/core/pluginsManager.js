@@ -328,7 +328,7 @@ class PluginsManager {
         try {
           await plugin.updateStrategy(mode);
         } catch (err) {
-          Logger.warn(`[PluginManager] 更新插件 ${plugin.pluginName || metadata.name} 策略失敗：${err.message}`);
+          Logger.warn(`[PluginManager] 更新插件 ${plugin.pluginName} 策略失敗：${err.message}`);
         }
       }
       const runtimePriority = typeof plugin.priority === 'number' ? plugin.priority : metadata.priority;
