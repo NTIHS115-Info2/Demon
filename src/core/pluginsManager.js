@@ -42,7 +42,7 @@ class PluginsManager {
     return typeof name === "string" ? name.toLowerCase() : name;
   }
 
-  // 依照名稱或目錄尋找插件註冊資訊所使用的 ID
+  // 根據插件名稱或目錄名稱解析出插件在註冊表中的唯一識別碼
   resolvePluginId(name) {
     const id = this.normalizeName(name);
     if (this.pluginRegistry.has(id)) {
