@@ -74,7 +74,7 @@ class PluginsManager {
     }
   }
 
-  // 驗證設定檔內容是否符合規範，異常時直接拋出錯誤
+  // 驗證 setting.json 的必填欄位（name, priority）與選填欄位（pluginType）的型別與值，不符合規範時拋出錯誤
   validatePluginSetting(setting, pluginDir, settingPath) {
     if (!setting || typeof setting !== 'object' || Array.isArray(setting)) {
       throw new Error(`${pluginDir}/setting.json 格式錯誤，必須為物件`);
