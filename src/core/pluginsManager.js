@@ -19,7 +19,7 @@ class PluginsManager {
     this.rootPath = path.resolve(__dirname, '..', 'plugins');
     // 插件設定登錄表，僅保存設定與路徑資訊
     this.pluginRegistry = new Map();
-    // 非法插件紀錄表，儲存設定檔錯誤與缺失資訊
+    // 無效插件紀錄表，儲存設定檔錯誤與缺失資訊
     this.invalidRegistry = new Map();
     // 目錄索引，用於將資料夾名稱對應至插件 id
     this.directoryIndex = new Map();
