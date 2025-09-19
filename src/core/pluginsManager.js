@@ -54,7 +54,7 @@ class PluginsManager {
     return null;
   }
 
-  // 讀取插件資料夾內的 setting.json，異常時丟出錯誤供外層處理
+  // 讀取插件資料夾內的 setting.json，異常時拋出錯誤供外層處理
   readPluginSetting(pluginDir) {
     const settingPath = path.join(this.rootPath, pluginDir, 'setting.json');
     if (!fs.existsSync(settingPath)) {
