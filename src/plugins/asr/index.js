@@ -13,8 +13,6 @@ let weights = { ...defaultWeights };
 
 
 module.exports = {
-  // 優先度將於 updateStrategy 時由所選策略設定
-  priority: 0,
   /**
    * 更新策略模式
    * @param {'local'|'remote'|'server'} newMode

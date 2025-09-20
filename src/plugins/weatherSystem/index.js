@@ -8,11 +8,6 @@ let strategy = null;
 let mode = 'local'; // 預設僅支援本地策略
 
 module.exports = {
-  // 標示此插件為 LLM 工具
-  pluginType: 'LLM',
-  pluginName: 'weatherSystem',
-  // 優先度將由策略決定
-  priority: 0,
   /**
    * 更新策略模式
    * @param {string} newMode - 目前僅支援 'local'

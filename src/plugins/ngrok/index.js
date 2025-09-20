@@ -7,7 +7,6 @@ let strategy = null;
 
 
 module.exports = {
-  priority: 0,
   async updateStrategy() {
     logger.info('Ngrok 策略更新中...');
     strategy = strategies.local;

@@ -1,0 +1,5 @@
+{
+  "name": "weatherSystem",
+  "priority": 0,
+  "pluginType": "LLM"
+}

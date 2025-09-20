@@ -7,8 +7,6 @@ let strategy = null;
 let mode = 'local';
 
 module.exports = {
-  // 優先度將在 updateStrategy 時由所選策略設定
-  priority: 0,
   /**
    * 更新策略模式，目前僅支援 local
    * @param {'local'} newMode

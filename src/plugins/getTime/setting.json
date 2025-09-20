@@ -1,0 +1,5 @@
+{
+  "name": "getTime",
+  "priority": 0,
+  "pluginType": "LLM"
+}

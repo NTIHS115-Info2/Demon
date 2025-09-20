@@ -42,6 +42,7 @@ describe('StartLLMTool 與 SetExceptionLLMTool 整合測試', () => {
     PM.llmPlugins.set('alpha', pluginA);
     PM.plugins.set('beta', pluginB);
     PM.llmPlugins.set('beta', pluginB);
+    PM.loadAllLLMPlugins = jest.fn().mockResolvedValue([pluginA, pluginB]);
 
     loggerInstance = Logger.mock.results[0].value;
     loggerInstance.info.mockClear();
