@@ -23,6 +23,9 @@ class PluginsManager {
     this.invalidRegistry = new Map();
     // 目錄索引，用於將資料夾名稱對應至插件 id
     this.directoryIndex = new Map();
+    // 掃描節流，避免頻繁重新掃描插件目錄
+    this.lastScanTime = 0;
+    this.scanCooldownMs = 3000;
     // 插件容器，key 為插件名稱，value 為插件實例
     this.plugins = new Map();           // 已載入的插件
     this.llmPlugins = new Map();        // 額外紀錄 LLM 類型插件方便查詢
@@ -52,6 +55,11 @@ class PluginsManager {
       return this.directoryIndex.get(id);
     }
     return null;
+  }
+
+  // 判斷是否需要重新掃描插件目錄，避免短時間內重複掃描
+  shouldRescanDirectories() {
+    return Date.now() - this.lastScanTime > this.scanCooldownMs;
   }
 
   // 讀取插件資料夾內的 setting.json，異常時拋出錯誤供外層處理
@@ -188,6 +196,7 @@ class PluginsManager {
 
   // 掃描 plugins 目錄並登錄所有合法插件，回傳掃描摘要
   scanPluginDirectories() {
+    this.lastScanTime = Date.now();
     const summary = { total: 0, registered: 0, invalid: 0 };
     let entries = [];
 
@@ -293,7 +302,7 @@ class PluginsManager {
     let targetId = this.resolvePluginId(name);
 
     // 若尚未登錄，嘗試掃描並重新定位
-    if (!targetId) {
+    if (!targetId && this.shouldRescanDirectories()) {
       this.scanPluginDirectories();
       targetId = this.resolvePluginId(name);
     }
@@ -428,29 +437,45 @@ class PluginsManager {
    * @returns {Promise<resolve> || true} 反傳回的內容 或是 true
    */
   async send(name, data) {
-    const id = this.normalizeName(name);
-    const plugin = await this.ensurePluginInstance(id);
+    const resolvedId = this.resolvePluginId(name);
+    const normalized = this.normalizeName(name);
+    const targetId = resolvedId || normalized;
+
+    if (!resolvedId && !this.pluginRegistry.has(targetId) && !this.plugins.has(targetId)) {
+      const label = typeof name === 'string' ? name : String(name);
+      Logger.warn(`[PluginManager] 找不到插件 ${label} 的設定，無法傳送資料`);
+      return false;
+    }
+
+    const plugin = await this.ensurePluginInstance(targetId);
+    const metadata = this.pluginRegistry.get(targetId);
+    const fallbackName = metadata?.name || (typeof name === 'string' ? name : String(name));
+
     if (!plugin) {
-      Logger.warn(`[PluginManager] 插件 ${id} 尚未載入，無法傳送資料`);
+      Logger.warn(`[PluginManager] 插件 ${fallbackName} 尚未載入，無法傳送資料`);
       return false;
     }
 
     if (await plugin.state() == 0) {
-      Logger.warn(`[PluginManager] 插件 ${id} 當前狀態為離線，無法傳送資料`);
+      const label = plugin.pluginName || fallbackName;
+      Logger.warn(`[PluginManager] 插件 ${label} 當前狀態為離線，無法傳送資料`);
       return false;
     }
 
     if (typeof plugin.send === "function") {
       try {
         const resolve = plugin.send(data);
-        Logger.info(`[PluginManager] 傳送資料給插件 ${id} 成功：${JSON.stringify(data)}`);
+        const label = plugin.pluginName || fallbackName;
+        Logger.info(`[PluginManager] 傳送資料給插件 ${label} 成功：${JSON.stringify(data)}`);
         return resolve || true; // 如果 send 方法沒有返回值，則返回 true
       } catch (err) {
-        Logger.error(`[PluginManager] 傳送資料給插件 ${id} 失敗：${err.message}`);
+        const label = plugin.pluginName || fallbackName;
+        Logger.error(`[PluginManager] 傳送資料給插件 ${label} 失敗：${err.message}`);
         return false;
       }
     } else {
-      Logger.warn(`[PluginManager] 插件 ${id} 未實作 send(data)，忽略傳送`);
+      const label = plugin.pluginName || fallbackName;
+      Logger.warn(`[PluginManager] 插件 ${label} 未實作 send(data)，忽略傳送`);
       return false;
     }
   }
@@ -463,50 +488,64 @@ class PluginsManager {
    * @returns {Promise<void>}
    */
   async queueOnline(name, options = {}) {
-    const id = this.normalizeName(name);
-    const plugin = await this.ensurePluginInstance(id, options.mode);
+    const resolvedId = this.resolvePluginId(name);
+    const normalized = this.normalizeName(name);
+    const targetId = resolvedId || normalized;
+
+    if (!resolvedId && !this.pluginRegistry.has(targetId) && !this.plugins.has(targetId)) {
+      const label = typeof name === 'string' ? name : String(name);
+      Logger.warn(`[Queue] 插件 ${label} 尚未登錄，無法啟動`);
+      return false;
+    }
+
+    const plugin = await this.ensurePluginInstance(targetId, options.mode);
+    const metadata = this.pluginRegistry.get(targetId);
+    const fallbackName = metadata?.name || (typeof name === 'string' ? name : String(name));
+    const label = plugin?.pluginName || fallbackName;
+
     if (!plugin?.online) {
-      Logger.warn(`[Queue] 插件 ${id} 無法啟動（尚未載入或缺少 online 方法）`);
+      Logger.warn(`[Queue] 插件 ${label} 無法啟動（尚未載入或缺少 online 方法）`);
       return false;
     }
 
     // 原子檢查：檢查是否已在佇列中或已上線，防止重複加入
-    if (this.queuedPlugins.has(id)) {
-      Logger.warn(`[Queue] 插件 ${id} 已在佇列中，忽略重複加入`);
+    const queueKey = targetId;
+    if (this.queuedPlugins.has(queueKey)) {
+      Logger.warn(`[Queue] 插件 ${label} 已在佇列中，忽略重複加入`);
       return false;
     }
 
     // 立即標記為正在處理，防止併發問題
-    this.queuedPlugins.add(id);
+    this.queuedPlugins.add(queueKey);
 
     try {
       // 檢查插件狀態，避免重複啟動
-      const state = await this.getPluginState(id);
+      const state = await this.getPluginState(queueKey);
       if (state === 1) {
-        Logger.warn(`[Queue] 插件 ${id} 已在線上，忽略重複啟動`);
-        this.queuedPlugins.delete(id); // 移除標記
+        Logger.warn(`[Queue] 插件 ${label} 已在線上，忽略重複啟動`);
+        this.queuedPlugins.delete(queueKey); // 移除標記
         return false;
       }
     } catch (err) {
-      Logger.error(`[Queue] 取得插件 ${id} 狀態失敗：${err.message}`);
-      this.queuedPlugins.delete(id); // 移除標記
+      Logger.error(`[Queue] 取得插件 ${label} 狀態失敗：${err.message}`);
+      this.queuedPlugins.delete(queueKey); // 移除標記
       return false;
     }
 
     // 用 Promise 包一層「包進 queue 後會觸發執行」的邏輯
     return new Promise((resolve, reject) => {
       this.queue.push(async () => {
-        Logger.info(`[Queue] 開始啟動插件：${id}`);
+        Logger.info(`[Queue] 開始啟動插件：${label}`);
         try {
           await plugin.online(options);  // 這裡的 online 是真實啟動流程
-          Logger.info(`[Queue] 插件 ${id} 啟動完成`);
+          Logger.info(`[Queue] 插件 ${label} 啟動完成`);
           resolve(true); // 👈 當 queue 執行這件事完畢，才 resolve
         } catch (err) {
-          Logger.error(`[Queue] 啟動插件 ${id} 失敗：${err.message}`);
+          Logger.error(`[Queue] 啟動插件 ${label} 失敗：${err.message}`);
           reject(err);
         } finally {
           // 從佇列中移除標記
-          this.queuedPlugins.delete(id);
+          this.queuedPlugins.delete(queueKey);
         }
       });
 
@@ -555,24 +594,39 @@ class PluginsManager {
    * @returns {Promise<boolean>} 成功返回 true，失敗返回 false
    */
   async offline(name) {
-    const id = this.normalizeName(name);
-    const plugin = this.plugins.get(id);
+    const resolvedId = this.resolvePluginId(name);
+    const normalized = this.normalizeName(name);
+    const targetId = resolvedId || normalized;
+
+    if (!resolvedId && !this.pluginRegistry.has(targetId) && !this.plugins.has(targetId)) {
+      const label = typeof name === 'string' ? name : String(name);
+      Logger.warn(`[PluginManager] 插件 ${label} 尚未登錄或尚未載入`);
+      return false;
+    }
+
+    const plugin = this.plugins.get(targetId);
+    const metadata = this.pluginRegistry.get(targetId);
+    const fallbackName = metadata?.name || (typeof name === 'string' ? name : String(name));
+
     if (!plugin?.offline) {
-      Logger.warn(`[PluginManager] 插件 ${id} 尚未載入或不支援離線`);
+      Logger.warn(`[PluginManager] 插件 ${fallbackName} 尚未載入或不支援離線`);
       return false;
     }
 
     if (await plugin.state() === 0) {
-      Logger.warn(`[PluginManager] 插件 ${id} 已經處於離線狀態`);
+      const label = plugin.pluginName || fallbackName;
+      Logger.warn(`[PluginManager] 插件 ${label} 已經處於離線狀態`);
       return true; // 已經離線，無需再次關閉
     }
 
     try {
       await plugin.offline();
-      Logger.info(`[PluginManager] 成功關閉插件：${id}`);
+      const label = plugin.pluginName || fallbackName;
+      Logger.info(`[PluginManager] 成功關閉插件：${label}`);
       return true;
     } catch (err) {
-      Logger.error(`[PluginManager] 關閉插件 ${id} 失敗：${err.message}`);
+      const label = plugin.pluginName || fallbackName;
+      Logger.error(`[PluginManager] 關閉插件 ${label} 失敗：${err.message}`);
       return false;
     }
   }
@@ -618,8 +672,11 @@ class PluginsManager {
    * @returns {number} 插件狀態（1: 啟動中, 0: 關閉中）
    */
   async getPluginState(name) {
-    const id = this.normalizeName(name);
-    const plugin = this.plugins.get(id);
+    const resolvedId = this.resolvePluginId(name);
+    const normalized = this.normalizeName(name);
+    const targetId = resolvedId || normalized;
+
+    const plugin = this.plugins.get(targetId);
     if (plugin?.state) {
       return await plugin.state();
     }
@@ -662,8 +719,10 @@ class PluginsManager {
    * @returns {object|null}
    */
   getLLMPlugin(name) {
-    const id = this.normalizeName(name);
-    return this.llmPlugins.get(id) || null;
+    const resolvedId = this.resolvePluginId(name);
+    const normalized = this.normalizeName(name);
+    const targetId = resolvedId || normalized;
+    return this.llmPlugins.get(targetId) || null;
   }
 
   /**
