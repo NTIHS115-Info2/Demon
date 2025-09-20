@@ -1,0 +1,5 @@
+{
+  "name": "llamaServer",
+  "priority": 0,
+  "pluginType": "Tool"
+}

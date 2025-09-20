@@ -8,8 +8,6 @@ let strategy = null;
 let mode = 'local'; // 目前僅支援 local 策略
 
 module.exports = {
-  pluginType: 'LLM',
-  priority: 0,
   /**
    * 更新策略模式
    * @param {string} newMode - 目前僅支援 'local' 模式

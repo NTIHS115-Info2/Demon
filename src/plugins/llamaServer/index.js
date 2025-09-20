@@ -15,7 +15,6 @@ let weights = { ...defaultWeights };
 
 
 module.exports = {
-    priority: 0,
 
     /**
      * 更新策略模式

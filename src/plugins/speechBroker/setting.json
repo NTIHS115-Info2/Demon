@@ -1,0 +1,5 @@
+{
+  "name": "speechBroker",
+  "priority": 0,
+  "pluginType": "Tool"
+}

@@ -12,8 +12,6 @@ const defaultWeights = { remote: 3, server: 2, local: 1 };
 let weights = { ...defaultWeights };
 
 module.exports = {
-  // 優先度將在 updateStrategy 中設定
-  priority: 0,
   /**
    * 更新策略模式
    * @param {'local'|'remote'|'server'} newMode
