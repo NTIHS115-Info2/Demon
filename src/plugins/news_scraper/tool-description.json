@@ -1,0 +1,23 @@
+[
+  {
+    "toolName": "news_scraper.autonomous_researcher",
+    "description": "接收一個研究主題和一個具體問題，自主上網搜尋、抓取、並過濾多個來源的資訊，最終回傳與具體問題最相關的文本片段。適用於需要對特定時事或主題進行快速、深度情報蒐集的場景。",
+    "input": {
+      "topic": "需要進行廣泛搜尋的研究主題，例如 'NVIDIA Blackwell architecture'",
+      "query": "需要從搜尋結果中回答的具體問題，例如 'What are the performance improvements of Blackwell over Hopper?'",
+      "depth": "搜尋結果的深度（要分析幾個來源），可選，預設為 3"
+    },
+    "output": {
+      "success": true,
+      "result": {
+        "relevant_sections": [
+          {
+            "chunk": "The fourth slide gives the goals for Blackwell: Optimize for new neural workloads, reduce memory footprint...",
+            "score": 0.8114
+          }
+        ]
+      },
+      "resultType": "json"
+    }
+  }
+]
