@@ -8,7 +8,7 @@ Server/llama/model
 src/plugins/tts/strategies/local/f5_tts
 
 logs
-index.js
+index.js/
 
 src/plugins/discord/config.js
 
@@ -24,3 +24,10 @@ tmp/
 config/*.js
 !config/*.example.js
 tokens/
+
+# --- news_scraper_plugin additions ---
+# Python Virtual Environment
+.venv/
+
+# News Scraper Cache
+src/plugins/news_scraper/strategies/local/cache/

@@ -1,0 +1,25 @@
+# API Interface (Diplomat Module)
+fastapi
+uvicorn[standard]
+
+# Web Scraping & Parsing
+requests
+beautifulsoup4
+lxml
+playwright
+fake-useragent
+
+# AI & Vector Search
+sentence-transformers
+faiss-cpu
+
+# AI Summarization
+transformers
+torch
+
+# Core Utilities
+numpy
+
+# Production Grade
+loguru
+pydantic
