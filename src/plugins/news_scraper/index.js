@@ -1,26 +1,25 @@
 // src/plugins/news_scraper/index.js
 
-// [V1.0.0] 引用路徑從 remote 改為 local
-import LocalStrategy from './strategies/local/index.js';
+// [V1.0.0-fix] 從 ES Module 改為 CommonJS
+const LocalStrategy = require('./strategies/local/index.js');
 
 class NewsScraperPlugin {
     constructor(options) {
-        this.currentState = -2; // -2: state 未定義
-        // [V1.0.0] 實例化 LocalStrategy
+        this.currentState = -2;
         this.strategy = new LocalStrategy(options);
-        this.currentState = 0; // 0: 初始化完成，處於下線狀態
+        this.currentState = 0;
         console.log("NewsScraperPlugin (v1.0.0) 已初始化，當前為離線狀態。");
     }
 
     async online(option) {
         console.log("NewsScraperPlugin 收到上線指令...");
-        this.currentState = 1; // 1: 上線
+        this.currentState = 1;
         console.log("NewsScraperPlugin 已成功上線。");
     }
 
     async offline() {
         console.log("NewsScraperPlugin 收到下線指令...");
-        this.currentState = 0; // 0: 下線
+        this.currentState = 0;
         console.log("NewsScraperPlugin 已成功下線。");
     }
 
@@ -44,4 +43,5 @@ class NewsScraperPlugin {
     }
 }
 
-export default NewsScraperPlugin;
+// [V1.0.0-fix] 從 ES Module 改為 CommonJS
+module.exports = NewsScraperPlugin;
