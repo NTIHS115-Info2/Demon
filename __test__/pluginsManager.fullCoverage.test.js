@@ -138,16 +138,24 @@ describe('PluginsManager 插件規範完整覆蓋測試', () => {
 
       if (meta.pluginType === 'LLM') {
         const descriptionPath = path.join(PM.rootPath, meta.directory, 'tool-description.json');
-        try {
-          expect(fs.existsSync(descriptionPath)).toBe(true);
-          const raw = fs.readFileSync(descriptionPath, 'utf-8');
-          const parsed = JSON.parse(raw);
-          expect(parsed.toolName).toBeTruthy();
-          expect(parsed.description).toBeTruthy();
-          expect(parsed.output).toBeDefined();
-        } catch (error) {
-          throw new Error(`檢查 LLM 插件 ${meta.name} 的工具描述檔案時發生錯誤：${error.message}`);
+        if (!fs.existsSync(descriptionPath)) {
+          throw new Error(`LLM 插件 ${meta.name} 缺少工具描述檔案：${descriptionPath}`);
         }
+        let raw;
+        try {
+          raw = fs.readFileSync(descriptionPath, 'utf-8');
+        } catch (error) {
+          throw new Error(`讀取 LLM 插件 ${meta.name} 的工具描述檔案時發生錯誤：${error.message}`);
+        }
+        let parsed;
+        try {
+          parsed = JSON.parse(raw);
+        } catch (error) {
+          throw new Error(`解析 LLM 插件 ${meta.name} 的工具描述檔案 JSON 時發生錯誤：${error.message}`);
+        }
+        expect(parsed.toolName).toBeTruthy();
+        expect(parsed.description).toBeTruthy();
+        expect(parsed.output).toBeDefined();
       }
     }
   });
