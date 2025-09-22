@@ -1,101 +1,66 @@
-// src/plugins/news_scraper/strategies/local/index.js
+// src/plugins/news_scraper/index.js
 
-// [V1.0.0-fix] 從 ES Module 改為 CommonJS
-const { spawn } = require('child_process');
-const path = require('path');
+const LocalStrategy = require('./strategies/local/index.js');
 
-class LocalStrategy {
-    constructor(options) {
-        this.pythonPath = options.pythonPath || 'python3';
-        this.strategyPath = path.join(process.cwd(), 'src', 'plugins', 'news_scraper', 'strategies', 'local');
-        console.log("本地新聞抓取策略 (LocalStrategy) V1.0.0 已初始化。");
+// 插件的狀態和策略實例
+let currentState = -2; // -2: state 未定義
+let strategy = null;
+let pluginOptions = {}; // 用於儲存初始化選項
+
+// [V1.0.0-fix] 導出一個直接包含所有方法的物件
+module.exports = {
+  // 初始化方法，由 PluginsManager 載入時調用
+  init: function(options) {
+    pluginOptions = options; // 保存選項供重啟使用
+    strategy = new LocalStrategy(options);
+    currentState = 0; // 0: 初始化完成，處於下線狀態
+    console.log("NewsScraperPlugin (v1.0.0) 已初始化，當前為離線狀態。");
+  },
+
+  online: async function(option) {
+    console.log("NewsScraperPlugin 收到上線指令...");
+    currentState = 1; // 1: 上線
+    console.log("NewsScraperPlugin 已成功上線。");
+    return true;
+  },
+
+  offline: async function() {
+    console.log("NewsScraperPlugin 收到下線指令...");
+    currentState = 0; // 0: 下線
+    console.log("NewsScraperPlugin 已成功下線。");
+  },
+
+  // [V1.0.0-fix] 新增缺失的 restart 方法
+  restart: async function(option) {
+    console.log("NewsScraperPlugin 收到重啟指令...");
+    await this.offline();
+    // 使用保存的選項重新初始化策略
+    this.init(pluginOptions);
+    await this.online(option);
+    console.log("NewsScraperPlugin 已成功重啟。");
+  },
+
+  state: async function() {
+    return currentState;
+  },
+
+  send: async function(payload) {
+    if (currentState !== 1) {
+      const errorMsg = "插件未上線，無法處理請求。";
+      console.error(errorMsg);
+      return { success: false, error: errorMsg };
     }
-
-    _runPythonScript(scriptName, args) {
-        return new Promise((resolve, reject) => {
-            const scriptPath = path.join(this.strategyPath, scriptName);
-            const pyProcess = spawn(this.pythonPath, [scriptPath, ...args]);
-            let stdout = '';
-            let stderr = '';
-            pyProcess.stdout.on('data', (data) => { stdout += data.toString(); });
-            pyProcess.stderr.on('data', (data) => { stderr += data.toString(); });
-            pyProcess.on('error', (err) => {
-                console.error(`[LocalStrategy] 無法啟動子進程 ${scriptName}:`, err);
-                reject(err);
-            });
-            pyProcess.on('close', (code) => {
-                if (code !== 0) {
-                    const errorMessage = stderr || `Python script ${scriptName} exited with code ${code}`;
-                    console.error(`[LocalStrategy] Python 腳本 ${scriptName} 執行錯誤 (code ${code}): ${errorMessage}`);
-                    reject(new Error(errorMessage));
-                } else {
-                    if (stdout.trim() === '') {
-                        resolve('{}');
-                        return;
-                    }
-                    resolve(stdout);
-                }
-            });
-        });
+    if (!strategy) {
+      const errorMsg = "策略未初始化，無法處理請求。";
+      console.error(errorMsg);
+      return { success: false, error: errorMsg };
     }
+    console.log("NewsScraperPlugin 正在將 'send' 指令轉發給策略...");
+    return strategy.send(payload);
+  },
 
-    async send(payload) {
-        const { input } = payload;
-        const { topic, query, depth = 3 } = input;
-        if (!topic || !query) {
-            return { success: false, error: "缺少 'topic' 或 'query' 參數。" };
-        }
-
-        try {
-            console.log(`[LocalStrategy] 步驟 1: 調用 researcher 發現關於 '${topic}' 的來源...`);
-            const researcherResult = await this._runPythonScript('researcher.py', [topic, depth.toString()]);
-            const researcherData = JSON.parse(researcherResult);
-            if (!researcherData.success || !researcherData.result) { return researcherData; }
-            
-            const discoveredUrls = researcherData.result.discovered_urls;
-            if (discoveredUrls.length === 0) {
-                return { success: true, result: { relevant_sections: [] }, resultType: "list" };
-            }
-
-            console.log(`[LocalStrategy] 步驟 2: 並發抓取 ${discoveredUrls.length} 個已發現的來源...`);
-            const scrapePromises = discoveredUrls.map(url => this._runPythonScript('scraper.py', [url]));
-            const scrapeResults = await Promise.all(scrapePromises);
-
-            let allArticlesText = '';
-            let scrapeErrors = [];
-            scrapeResults.forEach((content, index) => {
-                try {
-                    const data = JSON.parse(content);
-                    if (data.success && data.result) {
-                        allArticlesText += data.result.article_text + '\n\n';
-                    } else {
-                        const errorMsg = `抓取 URL ${discoveredUrls[index]} 失敗: ${data.error || '未知錯誤'}`;
-                        console.warn(`[LocalStrategy] ${errorMsg}`);
-                        scrapeErrors.push(errorMsg);
-                    }
-                } catch (e) {
-                    const errorMsg = `解析 URL ${discoveredUrls[index]} 的 scraper 結果時出錯: ${e.message}`;
-                    console.error(`[LocalStrategy] ${errorMsg}`);
-                    scrapeErrors.push(errorMsg)
-                }
-            });
-            if (!allArticlesText.trim()) {
-                 console.error("[LocalStrategy] 所有來源均抓取失敗。");
-                 return { success: false, error: "所有已發現的來源均無法抓取內容。", value: scrapeErrors };
-            }
-
-            console.log(`[LocalStrategy] 步驟 3: 調用 librarian 過濾內容...`);
-            const filteredResult = await this._runPythonScript('librarian.py', [allArticlesText, query]);
-            const filteredData = JSON.parse(filteredResult);
-            if (filteredData.success && filteredData.result) {
-                 return { success: true, result: filteredData.result, resultType: 'json' };
-            }
-            return filteredData;
-        } catch (error) {
-            return { success: false, error: `LocalStrategy 執行失敗: ${error.message}` };
-        }
-    }
-}
-
-// [V1.0.0-fix] 從 ES Module 改為 CommonJS
-module.exports = LocalStrategy;
+  updateStrategy: async function(option) {
+    console.log("updateStrategy 功能尚未實現。");
+    return { success: false, error: "Not implemented." };
+  }
+};
