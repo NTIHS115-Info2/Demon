@@ -1,20 +1,23 @@
-# src/plugins/news_scraper/strategies/local/librarian.py
+import numpy as np
 import faiss
 from sentence_transformers import SentenceTransformer
-import asyncio, re, sys, json
-from loguru import logger
-from .data_models import LibrarianInput, LibrarianOutput, LibrarianResult, RelevantSection
-import numpy as np
+import asyncio
+import re
+import sys
+import json
 
 class LibrarianStrategy:
-    """ V1.0.0-alpha: Final Version """
+    """
+    圖書管理員策略 (Librarian Strategy) - V1.0.3
+    核心職責：接收長篇文本內容與使用者查詢，利用向量語義搜索，過濾出與查詢最相關的文本片段。
+    """
     def __init__(self, model_name='all-MiniLM-L6-v2'):
-        logger.info(f"正在加載句向量模型: {model_name} ...")
         self.model = SentenceTransformer(model_name)
-        logger.info("模型加載完成。")
+        self.priority = 100
 
     def _chunk_text(self, text, min_length=50, max_length=300):
-        sentences = re.split(r'(?<=[.!?\n\r。！？])\s*', text)
+        # 修正：更穩健的句子切分正則表達式
+        sentences = re.split(r'(?<=[.!?。！？\n])\s+', text)
         chunks = []
         current_chunk = ""
         for sentence in sentences:
@@ -27,54 +30,46 @@ class LibrarianStrategy:
         if len(current_chunk.strip()) >= min_length: chunks.append(current_chunk.strip())
         return chunks
 
-    async def filter_content(self, input_data: LibrarianInput) -> LibrarianOutput:
+    async def filter_content(self, text_content: str, query: str, top_k: int = 3):
         try:
-            chunks = self._chunk_text(input_data.text_content)
+            chunks = self._chunk_text(text_content)
             if not chunks:
-                return LibrarianOutput(success=True, result=LibrarianResult(relevant_sections=[]))
+                return {"success": True, "result": {"relevant_sections": []}, "resultType": "object"}
             
-            # [Copilot Fix] 將 CPU 密集型任務移至線程池
-            chunk_embeddings = await asyncio.to_thread(self.model.encode, chunks, convert_to_tensor=True)
-            chunk_embeddings = chunk_embeddings.cpu().numpy()
-            query_embedding = await asyncio.to_thread(self.model.encode, [input_data.query], convert_to_tensor=True)
-            query_embedding = query_embedding.cpu().numpy()
-
-            # [Copilot Fix] 標準化向量並使用 IndexFlatIP (內積/餘弦相似度)
-            chunk_embeddings = chunk_embeddings / np.linalg.norm(chunk_embeddings, axis=1, keepdims=True)
-            query_embedding = query_embedding / np.linalg.norm(query_embedding, axis=1, keepdims=True)
+            chunk_embeddings = self.model.encode(chunks, convert_to_tensor=True).cpu().numpy()
             
-            index = faiss.IndexFlatIP(chunk_embeddings.shape[1])
+            index = faiss.IndexFlatL2(chunk_embeddings.shape[1])
             index.add(chunk_embeddings)
             
-            scores, indices = index.search(query_embedding, 3) # top_k=3
+            query_embedding = self.model.encode([query], convert_to_tensor=True).cpu().numpy()
             
-            results = [
-                RelevantSection(chunk=chunks[indices[0][i]], score=float(scores[0][i]))
-                for i in range(len(indices[0])) if indices[0][i] < len(chunks)
-            ]
+            distances, indices = index.search(query_embedding, top_k)
             
-            return LibrarianOutput(success=True, result=LibrarianResult(relevant_sections=results))
+            results = []
+            for i in range(len(indices[0])):
+                idx = indices[0][i]
+                # 確保索引在範圍內
+                if idx < len(chunks):
+                    # [合規性修正] score 應為相似度而非距離，此處用 1 / (1 + dist) 作為簡單示例
+                    score = 1 / (1 + float(distances[0][i]))
+                    results.append({"chunk": chunks[idx], "score": score})
+            
+            return {"success": True, "result": {"relevant_sections": results}, "resultType": "object"}
         except Exception as e:
             error_message = f"LibrarianStrategy filter_content failed: {str(e)}"
-            logger.exception(error_message)
-            return LibrarianOutput(success=False, error=error_message)
+            return {"success": False, "error": error_message}
 
-def main():
+async def main():
     if len(sys.argv) > 2:
-        try:
-            input_model = LibrarianInput(text_content=sys.argv[1], query=sys.argv[2])
-            async def async_main():
-                librarian = LibrarianStrategy()
-                result_model = await librarian.filter_content(input_model)
-                sys.stdout.buffer.write(result_model.model_dump_json().encode('utf-8'))
-            asyncio.run(async_main())
-        except Exception as e:
-            # [Copilot Fix] 修正變數名稱錯誤
-            error_output = LibrarianOutput(success=False, error=str(e))
-            sys.stdout.buffer.write(error_output.model_dump_json().encode('utf-8'))
+        text_content = sys.argv[1]
+        query = sys.argv[2]
+        librarian = LibrarianStrategy()
+        result = await librarian.filter_content(text_content=text_content, query=query)
+        # [教訓 2.1] 強制以 UTF-8 編碼輸出純淨 JSON
+        sys.stdout.buffer.write(json.dumps(result, ensure_ascii=False).encode('utf-8'))
     else:
-        error_result = LibrarianOutput(success=False, error="Insufficient arguments for librarian.py")
-        sys.stdout.buffer.write(error_result.model_dump_json().encode('utf-8'))
+        # 在被調用模式下不應有任何其他輸出
+        pass
 
 if __name__ == '__main__':
-    main()
+    asyncio.run(main())
