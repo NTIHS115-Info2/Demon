@@ -44,8 +44,13 @@ class ForagerStrategy:
             response.raise_for_status()
             
             root = ET.fromstring(response.content)
-            # [合規性修正] 確保 link 標籤存在
-            article_links = [item.find('link').text for item in root.findall('.//item') if item.find('link') is not None]
+            
+            # [Copilot 審查修正] 確保 link 標籤存在且其 text 內容不為空
+            article_links = [
+                item.find('link').text
+                for item in root.findall('.//item')
+                if item.find('link') is not None and item.find('link').text
+            ]
 
             for link in article_links[:3]: # 僅爬取最新的3篇文章以提高效率
                 if not link: continue
@@ -69,7 +74,7 @@ async def main():
         url = sys.argv[1]
         forager = ForagerStrategy()
         result = await forager.fetch_news(rss_url=url)
-        # [教訓 2.1] 強制以 UTF-8 編碼輸出純淨 JSON
+        # 強制以 UTF-8 編碼輸出 JSON，確保 Node.js 能正確解析
         sys.stdout.buffer.write(json.dumps(result, ensure_ascii=False).encode('utf-8'))
     else:
         error_result = {"success": False, "error": "No URL provided to scraper.py"}

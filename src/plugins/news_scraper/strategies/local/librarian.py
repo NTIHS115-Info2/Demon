@@ -16,7 +16,6 @@ class LibrarianStrategy:
         self.priority = 100
 
     def _chunk_text(self, text, min_length=50, max_length=300):
-        # 修正：更穩健的句子切分正則表達式
         sentences = re.split(r'(?<=[.!?。！？\n])\s+', text)
         chunks = []
         current_chunk = ""
@@ -37,21 +36,25 @@ class LibrarianStrategy:
                 return {"success": True, "result": {"relevant_sections": []}, "resultType": "object"}
             
             chunk_embeddings = self.model.encode(chunks, convert_to_tensor=True).cpu().numpy()
+            query_embedding = self.model.encode([query], convert_to_tensor=True).cpu().numpy()
+
+            # [Copilot 審查修正] 改用餘弦相似度以獲得更準確的語義相關性分數
+            # 1. 標準化向量 (L2 normalization)
+            faiss.normalize_L2(chunk_embeddings)
+            faiss.normalize_L2(query_embedding)
             
-            index = faiss.IndexFlatL2(chunk_embeddings.shape[1])
+            # 2. 使用 IndexFlatIP (內積) 進行計算，這在標準化向量上等同於餘弦相似度
+            index = faiss.IndexFlatIP(chunk_embeddings.shape[1])
             index.add(chunk_embeddings)
             
-            query_embedding = self.model.encode([query], convert_to_tensor=True).cpu().numpy()
-            
-            distances, indices = index.search(query_embedding, top_k)
+            similarities, indices = index.search(query_embedding, top_k)
             
             results = []
             for i in range(len(indices[0])):
                 idx = indices[0][i]
-                # 確保索引在範圍內
-                if idx < len(chunks):
-                    # [合規性修正] score 應為相似度而非距離，此處用 1 / (1 + dist) 作為簡單示例
-                    score = 1 / (1 + float(distances[0][i]))
+                if idx >= 0 and idx < len(chunks): # 確保索引有效
+                    # 直接使用內積結果作為相似度分數
+                    score = float(similarities[0][i])
                     results.append({"chunk": chunks[idx], "score": score})
             
             return {"success": True, "result": {"relevant_sections": results}, "resultType": "object"}
@@ -65,11 +68,11 @@ async def main():
         query = sys.argv[2]
         librarian = LibrarianStrategy()
         result = await librarian.filter_content(text_content=text_content, query=query)
-        # [教訓 2.1] 強制以 UTF-8 編碼輸出純淨 JSON
         sys.stdout.buffer.write(json.dumps(result, ensure_ascii=False).encode('utf-8'))
     else:
-        # 在被調用模式下不應有任何其他輸出
-        pass
+        # [Copilot 審查修正] 為不正確的 CLI 使用提供清晰的錯誤提示
+        print("Usage: python librarian.py <text_content> <query>", file=sys.stderr)
+        sys.exit(1)
 
 if __name__ == '__main__':
     asyncio.run(main())
