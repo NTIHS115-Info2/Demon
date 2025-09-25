@@ -28,6 +28,15 @@ tokens/
 # --- news_scraper_plugin additions ---
 # Python Virtual Environment
 .venv/
+# Python Cache (PR 審查修正)
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# macOS metadata files (新增)
+._*
 
 # News Scraper Cache
 src/plugins/news_scraper/strategies/local/cache/
+
