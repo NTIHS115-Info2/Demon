@@ -1,0 +1,20 @@
+{
+  "toolName": "news_scraper",
+  "description": "Fetches content from a news URL, then filters and extracts the most relevant sections based on a specific query. This tool performs an end-to-end process of scraping and semantic analysis.",
+  "input": {
+    "url": "string, required. The full URL of the news article or RSS feed to be processed.",
+    "query": "string, required. The user's specific question to find the most relevant information within the content."
+  },
+  "output": {
+    "success": true,
+    "result": {
+      "relevant_sections": [
+        {
+          "chunk": "The most relevant paragraph or section from the article that matches the query.",
+          "score": 0.92
+        }
+      ]
+    },
+    "resultType": "object"
+  }
+}
