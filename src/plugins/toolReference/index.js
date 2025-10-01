@@ -63,12 +63,16 @@ module.exports = {
 
   async send(data) {
     if (!strategy) await this.updateStrategy(mode);
-    if (typeof strategy.send !== 'function') return false;
+    if (typeof strategy.send !== 'function') {
+      const error = '目前策略未提供 send 功能';
+      logger.warn(`[toolReference] ${error}`);
+      return { success: false, error };
+    }
     try {
       return await strategy.send(data);
     } catch (e) {
       logger.error('[toolReference] send 執行錯誤: ' + e.message);
-      return false;
+      return { success: false, error: e.message };
     }
   },
 };
