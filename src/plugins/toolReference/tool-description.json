@@ -1,0 +1,14 @@
+{
+  "toolName": "toolReference",
+  "description": "提供 LLM 查詢所有已註冊工具描述與使用說明的核心索引服務。",
+  "input": {
+    "toolName": "字串或字串陣列。指定所需查詢的工具名稱，可接受逗號、換行或陣列形式分隔多個名稱，將依序回傳對應描述。"
+  },
+  "output": {
+    "success": "布林值。true 表示成功回傳工具描述，false 表示查詢失敗。",
+    "mode": "字串。detail 代表提供完整工具描述內容。",
+    "tools": "陣列。成功時依查詢順序列出各工具的 toolName、pluginName、description、definition 與 source。",
+    "missing": "陣列，可選。當部分工具不存在時列出缺少的名稱。",
+    "error": "字串，可選。失敗時的錯誤訊息，會提示改以 toolName 欄位查詢。"
+  }
+}
