@@ -130,11 +130,6 @@ function readDescriptions(rootPath) {
   for (const pluginName of pluginNames) {
     const filePath = path.join(rootPath, pluginName, TOOL_DESCRIPTION_FILE);
 
-    if (!fs.existsSync(filePath)) {
-      logger.info(`插件 ${pluginName} 無工具描述檔案，略過`);
-      continue;
-    }
-
     try {
       const raw = fs.readFileSync(filePath, 'utf8');
       const parsed = JSON.parse(raw);
@@ -159,7 +154,9 @@ function readDescriptions(rootPath) {
           toolName: String(toolName).trim(),
           description: String(description),
           summary: createSummaryText(description),
-          definition: entry,
+          definition: typeof structuredClone === 'function'
+            ? structuredClone(entry)
+            : JSON.parse(JSON.stringify(entry)),
           source: path.relative(rootPath, filePath).replace(/\\/g, '/'),
         };
 
@@ -177,6 +174,10 @@ function readDescriptions(rootPath) {
         logger.info(`成功載入插件 ${pluginName} 的 ${normalizedRecords.length} 筆工具描述`);
       }
     } catch (err) {
+      if (err && err.code === 'ENOENT') {
+        logger.info(`插件 ${pluginName} 無工具描述檔案，略過`);
+        continue;
+      }
       logger.warn(`讀取插件 ${pluginName} 的工具描述失敗：${err.message}`);
     }
   }
