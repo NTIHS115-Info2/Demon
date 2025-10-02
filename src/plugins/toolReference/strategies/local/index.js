@@ -455,7 +455,8 @@ function buildDetailResponse(cache, requestedNames) {
       toolName: record.toolName,
       pluginName: record.pluginName,
       description: record.definition.description,
-      definition: structuredClone(record.definition),
+      definition: typeof structuredClone === 'function' ? structuredClone(record.definition) : JSON.parse(JSON.stringify(record.definition)),
+
       source: record.source,
     });
   }
