@@ -76,7 +76,7 @@ async function GetDefaultSystemPrompt() {
       if (detailResponse?.success && Array.isArray(detailResponse.tools) && detailResponse.tools.length > 0) {
         const guide = detailResponse.tools[0].definition || {};
         const usageLines = Array.isArray(guide.usage)
-          ? guide.usage.map((text, index) => `${index + 1}. ${text}`)
+          ? guide.usage.filter(text => typeof text === 'string').map((text, index) => `${index + 1}. ${text}`)
           : [];
         const inputLines = guide.input && typeof guide.input === 'object'
           ? Object.entries(guide.input).map(([key, text]) => `- ${key}: ${text}`)
