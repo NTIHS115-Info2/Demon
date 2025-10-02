@@ -8,6 +8,7 @@ const logger = new Logger('toolReferenceLocal.log');
 // 常數設定
 const TOOL_DESCRIPTION_FILE = 'tool-description.json'; // 工具描述檔案名稱
 const SUMMARY_MAX_LENGTH = -1; // 粗略描述的最大長度
+const priority = 50; // 預設啟動優先度
 
 // 快取與監控狀態
 let descriptionCache = null; // 儲存最新的工具描述資料
@@ -480,6 +481,7 @@ function buildDetailResponse(cache, requestedNames) {
 }
 
 module.exports = {
+  priority,
   async updateStrategy() {},
 
   /**
