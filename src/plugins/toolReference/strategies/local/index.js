@@ -7,8 +7,7 @@ const logger = new Logger('toolReferenceLocal.log');
 
 // 常數設定
 const TOOL_DESCRIPTION_FILE = 'tool-description.json'; // 工具描述檔案名稱
-const SUMMARY_MAX_LENGTH = 120; // 粗略描述的最大長度
-const priority = 50; // 策略啟動優先度
+const SUMMARY_MAX_LENGTH = -1; // 粗略描述的最大長度
 
 // 快取與監控狀態
 let descriptionCache = null; // 儲存最新的工具描述資料
@@ -65,7 +64,7 @@ function createSummaryText(description) {
   if (typeof description !== 'string') return '';
   const normalized = description.replace(/\s+/g, ' ').trim();
   if (!normalized) return '';
-  if (normalized.length <= SUMMARY_MAX_LENGTH) return normalized;
+  if (SUMMARY_MAX_LENGTH  === -1 || normalized.length <= SUMMARY_MAX_LENGTH ) return normalized;
   return `${normalized.slice(0, SUMMARY_MAX_LENGTH - 1).trimEnd()}…`;
 }
 
@@ -481,7 +480,6 @@ function buildDetailResponse(cache, requestedNames) {
 }
 
 module.exports = {
-  priority,
   async updateStrategy() {},
 
   /**
