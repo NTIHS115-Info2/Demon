@@ -64,7 +64,7 @@ function createSummaryText(description) {
   if (typeof description !== 'string') return '';
   const normalized = description.replace(/\s+/g, ' ').trim();
   if (!normalized) return '';
-  if (normalized.length <= SUMMARY_MAX_LENGTH) return normalized;
+  if (SUMMARY_MAX_LENGTH  === -1 || normalized.length <= SUMMARY_MAX_LENGTH ) return normalized;
   return `${normalized.slice(0, SUMMARY_MAX_LENGTH - 1).trimEnd()}…`;
 }
 
