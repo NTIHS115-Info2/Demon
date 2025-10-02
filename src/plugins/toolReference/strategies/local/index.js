@@ -480,7 +480,6 @@ function buildDetailResponse(cache, requestedNames) {
 }
 
 module.exports = {
-  priority,
   async updateStrategy() {},
 
   /**
