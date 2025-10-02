@@ -1,0 +1,14 @@
+{
+  "toolName": "toolReference",
+  "description": "Provides a core index service for LLMs to query all registered tool descriptions and usage instructions.",
+  "input": {
+    "toolName": "String or array of strings. Specifies the tool name(s) to query. Multiple names can be separated by commas, newlines, or provided as an array. The corresponding descriptions will be returned in order."
+  },
+  "output": {
+    "success": "Boolean. true indicates that the tool descriptions were successfully returned; false indicates the query failed.",
+    "mode": "String. 'detail' means full tool descriptions are provided.",
+    "tools": "Array. On success, returns the queried tools in order, each including toolName, pluginName, description, definition, and source.",
+    "missing": "Array, optional. Lists tool names that were not found, if any.",
+    "error": "String, optional. Error message when the query fails, suggesting that queries should be made using the toolName field."
+  }
+}

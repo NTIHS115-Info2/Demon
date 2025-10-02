@@ -47,7 +47,69 @@ async function GetDefaultSystemPrompt() {
       throw new Error('系統提示檔案讀取結果格式錯誤');
     }
 
-    const DefaultToolList = `\n=== 以下為工具清單 ===${await PM.send('toolReference')}=== 工具清單結束 ===`;
+    // 從 toolReference 取得粗略的工具清單，用於系統提示
+    let toolListText = '';
+    try {
+      const toolResponse = await PM.send('toolReference', { roughly: true });
+      if (toolResponse?.success && Array.isArray(toolResponse.tools)) {
+        if (toolResponse.tools.length === 0) {
+          toolListText = '（目前沒有可用工具）';
+        } else {
+          toolListText = toolResponse.tools
+            .map(item => `- ${item.toolName}（${item.pluginName}）: ${item.description}`)
+            .join('\n');
+        }
+      } else if (toolResponse?.error) {
+        toolListText = `工具描述載入失敗：${toolResponse.error}`;
+      } else {
+        toolListText = '工具描述載入失敗：未取得有效回應';
+      }
+    } catch (err) {
+      logger.error(`載入工具描述清單失敗：${err.message}`);
+      toolListText = `工具描述載入失敗：${err.message}`;
+    }
+
+    // 另外拉取 toolReference 自身的完整說明，確保 LLM 每輪對話都掌握使用規則
+    let toolReferenceGuide = '';
+    try {
+      const detailResponse = await PM.send('toolReference', { toolName: 'toolReference' });
+      if (detailResponse?.success && Array.isArray(detailResponse.tools) && detailResponse.tools.length > 0) {
+        const guide = detailResponse.tools[0].definition || {};
+        const usageLines = Array.isArray(guide.usage)
+          ? guide.usage.filter(text => typeof text === 'string').map((text, index) => `${index + 1}. ${text}`)
+          : [];
+        const inputLines = guide.input && typeof guide.input === 'object'
+          ? Object.entries(guide.input).map(([key, text]) => `- ${key}: ${text}`)
+          : [];
+        const outputLines = guide.output && typeof guide.output === 'object'
+          ? Object.entries(guide.output).map(([key, text]) => `- ${key}: ${text}`)
+          : [];
+        const noteLines = Array.isArray(guide.notes)
+          ? guide.notes.map((text, index) => `${index + 1}. ${text}`)
+          : [];
+
+        const sections = [];
+        if (guide.description) sections.push(`描述：${guide.description}`);
+        if (usageLines.length > 0) sections.push(`使用步驟：\n${usageLines.join('\n')}`);
+        if (inputLines.length > 0) sections.push(`輸入參數：\n${inputLines.join('\n')}`);
+        if (outputLines.length > 0) sections.push(`輸出欄位：\n${outputLines.join('\n')}`);
+        if (noteLines.length > 0) sections.push(`注意事項：\n${noteLines.join('\n')}`);
+
+        toolReferenceGuide = sections.length > 0
+          ? sections.join('\n\n')
+          : '未能解析 toolReference 的詳細說明內容。';
+      } else if (detailResponse?.error) {
+        toolReferenceGuide = `toolReference 使用說明載入失敗：${detailResponse.error}`;
+      } else {
+        toolReferenceGuide = 'toolReference 使用說明載入失敗：未取得有效回應';
+      }
+    } catch (err) {
+      logger.error(`載入 toolReference 詳細說明失敗：${err.message}`);
+      toolReferenceGuide = `toolReference 使用說明載入失敗：${err.message}`;
+    }
+
+    const DefaultToolList = `\n=== 以下為工具清單 ===\n${toolListText}\n=== 工具清單結束 ===`;
+    const ToolReferenceInstruction = `\n=== toolReference 使用說明 ===\n${toolReferenceGuide}\n=== 說明結束 ===`;
 
     let result = '';
     DefaultSystemPrompt.forEach(element => {
@@ -57,6 +119,7 @@ async function GetDefaultSystemPrompt() {
     });
 
     result += DefaultToolList; // 加入工具清單
+    result += ToolReferenceInstruction; // 加入 toolReference 詳細說明
 
     if (!result.trim()) {
       logger.warn('系統提示內容為空，使用預設提示');
