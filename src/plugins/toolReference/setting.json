@@ -1,5 +1,5 @@
 {
   "name": "toolReference",
-  "priority": 0,
+  "priority": 50,
   "pluginType": "Tool"
 }

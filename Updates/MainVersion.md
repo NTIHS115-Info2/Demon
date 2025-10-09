@@ -269,3 +269,7 @@
 # [v.1.3.3]
 ### Test
 - 補齊pluginsManager的全面覆蓋測試
+
+# [v.1.4]
+### Change
+- 將 toolReference 插件改為 LLMTool 插件，並調整相關邏輯，使工具列表的使用與呈現更完善
