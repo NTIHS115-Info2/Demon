@@ -31,6 +31,11 @@ function _runPythonScript(scriptName, args) {
                 return reject(new Error(stderr || `Python script ${scriptName} exited with code ${code}`));
             }
             try {
+                // [V1.0.0-alpha] 修正：處理 Python 腳本可能無 stdout 的情況
+                if (!stdout.trim()) {
+                    logger.warn(`Python script ${scriptName} did not produce any stdout.`);
+                    return resolve({}); // 返回空物件而非拋出錯誤
+                }
                 resolve(JSON.parse(stdout));
             } catch (e) {
                 logger.error(`Raw stdout from ${scriptName}: ${stdout}`);
@@ -68,15 +73,22 @@ module.exports = {
         if (!isOnline) {
             return { success: false, error: 'Local strategy is offline.' };
         }
-        const { url, query } = payload;
+        
+        const { url, query, article_count = 3, top_k = 3 } = payload;
         if (!url || !query) {
             return { success: false, error: "Missing 'url' or 'query' in payload." };
         }
         try {
-            const scrapedData = await _runPythonScript('scraper.py', [url]);
+            const scrapedData = await _runPythonScript('scraper.py', [url, article_count.toString()]);
             if (!scrapedData.success) return scrapedData;
+            
             const articleText = scrapedData.result.article_text;
-            return await _runPythonScript('librarian.py', [articleText, query]);
+            if (!articleText.trim()) {
+                logger.warn(`Scraper for ${url} returned empty content.`);
+                return { success: true, result: { relevant_sections: [] }, resultType: 'list' };
+            }
+
+            return await _runPythonScript('librarian.py', [articleText, query, top_k.toString(), 'cpu']);
         } catch (error) {
             return { success: false, error: error.message };
         }

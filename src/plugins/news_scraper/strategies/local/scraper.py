@@ -1,3 +1,4 @@
+# src/plugins/news_scraper/strategies/local/scraper.py
 import sys
 import json
 import requests
@@ -34,7 +35,7 @@ class ForagerStrategy:
         cleaned_text = '\n'.join([p.get_text(strip=True) for p in paragraphs])
         return cleaned_text
 
-    async def fetch_news(self, rss_url: str) -> dict:
+    async def fetch_news(self, rss_url: str, article_limit: int = 3) -> dict:
         """
         非同步執行新聞獲取的主函式。
         """
@@ -52,7 +53,7 @@ class ForagerStrategy:
                 if item.find('link') is not None and item.find('link').text
             ]
 
-            for link in article_links[:3]: # 僅爬取最新的3篇文章以提高效率
+            for link in article_links[:article_limit]:
                 if not link: continue
                 
                 article_response = requests.get(link, headers=self.headers, timeout=10)
@@ -60,7 +61,7 @@ class ForagerStrategy:
                 
                 cleaned_article = self._clean_html_content(article_response.text)
                 all_cleaned_text += f"--- News Source: {link} ---\n\n{cleaned_article}\n\n"
-
+            
             return {
                 "success": True,
                 "result": { "source_url": rss_url, "article_text": all_cleaned_text.strip() },
@@ -72,8 +73,9 @@ class ForagerStrategy:
 async def main():
     if len(sys.argv) > 1:
         url = sys.argv[1]
+        article_limit = int(sys.argv[2]) if len(sys.argv) > 2 else 3
         forager = ForagerStrategy()
-        result = await forager.fetch_news(rss_url=url)
+        result = await forager.fetch_news(rss_url=url, article_limit=article_limit)
         # 強制以 UTF-8 編碼輸出 JSON，確保 Node.js 能正確解析
         sys.stdout.buffer.write(json.dumps(result, ensure_ascii=False).encode('utf-8'))
     else:

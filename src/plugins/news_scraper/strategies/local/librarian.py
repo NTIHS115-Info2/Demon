@@ -1,3 +1,4 @@
+# src/plugins/news_scraper/strategies/local/librarian.py
 import numpy as np
 import faiss
 from sentence_transformers import SentenceTransformer
@@ -29,8 +30,9 @@ class LibrarianStrategy:
         if len(current_chunk.strip()) >= min_length: chunks.append(current_chunk.strip())
         return chunks
 
-    async def filter_content(self, text_content: str, query: str, top_k: int = 3):
+    async def filter_content(self, text_content: str, query: str, top_k: int = 3, device: str = 'cpu'):
         try:
+            self.model.to(device)
             chunks = self._chunk_text(text_content)
             if not chunks:
                 return {"success": True, "result": {"relevant_sections": []}, "resultType": "object"}
@@ -66,12 +68,15 @@ async def main():
     if len(sys.argv) > 2:
         text_content = sys.argv[1]
         query = sys.argv[2]
+        top_k = int(sys.argv[3]) if len(sys.argv) > 3 else 3
+        device = sys.argv[4] if len(sys.argv) > 4 else 'cpu'
+
         librarian = LibrarianStrategy()
-        result = await librarian.filter_content(text_content=text_content, query=query)
+        result = await librarian.filter_content(text_content=text_content, query=query, top_k=top_k, device=device)
         sys.stdout.buffer.write(json.dumps(result, ensure_ascii=False).encode('utf-8'))
     else:
         # [Copilot 審查修正] 為不正確的 CLI 使用提供清晰的錯誤提示
-        print("Usage: python librarian.py <text_content> <query>", file=sys.stderr)
+        print("Usage: python librarian.py <text_content> <query> [top_k] [device]", file=sys.stderr)
         sys.exit(1)
 
 if __name__ == '__main__':
