@@ -32,14 +32,24 @@ class LibrarianStrategy:
 
     async def filter_content(self, text_content: str, query: str, top_k: int = 3, device: str = 'cpu'):
         try:
+            # 【P2 修正】建立局部變數以決定 FAISS 所需的設備
+            # 根據 requirements.txt 中的 'faiss-cpu'，我們目前只能使用 CPU。
+            # 這樣修改是為了未來的擴展性（例如，當升級到 faiss-gpu 時）。
+            faiss_device = 'cpu'
+            
             self.model.to(device)
             chunks = self._chunk_text(text_content)
             if not chunks:
                 return {"success": True, "result": {"relevant_sections": []}, "resultType": "object"}
             
-            chunk_embeddings = self.model.encode(chunks, convert_to_tensor=True).cpu().numpy()
-            query_embedding = self.model.encode([query], convert_to_tensor=True).cpu().numpy()
-
+            # 生成張量，它們會位於 self.model 所在的設備上 (device)
+            chunk_embeddings_tensor = self.model.encode(chunks, convert_to_tensor=True)
+            query_embedding_tensor = self.model.encode([query], convert_to_tensor=True)
+            
+            # 【P2 修正】在轉換為 numpy 陣列之前，將張量轉移到 FAISS 需要的設備上
+            chunk_embeddings = chunk_embeddings_tensor.to(faiss_device).numpy()
+            query_embedding = query_embedding_tensor.to(faiss_device).numpy()
+            
             # [Copilot 審查修正] 改用餘弦相似度以獲得更準確的語義相關性分數
             # 1. 標準化向量 (L2 normalization)
             faiss.normalize_L2(chunk_embeddings)
@@ -70,7 +80,7 @@ async def main():
         query = sys.argv[2]
         top_k = int(sys.argv[3]) if len(sys.argv) > 3 else 3
         device = sys.argv[4] if len(sys.argv) > 4 else 'cpu'
-
+        
         librarian = LibrarianStrategy()
         result = await librarian.filter_content(text_content=text_content, query=query, top_k=top_k, device=device)
         sys.stdout.buffer.write(json.dumps(result, ensure_ascii=False).encode('utf-8'))
