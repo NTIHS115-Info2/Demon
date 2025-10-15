@@ -153,9 +153,17 @@ describe('PluginsManager 插件規範完整覆蓋測試', () => {
         } catch (error) {
           throw new Error(`解析 LLM 插件 ${meta.name} 的工具描述檔案 JSON 時發生錯誤：${error.message}`);
         }
-        expect(parsed.toolName).toBeTruthy();
-        expect(parsed.description).toBeTruthy();
-        expect(parsed.output).toBeDefined();
+        const entries = Array.isArray(parsed) ? parsed : [parsed];
+        expect(entries.length).toBeGreaterThan(0);
+        for (const [i, tool] of entries.entries()) {
+          const where = `${meta.name}#${i}`;
+          expect(tool, `${where} 應為物件`).toBeDefined();
+          expect(typeof tool.toolName, `${where} 缺少 toolName`).toBe('string');
+          expect(tool.toolName.trim().length, `${where} 空的 toolName`).toBeGreaterThan(0);
+          expect(typeof tool.description, `${where} 缺少 description`).toBe('string');
+          expect(tool.description.trim().length, `${where} 空的 description`).toBeGreaterThan(0);
+          expect(tool.output, `${where} 缺少 output`).toBeDefined();
+        }
       }
     }
   });
