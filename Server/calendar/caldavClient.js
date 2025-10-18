@@ -38,6 +38,7 @@ class CalDavClient extends EventEmitter {
       this.dependencies.dav = require('dav');
       this.dependencies.ical = require('ical-generator');
       this.dependencies.luxon = require('luxon');
+      this.dependencies.nodeIcal = require('node-ical');
       this.mode = 'live';
     } catch (err) {
       this.logger.warn(`載入 CalDAV 相關套件失敗，使用模擬模式：${err.message}`);
@@ -127,11 +128,11 @@ class CalDavClient extends EventEmitter {
   }
 
   // === 段落說明：解析 iCal 物件為內部統一格式 ===
-  parseICalObject(obj) {
+  parseICalObject(icsString) {
     try {
       // Use node-ical to parse the ICS string
-      const ical = this.dependencies['node-ical'] || require('node-ical');
-      const parsed = ical.parseICS(obj.data);
+      const nodeIcal = this.dependencies.nodeIcal || require('node-ical');
+      const parsed = nodeIcal.parseICS(icsString);
       // Find the first VEVENT in the parsed object
       const eventKey = Object.keys(parsed).find(key => parsed[key].type === 'VEVENT');
       if (!eventKey) {
