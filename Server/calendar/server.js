@@ -31,12 +31,12 @@ class LocalCalendarServer extends EventEmitter {
       this.logger.warn('本地行事曆伺服器已啟動，略過重複操作');
       return;
     }
-    this.started = true;
-
     try {
       this.syncWorker.start({ incrementalMinutes: this.secrets.SYNC_INTERVAL_MINUTES });
+      this.started = true;
       this.logger.info('本地行事曆伺服器啟動完成');
     } catch (err) {
+      this.started = false;
       this.logger.error(`啟動同步排程失敗：${err.message}`);
       throw err;
     }
