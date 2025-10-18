@@ -111,10 +111,11 @@ class CalDavClient extends EventEmitter {
 
       const objects = await this.dependencies.dav.listCalendarObjects(calendar, params);
       const results = objects.map(obj => ({
-        event: this.parseICalObject(obj),
+        event: this.parseICalObject(obj.calendarData),
         etag: obj.etag,
         url: obj.url,
-        lastModified: obj.lastmodified || obj.data.lastmodified || new Date().toISOString(),
+        lastModified: obj.lastmodified || new Date().toISOString(),
+        calendarData: obj.calendarData,
         status: 'synced',
       }));
       this.syncToken = calendar.syncToken || syncToken || null;
