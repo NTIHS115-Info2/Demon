@@ -60,37 +60,35 @@ class LocalCalendarCache extends EventEmitter {
         payload && payload.metadata && typeof payload.metadata === 'object' && !Array.isArray(payload.metadata)
           ? { ...payload.metadata }
           : {},
+      // Set defaults for optional fields
+      description: '',
+      location: '',
+      attendees: [],
     };
 
     const hasField = key => Object.prototype.hasOwnProperty.call(payload, key);
 
+    // Required fields: only set if present (already checked above if !allowPartial)
     if (hasField('calendarName')) {
-      normalized.calendarName = payload.calendarName;
-    } else if (!allowPartial) {
       normalized.calendarName = payload.calendarName;
     }
 
     if (hasField('summary')) {
       normalized.summary = payload.summary;
-    } else if (!allowPartial) {
-      normalized.summary = payload.summary;
     }
 
+    // Optional fields: override defaults if present
     if (hasField('description')) {
       normalized.description = payload.description || '';
-    } else if (!allowPartial) {
-      normalized.description = '';
     }
 
     if (hasField('location')) {
       normalized.location = payload.location || '';
-    } else if (!allowPartial) {
-      normalized.location = '';
     }
 
     if (hasField('attendees')) {
       normalized.attendees = Array.isArray(payload.attendees) ? payload.attendees : [];
-    } else if (!allowPartial) {
+    }
       normalized.attendees = [];
     }
 
