@@ -128,19 +128,24 @@ class CalDavClient extends EventEmitter {
   // === 段落說明：解析 iCal 物件為內部統一格式 ===
   parseICalObject(obj) {
     try {
-      const ical = this.dependencies.ical({ prodId: '//demon//calendar-system//TW' });
-      ical.raw(obj.data);
-      const [component] = ical.events();
-      const event = component.toJSON();
+      // Use node-ical to parse the ICS string
+      const ical = this.dependencies['node-ical'] || require('node-ical');
+      const parsed = ical.parseICS(obj.data);
+      // Find the first VEVENT in the parsed object
+      const eventKey = Object.keys(parsed).find(key => parsed[key].type === 'VEVENT');
+      if (!eventKey) {
+        throw new Error('No VEVENT found in ICS data');
+      }
+      const event = parsed[eventKey];
       return {
         uid: event.uid,
         calendarName: this.secrets.ICLOUD_CAL_NAME,
         summary: event.summary,
         description: event.description,
         location: event.location,
-        startISO: event.start.toISOString(),
-        endISO: event.end.toISOString(),
-        attendees: event.attendees || [],
+        startISO: event.start ? new Date(event.start).toISOString() : null,
+        endISO: event.end ? new Date(event.end).toISOString() : null,
+        attendees: event.attendee ? (Array.isArray(event.attendee) ? event.attendee : [event.attendee]) : [],
         reminders: event.alarms || [],
       };
     } catch (err) {
