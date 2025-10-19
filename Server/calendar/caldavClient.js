@@ -111,14 +111,44 @@ class CalDavClient extends EventEmitter {
       if (syncToken) params.syncToken = syncToken;
 
       const objects = await this.dependencies.dav.listCalendarObjects(calendar, params);
-      const results = objects.map(obj => ({
-        event: this.parseICalObject(obj.calendarData),
-        etag: obj.etag,
-        url: obj.url,
-        lastModified: obj.lastmodified || new Date().toISOString(),
-        calendarData: obj.calendarData,
-        status: 'synced',
-      }));
+      const results = [];
+
+      for (const obj of objects) {
+        if (!obj) continue;
+
+        const url = obj.url || obj.href || null;
+        const statusCode = typeof obj.status === 'string' ? parseInt(obj.status, 10) : obj.status;
+        const hasCalendarData = typeof obj.calendarData === 'string' && obj.calendarData.trim().length > 0;
+
+        if (statusCode === 404 || !hasCalendarData) {
+          const uid = this.extractUidFromUrl(url);
+          if (!uid) {
+            if (this.logger && typeof this.logger.warn === 'function') {
+              this.logger.warn('收到缺少 UID 的刪除通知，已略過處理。');
+            }
+            continue;
+          }
+
+          results.push({
+            event: { uid },
+            etag: obj.etag || null,
+            url,
+            lastModified: obj.lastmodified || new Date().toISOString(),
+            calendarData: null,
+            status: 'deleted',
+          });
+          continue;
+        }
+
+        results.push({
+          event: this.parseICalObject(obj.calendarData),
+          etag: obj.etag,
+          url,
+          lastModified: obj.lastmodified || new Date().toISOString(),
+          calendarData: obj.calendarData,
+          status: 'synced',
+        });
+      }
       this.syncToken = calendar.syncToken || syncToken || null;
       return results;
     } catch (err) {
@@ -154,6 +184,23 @@ class CalDavClient extends EventEmitter {
       this.logger.error(`解析 iCal 事件失敗：${err.message}`);
       throw err;
     }
+  }
+
+  // === 段落說明：從 CalDAV URL 推斷事件 UID，支援增量刪除資訊 ===
+  extractUidFromUrl(url) {
+    if (!url || typeof url !== 'string') {
+      return null;
+    }
+
+    const trimmed = url.split('?')[0];
+    const parts = trimmed.split('/').filter(Boolean);
+    if (parts.length === 0) {
+      return null;
+    }
+
+    const lastSegment = decodeURIComponent(parts[parts.length - 1]);
+    const match = lastSegment.match(/([^/]+?)(?:\.ics)?$/i);
+    return match ? match[1] : null;
   }
 
   // === 段落說明：模擬模式下的事件列表實作 ===
