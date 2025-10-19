@@ -115,12 +115,23 @@ class LocalCalendarServer extends EventEmitter {
 
   // === 段落說明：刪除事件並同步遠端 ===
   async deleteEvent(uid, options = {}) {
+    const { soft = false } = options;
+
     try {
-      const record = this.cache.deleteEvent(uid, options);
-      if (!options.soft) {
-        await this.caldavClient.deleteRemoteEvent(uid);
+      if (soft) {
+        return this.cache.deleteEvent(uid, { soft: true });
       }
-      return record;
+
+      const existing = this.cache.getEvent(uid);
+      if (!existing) {
+        throw new Error(`找不到指定事件：${uid}`);
+      }
+      if (existing.locked) {
+        throw new Error(`事件 ${uid} 處於鎖定狀態，無法刪除`);
+      }
+
+      await this.caldavClient.deleteRemoteEvent(uid);
+      return this.cache.deleteEvent(uid);
     } catch (err) {
       this.logger.error(`刪除事件流程失敗：${err.message}`);
       throw err;
