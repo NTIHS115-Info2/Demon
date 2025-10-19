@@ -89,8 +89,6 @@ class LocalCalendarCache extends EventEmitter {
     if (hasField('attendees')) {
       normalized.attendees = Array.isArray(payload.attendees) ? payload.attendees : [];
     }
-      normalized.attendees = [];
-    }
 
     if (hasField('reminders')) {
       normalized.reminders = Array.isArray(payload.reminders) ? payload.reminders : [];
