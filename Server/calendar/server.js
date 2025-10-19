@@ -78,7 +78,9 @@ class LocalCalendarServer extends EventEmitter {
   async deleteEvent(uid, options = {}) {
     try {
       const record = this.cache.deleteEvent(uid, options);
-      await this.caldavClient.deleteRemoteEvent(uid);
+      if (!options.soft) {
+        await this.caldavClient.deleteRemoteEvent(uid);
+      }
       return record;
     } catch (err) {
       this.logger.error(`刪除事件流程失敗：${err.message}`);
