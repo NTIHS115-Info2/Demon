@@ -267,7 +267,16 @@ class LocalCalendarCache extends EventEmitter {
       }
 
       const existing = this.events.get(remote.event.uid);
+      const isRemoteDeletion = remote.status === 'deleted' || remote.event.status === 'deleted';
+
       if (!existing) {
+        if (isRemoteDeletion) {
+          if (this.logger && typeof this.logger.info === 'function') {
+            this.logger.info(`略過遠端刪除事件，因為本地不存在：${remote.event.uid}`);
+          }
+          continue;
+        }
+
         const created = this.createEvent({ ...remote.event });
         const synced = this.updateEvent(created.event.uid, {
           ...remote.event,
