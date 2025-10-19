@@ -164,7 +164,11 @@ class LocalCalendarCache extends EventEmitter {
       const updated = this.normalizeEvent({ ...record.event, ...patch, uid }, { allowPartial: true });
       const nowISO = toISO(this.nowProvider());
       const hasPatchLastModified = Object.prototype.hasOwnProperty.call(patch, 'lastModified');
-      const lastModified = hasPatchLastModified ? toISO(patch.lastModified) : nowISO;
+      const lastModified = hasPatchLastModified
+        ? patch.lastModified != null
+          ? toISO(patch.lastModified)
+          : nowISO
+        : nowISO;
       const nextRecord = {
         ...record,
         event: { ...record.event, ...updated },
