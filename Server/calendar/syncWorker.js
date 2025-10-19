@@ -77,6 +77,9 @@ class SyncWorker extends EventEmitter {
         syncToken: this.cache.getSyncToken(),
       });
       this.cache.applyRemoteSnapshot(remoteEvents);
+      if (typeof this.cache.setSyncToken === 'function') {
+        this.cache.setSyncToken(this.caldavClient.syncToken ?? null);
+      }
       this.emit('incremental-synced', { count: remoteEvents.length });
     } catch (err) {
       this.logger?.error(`執行增量同步時發生錯誤：${err.message}`);
@@ -89,6 +92,9 @@ class SyncWorker extends EventEmitter {
     try {
       const remoteEvents = await this.caldavClient.listRemoteEvents();
       this.cache.applyRemoteSnapshot(remoteEvents);
+      if (typeof this.cache.setSyncToken === 'function') {
+        this.cache.setSyncToken(this.caldavClient.syncToken ?? null);
+      }
       this.emit('full-synced', { count: remoteEvents.length });
     } catch (err) {
       this.logger?.error(`執行全量同步時發生錯誤：${err.message}`);
