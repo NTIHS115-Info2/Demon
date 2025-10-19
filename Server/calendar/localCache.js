@@ -188,6 +188,33 @@ class LocalCalendarCache extends EventEmitter {
     }
   }
 
+  // === 段落說明：回復事件至指定快照，多用於同步或錯誤回滾 ===
+  restoreEventSnapshot(snapshot, { emit = true } = {}) {
+    if (!snapshot || !snapshot.event || !snapshot.event.uid) {
+      throw new Error('提供的事件快照無效，無法回復');
+    }
+
+    const sourceEvent = snapshot.event;
+    const restored = {
+      ...snapshot,
+      event: {
+        ...sourceEvent,
+        attendees: Array.isArray(sourceEvent.attendees) ? [...sourceEvent.attendees] : sourceEvent.attendees,
+        reminders: Array.isArray(sourceEvent.reminders) ? [...sourceEvent.reminders] : sourceEvent.reminders,
+        metadata:
+          sourceEvent.metadata && typeof sourceEvent.metadata === 'object' && !Array.isArray(sourceEvent.metadata)
+            ? { ...sourceEvent.metadata }
+            : sourceEvent.metadata,
+      },
+    };
+
+    this.events.set(restored.event.uid, restored);
+    if (emit) {
+      this.emit('updated', { ...restored, rollback: true });
+    }
+    return { ...restored };
+  }
+
   // === 段落說明：刪除事件並保留最後狀態資訊 ===
   deleteEvent(uid, { soft = false } = {}) {
     const record = this.events.get(uid);

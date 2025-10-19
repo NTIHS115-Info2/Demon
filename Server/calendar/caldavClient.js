@@ -283,12 +283,39 @@ class CalDavClient extends EventEmitter {
     try {
       const account = await this.getAccount();
       const calendar = account.calendars.find(item => item.displayName === this.secrets.ICLOUD_CAL_NAME) || account.calendars[0];
-      const target = calendar.objects.find(obj => obj.calendarData.includes(uid));
+      const matchUid = obj => {
+        if (!obj) return false;
+        if (typeof obj.calendarData === 'string' && obj.calendarData.includes(uid)) {
+          return true;
+        }
+        const candidate = this.extractUidFromUrl(obj.url || obj.href || '');
+        return candidate === uid;
+      };
+      let target = Array.isArray(calendar.objects) ? calendar.objects.find(matchUid) : null;
+      if (!target) {
+        const refreshed = await this.dependencies.dav.listCalendarObjects(calendar, {});
+        target = refreshed.find(matchUid) || null;
+        if (target) {
+          if (Array.isArray(calendar.objects)) {
+            const index = calendar.objects.findIndex(matchUid);
+            if (index >= 0) {
+              calendar.objects[index] = target;
+            } else {
+              calendar.objects.push(target);
+            }
+          } else {
+            calendar.objects = [target];
+          }
+        }
+      }
       if (!target) {
         this.logger.warn(`遠端事件 ${uid} 不存在，視為成功刪除`);
         return { uid };
       }
       await this.dependencies.dav.deleteCalendarObject(target);
+      if (Array.isArray(calendar.objects)) {
+        calendar.objects = calendar.objects.filter(obj => !matchUid(obj));
+      }
       return { uid };
     } catch (err) {
       this.logger.error(`刪除遠端事件失敗：${err.message}`);

@@ -6,6 +6,26 @@ const CalDavClient = require('./caldavClient');
 const SyncWorker = require('./syncWorker');
 const { getSecrets } = require('./config/secrets');
 
+function cloneEvent(event = {}) {
+  const cloned = { ...event };
+  if (Array.isArray(event.attendees)) {
+    cloned.attendees = [...event.attendees];
+  }
+  if (Array.isArray(event.reminders)) {
+    cloned.reminders = [...event.reminders];
+  }
+  if (event.metadata && typeof event.metadata === 'object' && !Array.isArray(event.metadata)) {
+    cloned.metadata = { ...event.metadata };
+  }
+  return cloned;
+}
+
+function cloneRecord(record) {
+  if (!record) return null;
+  const { event, ...rest } = record;
+  return { ...rest, event: cloneEvent(event) };
+}
+
 // === 段落說明：建立本地行事曆伺服器類別，整合快取、同步與 API ===
 class LocalCalendarServer extends EventEmitter {
   constructor(options = {}) {
@@ -52,11 +72,19 @@ class LocalCalendarServer extends EventEmitter {
 
   // === 段落說明：建立事件並推送至遠端 ===
   async createEvent(payload) {
+    let record;
     try {
-      const record = this.cache.createEvent(payload);
+      record = this.cache.createEvent(payload);
       await this.caldavClient.upsertRemoteEvent(record);
       return record;
     } catch (err) {
+      if (record && record.event && record.event.uid) {
+        try {
+          this.cache.deleteEvent(record.event.uid);
+        } catch (rollbackErr) {
+          this.logger.error(`回滾本地新增事件失敗：${rollbackErr.message}`);
+        }
+      }
       this.logger.error(`建立事件流程失敗：${err.message}`);
       throw err;
     }
@@ -64,11 +92,22 @@ class LocalCalendarServer extends EventEmitter {
 
   // === 段落說明：更新事件內容並同步遠端 ===
   async updateEvent(uid, patch) {
+    let previousSnapshot = null;
+    let record = null;
     try {
-      const record = this.cache.updateEvent(uid, patch);
+      const existing = this.cache.getEvent(uid);
+      previousSnapshot = existing ? cloneRecord(existing) : null;
+      record = this.cache.updateEvent(uid, patch);
       await this.caldavClient.upsertRemoteEvent(record);
       return record;
     } catch (err) {
+      if (record && previousSnapshot) {
+        try {
+          this.cache.restoreEventSnapshot(previousSnapshot);
+        } catch (rollbackErr) {
+          this.logger.error(`回滾事件 ${uid} 至前一版本失敗：${rollbackErr.message}`);
+        }
+      }
       this.logger.error(`更新事件流程失敗：${err.message}`);
       throw err;
     }

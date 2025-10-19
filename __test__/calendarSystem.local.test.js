@@ -11,9 +11,14 @@ class MockCalDavClient {
     this.created = [];
     this.updated = [];
     this.deleted = [];
+    this.failNextUpsert = false;
   }
   // === 段落說明：模擬遠端建立或更新事件 ===
   async upsertRemoteEvent(record) {
+    if (this.failNextUpsert) {
+      this.failNextUpsert = false;
+      throw new Error('mock upsert failure');
+    }
     this.created.push(record.event.uid);
     this.updated.push(record.event.uid);
     return record;
@@ -80,6 +85,46 @@ describe('LocalCalendarServer', () => {
 
     const listed = await server.listEvents();
     expect(listed).toHaveLength(1);
+
+    await server.stop();
+  });
+
+  test('rollback cache when remote create fails', async () => {
+    const { server, mockClient } = createServer();
+    await server.start();
+
+    mockClient.failNextUpsert = true;
+    await expect(
+      server.createEvent({
+        calendarName: '測試行事曆',
+        summary: '失敗事件',
+        startISO: new Date().toISOString(),
+        endISO: new Date(Date.now() + 3600000).toISOString(),
+      })
+    ).rejects.toThrow('mock upsert failure');
+
+    const events = await server.listEvents();
+    expect(events).toHaveLength(0);
+
+    await server.stop();
+  });
+
+  test('restore previous record when remote update fails', async () => {
+    const { server, mockClient } = createServer();
+    await server.start();
+
+    const created = await server.createEvent({
+      calendarName: '測試行事曆',
+      summary: '原始事件',
+      startISO: new Date().toISOString(),
+      endISO: new Date(Date.now() + 3600000).toISOString(),
+    });
+
+    mockClient.failNextUpsert = true;
+    await expect(server.updateEvent(created.event.uid, { summary: '失敗更新' })).rejects.toThrow('mock upsert failure');
+
+    const current = await server.readEvent(created.event.uid);
+    expect(current.event.summary).toBe('原始事件');
 
     await server.stop();
   });
