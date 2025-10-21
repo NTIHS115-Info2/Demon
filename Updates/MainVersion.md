@@ -273,3 +273,28 @@
 # [v.1.4]
 ### Change
 - 將 toolReference 插件改為 LLMTool 插件，並調整相關邏輯，使工具列表的使用與呈現更完善
+# [v.1.5]
+### New
+- 新增 calendarSystem 插件，整合本地伺服器與 CalDAV 客戶端、同步工作者與快取架構
+- 建立 Server/calendar 模組，含 secrets 載入、快取、CalDAV 客戶端與同步排程
+### Test
+- 補充 calendarSystem 單元測試，驗證 CRUD 流程與插件指令路由
+### Docs
+- 撰寫 calendarSystem 插件 README，說明指令使用方式與注意事項
+
+# [v.1.5.1]
+### Change
+- 重構 calendarSystem 插件為策略化架構，所有指令與啟停流程統一透過 local 策略管理
+- 重寫 Server/calendar 密鑰載入邏輯，強制使用 CommonJS tokens 並移除預設憑證 fallback
+### Docs
+- 更新 calendarSystem README 與 tokens/README.md，說明憑證需求與策略限制
+### Test
+- 調整 calendarSystem 單元測試以注入模擬憑證並驗證新策略行為
+
+# [v.1.5.2]
+### Fix
+- 移除 calendarSystem 插件與本地策略中的測試掛鉤，確保僅暴露符合規範的介面
+### Change
+- 強化本地策略的 configure 錯誤處理，並支援透過選項重設伺服器工廠
+### Test
+- 更新 calendarSystem 單元測試改以啟動選項注入測試伺服器並於測試後還原設定

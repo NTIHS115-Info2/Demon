@@ -8,7 +8,9 @@ Server/llama/model
 src/plugins/tts/strategies/local/f5_tts
 
 logs
-index.js
+./index.js
+!Server/calendar/index.js
+!src/plugins/calendarSystem/index.js
 
 src/plugins/discord/config.js
 
@@ -24,3 +26,4 @@ tmp/
 config/*.js
 !config/*.example.js
 tokens/
+!tokens/README.md
