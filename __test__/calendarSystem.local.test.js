@@ -177,3 +177,57 @@ describe('calendarSystem plugin', () => {
     await server.stop();
   });
 });
+
+// === 段落說明：測試同步工作者在全量同步時的刪除行為 ===
+describe('SyncWorker', () => {
+  test('runFullSync prunes local records missing from remote snapshot', async () => {
+    const cache = new LocalCalendarCache({ logger: null, nowProvider: () => new Date('2024-01-01T00:00:00.000Z') });
+
+    const remoteEvent = uid => ({
+      event: {
+        uid,
+        calendarName: '測試行事曆',
+        summary: `Remote ${uid}`,
+        startISO: '2024-01-01T00:00:00.000Z',
+        endISO: '2024-01-01T01:00:00.000Z',
+      },
+      status: 'synced',
+      etag: `etag-${uid}`,
+      url: `https://example.com/${uid}.ics`,
+      lastModified: '2024-01-01T00:00:00.000Z',
+    });
+
+    cache.applyRemoteSnapshot([remoteEvent('keep'), remoteEvent('remove')]);
+
+    const localDraft = cache.createEvent({
+      calendarName: '測試行事曆',
+      summary: '本地草稿',
+      startISO: '2024-01-03T00:00:00.000Z',
+      endISO: '2024-01-03T01:00:00.000Z',
+    });
+
+    const mockClient = {
+      listRemoteEvents: jest.fn().mockResolvedValue([remoteEvent('keep')]),
+      syncToken: 'token-after-full',
+    };
+
+    const worker = new SyncWorker({
+      cache,
+      caldavClient: mockClient,
+      logger: { info: jest.fn(), warn: jest.fn(), error: jest.fn() },
+      scheduler: { setInterval: () => null, clearInterval: () => {}, setTimeout: () => null, clearTimeout: () => {} },
+    });
+
+    await worker.runFullSync();
+
+    expect(mockClient.listRemoteEvents).toHaveBeenCalled();
+    expect(cache.getEvent('keep')).not.toBeNull();
+    expect(cache.getEvent('remove')).toBeNull();
+
+    const remaining = cache.listEvents();
+    const remainingUids = remaining.map(record => record.event.uid);
+    expect(remainingUids).toContain('keep');
+    expect(remainingUids).toContain(localDraft.event.uid);
+    expect(remainingUids).not.toContain('remove');
+  });
+});

@@ -91,11 +91,46 @@ class SyncWorker extends EventEmitter {
   async runFullSync() {
     try {
       const remoteEvents = await this.caldavClient.listRemoteEvents();
-      this.cache.applyRemoteSnapshot(remoteEvents);
+      const snapshot = Array.isArray(remoteEvents) ? remoteEvents : [];
+      const remoteUids = new Set();
+
+      for (const remote of snapshot) {
+        const uid = remote?.event?.uid;
+        if (uid) {
+          remoteUids.add(uid);
+        }
+      }
+
+      this.cache.applyRemoteSnapshot(snapshot);
+
+      if (typeof this.cache.listEvents === 'function' && typeof this.cache.deleteEvent === 'function') {
+        const localRecordsRaw = await Promise.resolve(this.cache.listEvents({ includeDeleted: true }));
+        const localRecords = Array.isArray(localRecordsRaw) ? localRecordsRaw : [];
+
+        for (const record of localRecords) {
+          const uid = record?.event?.uid;
+          if (!uid || remoteUids.has(uid)) {
+            continue;
+          }
+
+          const isLocalOnly = !record.url && record.status !== 'deleted';
+          if (isLocalOnly) {
+            continue;
+          }
+
+          try {
+            this.cache.deleteEvent(uid);
+            this.logger?.info?.(`移除遠端快照中缺失的本地事件：${uid}`);
+          } catch (deleteErr) {
+            this.logger?.warn?.(`移除遠端快照中缺失的本地事件失敗：${uid} - ${deleteErr.message}`);
+          }
+        }
+      }
+
       if (typeof this.cache.setSyncToken === 'function') {
         this.cache.setSyncToken(this.caldavClient.syncToken ?? null);
       }
-      this.emit('full-synced', { count: remoteEvents.length });
+      this.emit('full-synced', { count: snapshot.length });
     } catch (err) {
       this.logger?.error(`執行全量同步時發生錯誤：${err.message}`);
       throw err;
