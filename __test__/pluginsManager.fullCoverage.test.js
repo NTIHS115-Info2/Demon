@@ -153,9 +153,26 @@ describe('PluginsManager 插件規範完整覆蓋測試', () => {
         } catch (error) {
           throw new Error(`解析 LLM 插件 ${meta.name} 的工具描述檔案 JSON 時發生錯誤：${error.message}`);
         }
-        expect(parsed.toolName).toBeTruthy();
-        expect(parsed.description).toBeTruthy();
-        expect(parsed.output).toBeDefined();
+
+        const descriptions = Array.isArray(parsed)
+          ? parsed
+          : (parsed && typeof parsed === 'object'
+            ? [parsed]
+            : []);
+
+        if (descriptions.length === 0) {
+          throw new Error(`LLM 插件 ${meta.name} 的工具描述檔案格式不支援`);
+        }
+
+        expect(descriptions.length).toBeGreaterThan(0);
+        descriptions.forEach((tool, index) => {
+          if (!tool || typeof tool !== 'object') {
+            throw new Error(`LLM 插件 ${meta.name} 的工具描述第 ${index + 1} 筆資料格式不正確`);
+          }
+          expect(tool.toolName).toBeTruthy();
+          expect(tool.description).toBeTruthy();
+          expect(tool.output).toBeDefined();
+        });
       }
     }
   });
