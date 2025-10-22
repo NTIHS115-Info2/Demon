@@ -47,7 +47,7 @@ function normalizeSecrets(rawModule) {
   }
 
   const requiredFields = ['ICLOUD_USER', 'ICLOUD_APP_PASSWORD', 'ICLOUD_CAL_NAME'];
-  const missing = requiredFields.filter((field) => !secretsSource[field]);
+  const missing = requiredFields.filter(field => !secretsSource[field]);
   if (missing.length > 0) {
     const message = `tokens/icloud.js 缺少必要欄位：${missing.join(', ')}`;
     logger.error(message);
