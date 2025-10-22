@@ -370,7 +370,7 @@ module.exports = {
 
 ```js
 // server/config/secrets.js
-import * as iCloud from "../../tokens/icloud.js";
+const iCloud = require("../../tokens/icloud.js");
 
 export const secrets = {
   ICLOUD_USER: iCloud.ICLOUD_USER,
