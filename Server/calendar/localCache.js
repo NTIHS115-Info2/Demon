@@ -56,16 +56,17 @@ class LocalCalendarCache extends EventEmitter {
 
     const normalized = {
       uid: payload.uid || this.generateUid(),
-      metadata:
-        payload && payload.metadata && typeof payload.metadata === 'object' && !Array.isArray(payload.metadata)
-          ? { ...payload.metadata }
-          : {},
       // Set defaults for optional fields
       description: '',
       location: '',
       attendees: [],
     };
 
+    // Assign metadata after required field validation
+    normalized.metadata =
+      payload && payload.metadata && typeof payload.metadata === 'object' && !Array.isArray(payload.metadata)
+        ? { ...payload.metadata }
+        : {};
     const hasField = key => Object.prototype.hasOwnProperty.call(payload, key);
 
     // Required fields: only set if present (already checked above if !allowPartial)
