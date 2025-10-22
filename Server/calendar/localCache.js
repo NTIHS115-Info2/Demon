@@ -105,13 +105,9 @@ class LocalCalendarCache extends EventEmitter {
 
     if (hasField('startISO')) {
       normalized.startISO = toISO(payload.startISO);
-    } else if (!allowPartial) {
-      normalized.startISO = toISO(payload.startISO);
     }
 
     if (hasField('endISO')) {
-      normalized.endISO = toISO(payload.endISO);
-    } else if (!allowPartial) {
       normalized.endISO = toISO(payload.endISO);
     }
 
