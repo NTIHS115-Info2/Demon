@@ -123,9 +123,7 @@ class CalDavClient extends EventEmitter {
         if (statusCode === 404 || !hasCalendarData) {
           const uid = this.extractUidFromUrl(url);
           if (!uid) {
-            if (this.logger && typeof this.logger.warn === 'function') {
-              this.logger.warn('收到缺少 UID 的刪除通知，已略過處理。');
-            }
+            this.logger?.warn('收到缺少 UID 的刪除通知，已略過處理。');
             continue;
           }
 
