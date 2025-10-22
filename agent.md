@@ -385,7 +385,7 @@ export const secrets = {
 
 ```js
 // 例：server/bootstrap.js
-import { secrets } from "./config/secrets.js";
+const { secrets } = require("./config/secrets.js");
 
 console.log("Sync as:", secrets.ICLOUD_USER);
 // 在 CalDAV client、Scheduler、Worker 中引用 secrets.*
