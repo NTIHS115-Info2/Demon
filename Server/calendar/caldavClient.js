@@ -160,7 +160,7 @@ class CalDavClient extends EventEmitter {
     try {
       // Use node-ical to parse the ICS string
       if (!this.dependencies.nodeIcal) {
-        throw new Error("Missing dependency: node-ical is not loaded. Please ensure bootstrapDependencies() loads it in 'live' mode.");
+        throw new Error("Missing dependency: nodeIcal is not loaded. Please ensure bootstrapDependencies() loads it in 'live' mode.");
       }
       const nodeIcal = this.dependencies.nodeIcal;
       const parsed = nodeIcal.parseICS(icsString);
