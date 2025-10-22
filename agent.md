@@ -351,11 +351,19 @@ project-root/
 
 ```js
 // tokens/icloud.js
-export const ICLOUD_USER = "your-apple-id@email.com";
-export const ICLOUD_APP_PASSWORD = "xxxx-xxxx-xxxx-xxxx"; // Apple App-Specific Password
-export const ICLOUD_CAL_NAME = "小惡魔行事曆";
-export const TIMEZONE = "Asia/Taipei";
-export const SYNC_INTERVAL_MINUTES = 1; // 分鐘級增量同步週期
+const ICLOUD_USER = "your-apple-id@email.com";
+const ICLOUD_APP_PASSWORD = "xxxx-xxxx-xxxx-xxxx"; // Apple App-Specific Password
+const ICLOUD_CAL_NAME = "小惡魔行事曆";
+const TIMEZONE = "Asia/Taipei";
+const SYNC_INTERVAL_MINUTES = 1; // 分鐘級增量同步週期
+
+module.exports = {
+  ICLOUD_USER,
+  ICLOUD_APP_PASSWORD,
+  ICLOUD_CAL_NAME,
+  TIMEZONE,
+  SYNC_INTERVAL_MINUTES,
+};
 ```
 
 **server/config/secrets.js**（集中載入，方便日後切換來源）
