@@ -8,11 +8,9 @@ const logger = new Logger('calendarSystem');
 // === 段落說明：維護目前策略、模式與啟動優先度 ===
 let strategy = null;
 let mode = 'local';
-let priority = 0;
 
 module.exports = {
-  // === 段落說明：預設提供優先度資訊供外部調度 ===
-  priority,
+  
 
   // === 段落說明：切換策略模式，目前僅支援 local ===
   async updateStrategy(newMode = 'local', options = {}) {
