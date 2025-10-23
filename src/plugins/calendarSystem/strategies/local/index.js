@@ -10,9 +10,11 @@ let serverInstance = null;
 let serverFactory = getCalendarServer;
 let lastOptions = {};
 
+const priority = 0,
+
 module.exports = {
   // === 段落說明：宣告本地策略的預設優先度 ===
-  priority: 10,
+  priority,
 
   // === 段落說明：更新伺服器工廠與設定以便測試或客製化 ===
   configure(options = {}) {
