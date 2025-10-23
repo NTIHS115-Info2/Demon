@@ -53,7 +53,7 @@ module.exports = {
         isOnline = true;
         logger.info(`Local strategy is now online with python: ${pythonPath}.`);
     },
-    
+
     async offline() {
         isOnline = false;
         logger.info('Local strategy is now offline.');
@@ -61,7 +61,7 @@ module.exports = {
 
     async restart(options = {}) {
         await this.offline();
-        await new Promise(resolve => setTimeout(resolve, 100));
+        await new Promise((resolve) => setTimeout(resolve, 100));
         await this.online(options);
     },
 
@@ -69,26 +69,40 @@ module.exports = {
         return isOnline ? 1 : 0;
     },
 
-    async send(payload) {
+    async send(payload = {}) {
         if (!isOnline) {
             return { success: false, error: 'Local strategy is offline.' };
         }
-        
-        const { url, query, article_count = 3, top_k = 3 } = payload;
+
+        const { url, query } = payload;
+        const articleCount = Number.parseInt(
+            payload.article_count !== undefined ? payload.article_count : 3,
+            10
+        );
+        const topK = Number.parseInt(
+            payload.top_k !== undefined ? payload.top_k : 3,
+            10
+        );
+        const device = typeof payload.device === 'string' && payload.device.trim() ? payload.device.trim() : 'cpu';
+
         if (!url || !query) {
             return { success: false, error: "Missing 'url' or 'query' in payload." };
         }
+
+        const articleLimitArg = Number.isInteger(articleCount) && articleCount > 0 ? articleCount.toString() : '3';
+        const topKArg = Number.isInteger(topK) && topK > 0 ? topK.toString() : '3';
+
         try {
-            const scrapedData = await _runPythonScript('scraper.py', [url, article_count.toString()]);
+            const scrapedData = await _runPythonScript('scraper.py', [url, articleLimitArg]);
             if (!scrapedData.success) return scrapedData;
-            
+
             const articleText = scrapedData.result.article_text;
             if (!articleText.trim()) {
                 logger.warn(`Scraper for ${url} returned empty content.`);
                 return { success: true, result: { relevant_sections: [] }, resultType: 'list' };
             }
 
-            return await _runPythonScript('librarian.py', [articleText, query, top_k.toString(), 'cpu']);
+            return await _runPythonScript('librarian.py', [articleText, query, topKArg, device]);
         } catch (error) {
             return { success: false, error: error.message };
         }

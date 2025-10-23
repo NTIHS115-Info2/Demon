@@ -1,11 +1,11 @@
 [
   {
     "toolName": "news_scraper.autonomous_researcher",
-    "description": "接收一個研究主題和一個具體問題，自主上網搜尋、抓取、並過濾多個來源的資訊，最終回傳與具體問題最相關的文本片段。適用於需要對特定時事或主題進行快速、深度情報蒐集的場景。",
+    "description": "自動研究新聞與即時來源：根據指定主題與問題爬取多個來源的新聞文章，利用語義向量搜尋比對並挑選最相關的段落，以協助快速整理情資。",
     "input": {
-      "topic": "需要進行廣泛搜尋的研究主題，例如 'NVIDIA Blackwell architecture'",
-      "query": "需要從搜尋結果中回答的具體問題，例如 'What are the performance improvements of Blackwell over Hopper?'",
-      "depth": "搜尋結果的深度（要分析幾個來源），可選，預設為 3"
+      "topic": "研究的主題，例如 'NVIDIA Blackwell architecture'",
+      "query": "需要回答的具體問題，例如 'What are the performance improvements of Blackwell over Hopper?'",
+      "depth": "要分析的來源數量，預設為 3，可根據需求調整"
     },
     "output": {
       "success": true,

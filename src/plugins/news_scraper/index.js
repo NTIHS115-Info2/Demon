@@ -1,7 +1,7 @@
 // src/plugins/news_scraper/index.js
 // 職責：作為一個輕薄的轉發層，不包含任何業務邏輯。
 const Logger = require('../../utils/logger');
-const strategies = require('./strategies'); // 【架構修正】從統一出口導入
+const strategies = require('./strategies');
 
 const logger = new Logger('news_scraper_plugin.log');
 let currentStrategy = null;
@@ -13,11 +13,11 @@ module.exports = {
         if (!strategies[strategyName]) {
             throw new Error(`Strategy '${strategyName}' not found.`);
         }
-        
+
         if (currentStrategy && currentStrategyName !== strategyName) {
             await currentStrategy.offline();
         }
-        
+
         currentStrategy = strategies[strategyName];
         currentStrategyName = strategyName;
         logger.info(`Strategy successfully set to '${strategyName}'.`);
@@ -51,7 +51,6 @@ module.exports = {
         if (!currentStrategy) {
             return { success: false, error: 'Plugin not initialized. Please call online() first.' };
         }
-        // 【P0 修正】確保 await
         return await currentStrategy.send(payload);
     }
 };
