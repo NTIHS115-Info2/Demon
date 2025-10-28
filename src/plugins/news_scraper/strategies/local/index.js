@@ -9,6 +9,14 @@ const logger = new Logger('news_scraper_local_strategy.log');
 let isOnline = false;
 let pythonPath = 'python3'; // 預設值
 
+function sanitizePositiveInteger(value, fallback) {
+    const parsed = Number.parseInt(value, 10);
+    if (Number.isInteger(parsed) && parsed > 0) {
+        return parsed;
+    }
+    return fallback;
+}
+
 /**
  * 執行 Python 腳本的核心邏輯 (私有函數)
  * @param {string} scriptName - 'scraper.py' 或 'librarian.py' 等
@@ -74,35 +82,33 @@ module.exports = {
             return { success: false, error: 'Local strategy is offline.' };
         }
 
-        const { url, query } = payload;
-        const articleCount = Number.parseInt(
+        const rawUrl = typeof payload.url === 'string' ? payload.url.trim() : '';
+        const rawQuery = typeof payload.query === 'string' ? payload.query.trim() : '';
+        const articleCount = sanitizePositiveInteger(
             payload.article_count !== undefined ? payload.article_count : 3,
-            10
+            3
         );
-        const topK = Number.parseInt(
+        const topK = sanitizePositiveInteger(
             payload.top_k !== undefined ? payload.top_k : 3,
-            10
+            3
         );
         const device = typeof payload.device === 'string' && payload.device.trim() ? payload.device.trim() : 'cpu';
 
-        if (!url || !query) {
+        if (!rawUrl || !rawQuery) {
             return { success: false, error: "Missing 'url' or 'query' in payload." };
         }
 
-        const articleLimitArg = Number.isInteger(articleCount) && articleCount > 0 ? articleCount.toString() : '3';
-        const topKArg = Number.isInteger(topK) && topK > 0 ? topK.toString() : '3';
-
         try {
-            const scrapedData = await _runPythonScript('scraper.py', [url, articleLimitArg]);
+            const scrapedData = await _runPythonScript('scraper.py', [rawUrl, articleCount.toString()]);
             if (!scrapedData.success) return scrapedData;
 
-            const articleText = scrapedData.result.article_text;
+            const articleText = scrapedData?.result?.article_text ?? '';
             if (!articleText.trim()) {
-                logger.warn(`Scraper for ${url} returned empty content.`);
+                logger.warn(`Scraper for ${rawUrl} returned empty content.`);
                 return { success: true, result: { relevant_sections: [] }, resultType: 'list' };
             }
 
-            return await _runPythonScript('librarian.py', [articleText, query, topKArg, device]);
+            return await _runPythonScript('librarian.py', [articleText, rawQuery, topK.toString(), device]);
         } catch (error) {
             return { success: false, error: error.message };
         }

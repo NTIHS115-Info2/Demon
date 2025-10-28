@@ -7,6 +7,16 @@ import re
 import sys
 import json
 
+def _sanitize_positive_int(value, fallback=3):
+    try:
+        parsed = int(value)
+        if parsed > 0:
+            return parsed
+    except (TypeError, ValueError):
+        pass
+    return fallback
+
+
 class LibrarianStrategy:
     """
     圖書管理員策略 (Librarian Strategy) - V1.0.3
@@ -34,9 +44,12 @@ class LibrarianStrategy:
         try:
             # 【P2 修正】建立局部變數以決定 FAISS 所需的設備
             # 預設為 CPU，但可透過參數覆寫。
-            faiss_device = device or 'cpu'
+            sanitized_device = (device or 'cpu').strip() or 'cpu'
+            faiss_device = sanitized_device
 
-            self.model.to(device)
+            safe_top_k = _sanitize_positive_int(top_k, fallback=3)
+
+            self.model.to(sanitized_device)
             chunks = self._chunk_text(text_content)
             if not chunks:
                 return {"success": True, "result": {"relevant_sections": []}, "resultType": "object"}
@@ -66,7 +79,7 @@ class LibrarianStrategy:
             index = faiss.IndexFlatIP(chunk_embeddings.shape[1])
             index.add(chunk_embeddings)
             
-            similarities, indices = index.search(query_embedding, top_k)
+            similarities, indices = index.search(query_embedding, safe_top_k)
             
             results = []
             for i in range(len(indices[0])):
@@ -85,7 +98,7 @@ async def main():
     if len(sys.argv) > 2:
         text_content = sys.argv[1]
         query = sys.argv[2]
-        top_k = int(sys.argv[3]) if len(sys.argv) > 3 else 3
+        top_k = _sanitize_positive_int(sys.argv[3]) if len(sys.argv) > 3 else 3
         device = sys.argv[4] if len(sys.argv) > 4 else 'cpu'
         
         librarian = LibrarianStrategy()
