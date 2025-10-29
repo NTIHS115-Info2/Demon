@@ -73,8 +73,16 @@ module.exports = {
 
   // === 段落說明：重新啟動插件以套用最新設定 ===
   async restart(options = {}) {
-    await this.offline();
-    await this.online(options);
+    if (!strategies){
+      logger.warn('calendarSystem 尚未初始化策略，略過重啟流程');
+      return;
+    }
+    try{
+      await strategy.restart();
+    }catch (err) {
+      logger.error(`calenderSystem 重啟失敗 : ${err}`);
+      throw err;
+    }
   },
 
   // === 段落說明：查詢目前插件狀態 ===

@@ -1,24 +1,24 @@
 {
   "toolName": "calendarSystem",
-  "description": "透過本地行事曆伺服器管理事件，並與 iCloud CalDAV 進行同步。可用於建立、更新、刪除、查詢與手動觸發同步。",
+  "description": "Manage events through a local calendar server and synchronize with iCloud CalDAV. Can be used to create, update, delete, query, and manually trigger synchronization.",
   "apis": {
-    "create": "建立新的行事曆事件並推送至設定的 iCloud 行事曆。",
-    "update": "依據 UID 更新既有事件並同步遠端。",
-    "delete": "依據 UID 移除事件；options.soft=true 時改為軟刪除。",
-    "read": "依據 UID 從本地快取取得單一事件。",
-    "list": "依條件（calendarName、rangeStart、rangeEnd、includeDeleted）過濾事件清單。",
-    "push": "手動觸發同步：預設 incremental，可設定 options.type='full' 進行全量同步。",
-    "status": "回傳本地伺服器與同步模式的狀態資訊。"
+    "create": "Create a new calendar event and push it to the configured iCloud calendar.",
+    "update": "Update an existing event by UID and sync it to the remote.",
+    "delete": "Remove an event by UID; when options.soft=true, perform a soft delete instead.",
+    "read": "Retrieve a single event from the local cache by UID.",
+    "list": "Filter event lists by conditions (calendarName, rangeStart, rangeEnd, includeDeleted).",
+    "push": "Manually trigger synchronization: defaults to incremental, set options.type='full' for a full sync.",
+    "status": "Return status information of the local server and synchronization mode."
   },
   "input": {
-    "action": "可為 create、update、delete、read、list、push、status 之一。",
-    "payload": "當 action=create 或 update 時必填，需提供 calendarName、summary、startISO、endISO 等事件欄位。",
-    "uid": "當 action=update、delete、read 時需提供事件 UID。",
-    "options": "可選參數；delete 可帶 soft、list 可帶篩選條件、push 可帶 type（incremental|full）。"
+    "action": "One of create, update, delete, read, list, push, status.",
+    "payload": "Required when action=create or update; must include event fields such as calendarName, summary, startISO, endISO.",
+    "uid": "Required when action=update, delete, or read to identify the event UID.",
+    "options": "Optional parameters; delete supports soft, list supports filters, push supports type (incremental|full)."
   },
   "output": {
-    "event": "create、update、read 成功時回傳事件內容。",
-    "status": "push 與 status 會回傳同步狀態資訊。",
-    "error": "若操作失敗，會回傳錯誤訊息字串。"
+    "event": "Returned when create, update, or read succeeds, containing event details.",
+    "status": "Returned when push or status succeeds, containing synchronization status information.",
+    "error": "If an operation fails, returns an error message string."
   }
 }

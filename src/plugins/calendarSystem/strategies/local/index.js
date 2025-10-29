@@ -12,34 +12,34 @@ let lastOptions = {};
 
 const priority = 0;
 
+// === 段落說明：更新伺服器工廠與設定以便測試或客製化 ===
+const configure = (options = {}) => {
+  try {
+    const hasCustomFactory = Object.prototype.hasOwnProperty.call(options, 'serverFactory');
+    if (hasCustomFactory) {
+      if (typeof options.serverFactory === 'function') {
+        serverFactory = options.serverFactory;
+      } else if (options.serverFactory === null) {
+        serverFactory = getCalendarServer;
+      } else {
+        throw new Error('提供的 serverFactory 不是可呼叫的函式');
+      }
+    }
+    lastOptions = options.serverOptions ? { ...options.serverOptions } : {};
+  } catch (err) {
+    const message = `calendarSystem 本地策略配置失敗：${err.message}`;
+    logger.error(message);
+    throw new Error(message);
+  }
+}
+
 module.exports = {
   // === 段落說明：宣告本地策略的預設優先度 ===
   priority,
 
-  // === 段落說明：更新伺服器工廠與設定以便測試或客製化 ===
-  configure(options = {}) {
-    try {
-      const hasCustomFactory = Object.prototype.hasOwnProperty.call(options, 'serverFactory');
-      if (hasCustomFactory) {
-        if (typeof options.serverFactory === 'function') {
-          serverFactory = options.serverFactory;
-        } else if (options.serverFactory === null) {
-          serverFactory = getCalendarServer;
-        } else {
-          throw new Error('提供的 serverFactory 不是可呼叫的函式');
-        }
-      }
-      lastOptions = options.serverOptions ? { ...options.serverOptions } : {};
-    } catch (err) {
-      const message = `calendarSystem 本地策略配置失敗：${err.message}`;
-      logger.error(message);
-      throw new Error(message);
-    }
-  },
-
   // === 段落說明：啟動本地行事曆伺服器 ===
   async online(options = {}) {
-    this.configure(options);
+    configure(options);
     if (serverInstance) {
       logger.warn('calendarSystem 本地策略已啟動，略過重複啟動請求');
       return;
