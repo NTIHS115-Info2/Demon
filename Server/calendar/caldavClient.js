@@ -2,6 +2,7 @@
 const { EventEmitter } = require('events');
 const Logger = require('../../src/utils/logger');
 const { getSecrets } = require('./config/secrets');
+const { t } = require('tar');
 
 // === 段落說明：定義 CalDAV 客戶端，涵蓋實際與模擬兩種執行模式 ===
 class CalDavClient extends EventEmitter {
@@ -58,7 +59,7 @@ class CalDavClient extends EventEmitter {
 
     try {
       const account = await dav.createAccount({
-        server: 'https://caldav.icloud.com',
+        server: this.secrets.ICLOUD_HOME_URL,
         credentials,
         loadCollections: true,
         loadObjects: true,
