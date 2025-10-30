@@ -70,10 +70,20 @@ class ForagerStrategy:
         except Exception as e:
             return { "success": False, "error": f"ForagerStrategy failed: {str(e)}" }
 
+def _sanitize_article_limit(raw_limit, fallback=3):
+    try:
+        parsed = int(raw_limit)
+        if parsed > 0:
+            return parsed
+    except (TypeError, ValueError):
+        pass
+    return fallback
+
+
 async def main():
     if len(sys.argv) > 1:
         url = sys.argv[1]
-        article_limit = int(sys.argv[2]) if len(sys.argv) > 2 else 3
+        article_limit = _sanitize_article_limit(sys.argv[2]) if len(sys.argv) > 2 else 3
         forager = ForagerStrategy()
         result = await forager.fetch_news(rss_url=url, article_limit=article_limit)
         # 強制以 UTF-8 編碼輸出 JSON，確保 Node.js 能正確解析
