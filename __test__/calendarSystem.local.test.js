@@ -153,19 +153,80 @@ describe('calendarSystem plugin', () => {
     const { server } = createServer();
 
     // === 段落說明：透過啟動選項注入測試專用伺服器 ===
-    await CalendarPlugin.online({ serverFactory: () => server, serverOptions: {} });
+    await CalendarPlugin.online({ serverFactory: () => server, serverOptions: { defaultCalendarName: '測試行事曆' } });
 
+    // === 段落說明：使用新介面建立事件並驗證成功回傳 ===
     const created = await CalendarPlugin.send({
-      action: 'create',
-      payload: {
-        calendarName: '測試行事曆',
-        summary: '插件建立',
-        startISO: new Date().toISOString(),
-        endISO: new Date(Date.now() + 3600000).toISOString(),
+      action: 'createEvent',
+      params: {
+        title: '插件建立',
+        startTime: new Date().toISOString(),
+        endTime: new Date(Date.now() + 3600000).toISOString(),
       },
     });
 
-    expect(created.event.summary).toBe('插件建立');
+    expect(created.success).toBe(true);
+    expect(created.resultType).toBe('event');
+    expect(created.result.event.summary).toBe('插件建立');
+
+    const targetUid = created.result.event.uid;
+    const dateOnly = created.result.event.startISO.slice(0, 10);
+
+    // === 段落說明：以相容別名更新事件並確認回傳 ===
+    const updated = await CalendarPlugin.send({
+      action: 'update',
+      params: {
+        uid: targetUid,
+        title: '插件更新',
+        description: '更新描述',
+      },
+    });
+
+    expect(updated.event.summary).toBe('插件更新');
+    expect(updated.event.description).toBe('更新描述');
+
+    // === 段落說明：以舊欄位讀取事件驗證相容處理 ===
+    const read = await CalendarPlugin.send({ action: 'read', uid: targetUid });
+
+    expect(read.event.uid).toBe(targetUid);
+
+    // === 段落說明：使用新介面列出事件 ===
+    const listed = await CalendarPlugin.send({
+      action: 'listEvents',
+      params: {
+        date: new Date().toISOString().slice(0, 10),
+      },
+    });
+
+    expect(listed.success).toBe(true);
+    expect(listed.resultType).toBe('eventList');
+    expect(Array.isArray(listed.result)).toBe(true);
+    expect(listed.result.length).toBeGreaterThan(0);
+    expect(listed.result[0].event.summary).toBe('插件建立');
+
+    // === 段落說明：使用舊格式 options 呼叫 list 指令驗證兼容 ===
+    const legacyListed = await CalendarPlugin.send({ action: 'list', options: { date: dateOnly, includeDeleted: false } });
+
+    expect(Array.isArray(legacyListed)).toBe(true);
+    expect(legacyListed.some(item => item.event.uid === targetUid)).toBe(true);
+
+    // === 段落說明：刪除事件並驗證回傳結構 ===
+    const removed = await CalendarPlugin.send({ action: 'delete', params: { uid: targetUid } });
+
+    expect(removed.uid).toBe(targetUid);
+
+    // === 段落說明：刪除後重新列出事件確認已被移除 ===
+    const afterDelete = await CalendarPlugin.send({ action: 'listEvents', params: { date: dateOnly } });
+
+    expect(afterDelete.success).toBe(true);
+    expect(afterDelete.resultType).toBe('eventList');
+    expect(Array.isArray(afterDelete.result)).toBe(true);
+    expect(afterDelete.result.some(item => item.event.uid === targetUid)).toBe(false);
+
+    // === 段落說明：手動觸發全量同步檢查成功結果 ===
+    const syncResult = await CalendarPlugin.send({ action: 'push', params: { type: 'full' } });
+
+    expect(syncResult).toBeDefined();
 
     const status = await CalendarPlugin.send({ action: 'status' });
     expect(status.started).toBe(true);

@@ -1,24 +1,79 @@
 {
   "toolName": "calendarSystem",
-  "description": "Manage events through a local calendar server and synchronize with iCloud CalDAV. Can be used to create, update, delete, query, and manually trigger synchronization.",
+  "description": "管理個人 iCloud 行事曆，提供 CRUD、同步與查詢功能，並遵循標準化的回應結構。",
   "apis": {
-    "create": "Create a new calendar event and push it to the configured iCloud calendar.",
-    "update": "Update an existing event by UID and sync it to the remote.",
-    "delete": "Remove an event by UID; when options.soft=true, perform a soft delete instead.",
-    "read": "Retrieve a single event from the local cache by UID.",
-    "list": "Filter event lists by conditions (calendarName, rangeStart, rangeEnd, includeDeleted).",
-    "push": "Manually trigger synchronization: defaults to incremental, set options.type='full' for a full sync.",
-    "status": "Return status information of the local server and synchronization mode."
+    "create": "建立新的行事曆事件，需於 payload/params 中提供 calendarName、summary、startISO、endISO 等欄位。",
+    "update": "依據 uid 與 payload 更新事件部分欄位，支援 summary、description、location、時間欄位與 calendarName。",
+    "delete": "依 uid 刪除事件；若 options.soft 為 true，將僅標記刪除而不觸發遠端刪除。",
+    "read": "依 uid 讀取單一事件紀錄，若不存在將拋出錯誤。",
+    "list": "使用 options 傳入篩選條件 (calendarName、rangeStart、rangeEnd、includeDeleted) 回傳事件陣列。",
+    "push": "觸發同步流程；options.type 可指定 incremental 或 full。",
+    "status": "回傳本地伺服器狀態與同步資訊，包括 started 旗標與快取摘要。"
+  },
+  "actions": {
+    "createEvent": "建立新的 iCloud 行事曆事件。",
+    "listEvents": "依日期或日期區間列出事件清單。",
+    "status": "取得伺服器狀態摘要。",
+    "create": "相容別名，與 createEvent 共用參數格式。",
+    "update": "相容別名，更新事件的部分欄位。",
+    "delete": "相容別名，刪除事件並支援軟刪除。",
+    "read": "相容別名，讀取單一事件紀錄。",
+    "list": "相容別名，沿用舊版列表指令並採用新參數格式。",
+    "push": "相容別名，手動觸發同步流程。"
+  },
+  "actionParams": {
+    "createEvent": {
+      "title": "字串 – 事件標題。",
+      "startTime": "字串 – 事件開始時間 (UTC ISO 8601)。",
+      "endTime": "字串 – 事件結束時間 (UTC ISO 8601)。",
+      "calendarName": "字串 – 行事曆名稱 (選填，預設為系統設定)。",
+      "location": "字串 – 事件地點 (選填)。",
+      "description": "字串 – 事件描述 (選填)。"
+    },
+    "listEvents": {
+      "date": "字串 – 指定單日 (YYYY-MM-DD) 取得事件，與 from/to 擇一使用。",
+      "from": "字串 – 起始日期 (YYYY-MM-DD)。",
+      "to": "字串 – 結束日期 (YYYY-MM-DD)。",
+      "rangeStart": "字串 – 自訂範圍起點 (UTC ISO 8601，與 date/from 擇一使用)。",
+      "rangeEnd": "字串 – 自訂範圍終點 (UTC ISO 8601，與 date/to 擇一使用)。",
+      "calendarName": "字串 – 篩選特定行事曆 (選填)。",
+      "includeDeleted": "布林 – 是否包含已軟刪除事件 (選填)。"
+    },
+    "status": {},
+    "create": "與 createEvent 相同。",
+    "update": {
+      "uid": "字串 – 目標事件的唯一識別碼。",
+      "title": "字串 – 新事件標題 (選填)。",
+      "description": "字串 – 事件描述 (選填)。",
+      "location": "字串 – 事件地點 (選填)。",
+      "startTime": "字串 – 更新後的開始時間 (UTC ISO 8601，選填)。",
+      "endTime": "字串 – 更新後的結束時間 (UTC ISO 8601，選填)。",
+      "calendarName": "字串 – 行事曆名稱 (選填，用於相容舊欄位)。"
+    },
+    "delete": {
+      "uid": "字串 – 目標事件的唯一識別碼。",
+      "soft": "布林 – 是否僅軟刪除而不影響遠端 (選填)。"
+    },
+    "read": {
+      "uid": "字串 – 目標事件的唯一識別碼。"
+    },
+    "list": "與 listEvents 相同，可額外沿用舊版 rangeStart/rangeEnd/includeDeleted 旗標。",
+    "push": {
+      "type": "字串 – 同步型態：'incremental' (預設) 或 'full'。"
+    }
   },
   "input": {
-    "action": "One of create, update, delete, read, list, push, status.",
-    "payload": "Required when action=create or update; must include event fields such as calendarName, summary, startISO, endISO.",
-    "uid": "Required when action=update, delete, or read to identify the event UID.",
-    "options": "Optional parameters; delete supports soft, list supports filters, push supports type (incremental|full)."
+    "action": "字串 – 指定欲執行的指令名稱。",
+    "params": "物件 – 指令所需參數，建議採用新格式。",
+    "uid": "字串 – 舊版欄位，已棄用，建議改用 params.uid。",
+    "payload": "物件 – 舊版欄位，已棄用，建議改用 params。",
+    "options": "物件 – 舊版欄位，已棄用，建議改用 params。"
   },
   "output": {
-    "event": "Returned when create, update, or read succeeds, containing event details.",
-    "status": "Returned when push or status succeeds, containing synchronization status information.",
-    "error": "If an operation fails, returns an error message string."
+    "success": "布林 – 指令是否執行成功 (僅適用於 createEvent/listEvents 等新指令)。",
+    "result": "物件/陣列 – 指令回傳資料：建立/更新/讀取回傳事件物件，列表回傳事件陣列，刪除/同步回傳作業摘要。",
+    "resultType": "字串 – 標示回傳型態，例如 'event'、'eventList'、'status' 或 'void' (僅適用於新指令)。",
+    "error": "字串 – 當 success 為 false 時的錯誤訊息 (新指令使用)。",
+    "value": "物件 – 補充錯誤資訊 (選填，僅於 success 為 false 時提供)。"
   }
 }

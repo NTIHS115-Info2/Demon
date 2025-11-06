@@ -298,3 +298,29 @@
 - 強化本地策略的 configure 錯誤處理，並支援透過選項重設伺服器工廠
 ### Test
 - 更新 calendarSystem 單元測試改以啟動選項注入測試伺服器並於測試後還原設定
+
+# [v.1.5.3]
+### Change
+- 更新 calendarSystem 插件的 tool-description.json 與本地策略，支援新版 `createEvent` 與 `listEvents` 指令格式與回傳結構
+### Docs
+- 調整 calendarSystem README 以描述新指令與回應欄位
+### Test
+- 更新 calendarSystem 單元測試以驗證新介面並覆蓋查詢行為
+# [v.1.5.4]
+### Change
+- 保留 calendarSystem 舊指令別名並導入統一回應結構，確保與伺服器介面相容
+- 擴充本地策略參數轉換與錯誤處理邏輯，支援新舊欄位與同步指令
+### Docs
+- 更新 calendarSystem 工具描述與 README，說明相容別名與新欄位規範
+### Test
+- 擴增 calendarSystem 單元測試，覆蓋相容別名、刪除與同步指令的回傳格式
+
+# [v.1.5.5]
+### Change
+- 調整 calendarSystem 本地策略錯誤處理，將舊指令回復為原始回傳格式並保留新指令的 success/result 包裝
+- 擴充列表篩選支援 rangeStart/rangeEnd 與 ISO 驗證，確保舊版參數可用
+### Docs
+- 更新 tool-description.json 增列 `apis` 區塊並描述舊新版回傳差異
+- 補充 README 說明新舊指令在結果格式與錯誤處理上的差異
+### Test
+- 調整本地策略測試，驗證舊指令維持原樣回傳且新指令仍提供 success/result 結構
