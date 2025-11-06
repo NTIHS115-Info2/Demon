@@ -223,20 +223,18 @@ const buildUpdatePayload = (data = {}) => {
 
   if (hasOwn('startTime') || hasOwn('startISO')) {
     const rawStart = hasOwn('startTime') ? params.startTime : params.startISO;
-    const start = new Date(rawStart);
-    if (Number.isNaN(start.getTime())) {
-      throw new Error('startTime 必須為有效的 ISO 8601 字串');
-    }
-    patch.startISO = start.toISOString();
+    patch.startISO = normalizeISODateTime(rawStart, 'startTime');
   }
 
   if (hasOwn('endTime') || hasOwn('endISO')) {
     const rawEnd = hasOwn('endTime') ? params.endTime : params.endISO;
-    const end = new Date(rawEnd);
-    if (Number.isNaN(end.getTime())) {
-      throw new Error('endTime 必須為有效的 ISO 8601 字串');
+    patch.endISO = normalizeISODateTime(rawEnd, 'endTime');
+  }
+
+  if (patch.startISO && patch.endISO) {
+    if (new Date(patch.endISO).getTime() <= new Date(patch.startISO).getTime()) {
+      throw new Error('endTime 必須晚於 startTime');
     }
-    patch.endISO = end.toISOString();
   }
 
   if (hasOwn('calendarName')) {
