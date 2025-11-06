@@ -108,24 +108,28 @@ const buildCreatePayload = (params = {}) => {
     throw new Error('endTime 必須晚於 startTime');
   }
 
-  const payload = {
-    calendarName: ensureNonEmptyString(
-      params.calendarName || lastOptions.defaultCalendarName || DEFAULT_CALENDAR_NAME,
-      'calendarName'
-    ),
-    summary: title,
-    startISO,
-    endISO,
-  };
+  const payload = { ...params };
+
+  payload.calendarName = ensureNonEmptyString(
+    params.calendarName || lastOptions.defaultCalendarName || DEFAULT_CALENDAR_NAME,
+    'calendarName'
+  );
+  payload.summary = title;
+  payload.startISO = startISO;
+  payload.endISO = endISO;
 
   const location = normalizeOptionalString(params.location, 'location');
   if (typeof location !== 'undefined') {
     payload.location = location;
+  } else if (!Object.prototype.hasOwnProperty.call(params, 'location')) {
+    delete payload.location;
   }
 
   const description = normalizeOptionalString(params.description, 'description');
   if (typeof description !== 'undefined') {
     payload.description = description;
+  } else if (!Object.prototype.hasOwnProperty.call(params, 'description')) {
+    delete payload.description;
   }
 
   return payload;
@@ -189,23 +193,36 @@ const buildUpdatePayload = (data = {}) => {
   }
 
   const uid = ensureNonEmptyString(params.uid, 'uid');
-  const patch = {};
+  const patch = { ...params };
+  delete patch.uid;
 
-  if (typeof params.title !== 'undefined' || typeof params.summary !== 'undefined') {
-    const rawTitle = typeof params.title !== 'undefined' ? params.title : params.summary;
+  const hasOwn = key => Object.prototype.hasOwnProperty.call(params, key);
+
+  if (hasOwn('title') || hasOwn('summary')) {
+    const rawTitle = hasOwn('title') ? params.title : params.summary;
     patch.summary = ensureNonEmptyString(rawTitle, 'title');
   }
 
-  if (typeof params.description !== 'undefined') {
-    patch.description = normalizeOptionalString(params.description, 'description');
+  if (hasOwn('description')) {
+    const description = normalizeOptionalString(params.description, 'description');
+    if (typeof description !== 'undefined') {
+      patch.description = description;
+    } else {
+      delete patch.description;
+    }
   }
 
-  if (typeof params.location !== 'undefined') {
-    patch.location = normalizeOptionalString(params.location, 'location');
+  if (hasOwn('location')) {
+    const location = normalizeOptionalString(params.location, 'location');
+    if (typeof location !== 'undefined') {
+      patch.location = location;
+    } else {
+      delete patch.location;
+    }
   }
 
-  if (typeof params.startTime !== 'undefined' || typeof params.startISO !== 'undefined') {
-    const rawStart = typeof params.startTime !== 'undefined' ? params.startTime : params.startISO;
+  if (hasOwn('startTime') || hasOwn('startISO')) {
+    const rawStart = hasOwn('startTime') ? params.startTime : params.startISO;
     const start = new Date(rawStart);
     if (Number.isNaN(start.getTime())) {
       throw new Error('startTime 必須為有效的 ISO 8601 字串');
@@ -213,8 +230,8 @@ const buildUpdatePayload = (data = {}) => {
     patch.startISO = start.toISOString();
   }
 
-  if (typeof params.endTime !== 'undefined' || typeof params.endISO !== 'undefined') {
-    const rawEnd = typeof params.endTime !== 'undefined' ? params.endTime : params.endISO;
+  if (hasOwn('endTime') || hasOwn('endISO')) {
+    const rawEnd = hasOwn('endTime') ? params.endTime : params.endISO;
     const end = new Date(rawEnd);
     if (Number.isNaN(end.getTime())) {
       throw new Error('endTime 必須為有效的 ISO 8601 字串');
@@ -222,7 +239,7 @@ const buildUpdatePayload = (data = {}) => {
     patch.endISO = end.toISOString();
   }
 
-  if (typeof params.calendarName !== 'undefined') {
+  if (hasOwn('calendarName')) {
     patch.calendarName = ensureNonEmptyString(params.calendarName, 'calendarName');
   }
 
