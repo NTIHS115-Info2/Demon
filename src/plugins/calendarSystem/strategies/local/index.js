@@ -430,7 +430,7 @@ module.exports = {
           return serverInstance.readEvent(uid);
         }
         case 'list': {
-          const legacyOptions = data && typeof data.options === 'object' && data.options ? data.options : {};
+          const legacyOptions = typeof data.options === 'object' && data.options ? data.options : {};
           const combined = { ...legacyOptions, ...(params || {}) };
           const filters = buildListFilters(combined);
           return serverInstance.listEvents(filters);
