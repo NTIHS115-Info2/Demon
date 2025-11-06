@@ -202,8 +202,9 @@ describe('calendarSystem plugin', () => {
     expect(listed.resultType).toBe('eventList');
     expect(Array.isArray(listed.result)).toBe(true);
     expect(listed.result.length).toBeGreaterThan(0);
-    expect(listed.result[0].event.summary).toBe('插件建立');
-
+    const createdEvent = listed.result.find(item => item.event.uid === targetUid);
+    expect(createdEvent).toBeDefined();
+    expect(createdEvent.event.summary).toBe('插件建立');
     // === 段落說明：使用舊格式 options 呼叫 list 指令驗證兼容 ===
     const legacyListed = await CalendarPlugin.send({ action: 'list', options: { date: dateOnly, includeDeleted: false } });
 
