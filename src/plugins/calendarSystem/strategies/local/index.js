@@ -35,6 +35,16 @@ const normalizeOptionalString = (value, fieldName) => {
   return value.trim();
 };
 
+// === 段落說明：賦值可選欄位或刪除未定義的欄位 ===
+const assignOptionalField = (target, key, value) => {
+  const normalized = normalizeOptionalString(value, key);
+  if (typeof normalized !== 'undefined') {
+    target[key] = normalized;
+  } else {
+    delete target[key];
+  }
+};
+
 // === 段落說明：解析 YYYY-MM-DD 字串並產出當天起訖時間 ===
 const parseDateOnly = dateStr => {
   const value = ensureNonEmptyString(dateStr, '日期參數');
@@ -204,21 +214,11 @@ const buildUpdatePayload = (data = {}) => {
   }
 
   if (hasOwn('description')) {
-    const description = normalizeOptionalString(params.description, 'description');
-    if (typeof description !== 'undefined') {
-      patch.description = description;
-    } else {
-      delete patch.description;
-    }
+    assignOptionalField(patch, 'description', params.description);
   }
 
   if (hasOwn('location')) {
-    const location = normalizeOptionalString(params.location, 'location');
-    if (typeof location !== 'undefined') {
-      patch.location = location;
-    } else {
-      delete patch.location;
-    }
+    assignOptionalField(patch, 'location', params.location);
   }
 
   if (hasOwn('startTime') || hasOwn('startISO')) {
