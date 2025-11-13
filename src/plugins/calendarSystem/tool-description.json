@@ -92,7 +92,9 @@
   },
   "input": {
     "action": "String – 指定要執行的動作（create、update、delete、read、list、push、status）。",
-    "params": "Object – 依據 action 填入對應的欄位，於呼叫時展開為 payload、uid、options 等參數後傳入伺服器。"
+    "payload": "Object – 依據 action 於頂層帶入對應的 payload 內容。create 與 update 需提供此欄位，其結構請參照 actionParams 中對應的 payload 描述。",
+    "uid": "String – 依據 action 於頂層提供對應的事件 UID。update、delete、read 需要此欄位。",
+    "options": "Object – 依據 action 於頂層提供額外選項。delete、list、push、status 會使用此欄位，其結構請參照 actionParams 中對應的 options 描述。"
   },
   "output": {
     "success": "Boolean – 操作成功時為 true，失敗時為 false。",
