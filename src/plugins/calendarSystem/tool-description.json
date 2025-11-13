@@ -1,24 +1,104 @@
 {
   "toolName": "calendarSystem",
-  "description": "Manage events through a local calendar server and synchronize with iCloud CalDAV. Can be used to create, update, delete, query, and manually trigger synchronization.",
-  "apis": {
-    "create": "Create a new calendar event and push it to the configured iCloud calendar.",
-    "update": "Update an existing event by UID and sync it to the remote.",
-    "delete": "Remove an event by UID; when options.soft=true, perform a soft delete instead.",
-    "read": "Retrieve a single event from the local cache by UID.",
-    "list": "Filter event lists by conditions (calendarName, rangeStart, rangeEnd, includeDeleted).",
-    "push": "Manually trigger synchronization: defaults to incremental, set options.type='full' for a full sync.",
-    "status": "Return status information of the local server and synchronization mode."
+  "description": "管理本地行事曆伺服器並與 iCloud CalDAV 同步，提供事件建立、查詢、更新、刪除與同步控制能力。",
+  "actions": {
+    "create": "建立新事件並立即同步至已設定的 iCloud 行事曆。",
+    "update": "依據 UID 更新既有事件內容並同步遠端。",
+    "delete": "刪除指定 UID 的事件，可選擇軟刪除僅標記為已刪除。",
+    "read": "讀取單一事件紀錄以取得完整細節。",
+    "list": "依行事曆名稱與時間範圍篩選事件列表，可選擇包含已刪除紀錄。",
+    "push": "手動觸發同步流程，支援增量與全量兩種模式。",
+    "status": "查詢伺服器啟動狀態與最近同步資訊。"
+  },
+  "actionParams": {
+    "create": {
+      "payload": {
+        "description": "Object – 必填，建立事件所需的欄位集合。缺少必要欄位時會被伺服器拒絕。",
+        "fields": {
+          "calendarName": "String – 必填，要寫入的行事曆名稱，會對應到本地快取與遠端 CalDAV 的 displayName。",
+          "summary": "String – 必填，事件的主旨文字。",
+          "startISO": "String – 必填，事件開始時間，需為 ISO 8601 UTC 格式（例如 2024-01-01T00:00:00.000Z）。",
+          "endISO": "String – 必填，事件結束時間，需為 ISO 8601 UTC 格式且不得早於 startISO。",
+          "description": "String – 選填，事件詳細描述，未提供時預設為空字串。",
+          "location": "String – 選填，事件地點文字描述，未提供時預設為空字串。",
+          "attendees": "Array<Object> – 選填，參與者列表，每筆物件建議包含 address(String)、name(String)、role(String) 等 CalDAV 兼容欄位，未提供時預設為空陣列。",
+          "reminders": "Array<Object> – 選填，提醒設定陣列，支援 CalDAV 兼容的觸發格式（例如 { type: 'display', minutesBefore: 30 }），未提供時預設為空陣列。",
+          "recurrenceRule": "String – 選填，重複規則，需遵循 RFC 5545 RRULE 格式，未提供時預設為 null。",
+          "metadata": "Object – 選填，自定義中繼資料，必須為一般物件且不接受陣列，未提供時預設為空物件。",
+          "etag": "String – 選填，遠端事件版本識別碼，若省略則由伺服器於同步時補齊。",
+          "url": "String – 選填，遠端事件的 CalDAV URL，若省略則於同步成功後由伺服器填入。"
+        }
+      }
+    },
+    "update": {
+      "uid": "String – 必填，要更新的事件 UID。",
+      "payload": {
+        "description": "Object – 必填，提供欲修改的欄位集合。允許僅帶入部分欄位，其餘會沿用既有值。",
+        "fields": {
+          "calendarName": "String – 選填，更新事件所屬的行事曆名稱。",
+          "summary": "String – 選填，更新後的事件主旨。",
+          "description": "String – 選填，更新後的事件描述。",
+          "location": "String – 選填，更新後的事件地點。",
+          "attendees": "Array<Object> – 選填，完整覆寫的參與者陣列，結構與 create.payload.attendees 相同。",
+          "reminders": "Array<Object> – 選填，完整覆寫的提醒陣列，結構與 create.payload.reminders 相同。",
+          "recurrenceRule": "String – 選填，新的重複規則，格式須符合 RRULE 規範。",
+          "startISO": "String – 選填，更新後的開始時間（ISO 8601 UTC）。",
+          "endISO": "String – 選填，更新後的結束時間（ISO 8601 UTC）。",
+          "metadata": "Object – 選填，覆寫事件的自定義中繼資料。",
+          "lastModified": "String – 選填，客製的最後修改時間（ISO 8601），未提供時伺服器會以當下時間填入。",
+          "status": "String – 選填，事件狀態標記，例如 updated、synced、deleted 等，若省略則由伺服器推算。",
+          "etag": "String – 選填，遠端事件版本識別碼，會覆寫快取中的 etag。",
+          "url": "String – 選填，遠端事件的 CalDAV URL，會覆寫快取中的 url。"
+        }
+      }
+    },
+    "delete": {
+      "uid": "String – 必填，要刪除的事件 UID。",
+      "options": {
+        "description": "Object – 選填，控制刪除行為的參數。",
+        "fields": {
+          "soft": "Boolean – 選填，預設為 false。true 時僅在本地標記為已刪除，不會呼叫遠端刪除。"
+        }
+      }
+    },
+    "read": {
+      "uid": "String – 必填，要讀取的事件 UID。"
+    },
+    "list": {
+      "options": {
+        "description": "Object – 選填，事件列表的篩選條件。未提供時回傳所有未刪除的事件。",
+        "fields": {
+          "calendarName": "String – 選填，僅回傳指定行事曆名稱的事件。",
+          "rangeStart": "String – 選填，查詢起始時間（ISO 8601 UTC）。若設定則排除結束時間早於此值的事件。",
+          "rangeEnd": "String – 選填，查詢結束時間（ISO 8601 UTC）。若設定則排除開始時間晚於此值的事件。",
+          "includeDeleted": "Boolean – 選填，預設為 false。true 時會一併回傳已標記刪除的事件。"
+        }
+      }
+    },
+    "push": {
+      "options": {
+        "description": "Object – 選填，同步操作的模式設定。",
+        "fields": {
+          "type": "String – 選填，指定同步模式，可用值為 incremental（預設，僅同步變更）或 full（全量同步）。"
+        }
+      }
+    },
+    "status": {
+      "options": {
+        "description": "Object – 選填，保留擴充用的診斷參數，目前不需要提供任何欄位。",
+        "fields": {}
+      }
+    }
   },
   "input": {
-    "action": "One of create, update, delete, read, list, push, status.",
-    "payload": "Required when action=create or update; must include event fields such as calendarName, summary, startISO, endISO.",
-    "uid": "Required when action=update, delete, or read to identify the event UID.",
-    "options": "Optional parameters; delete supports soft, list supports filters, push supports type (incremental|full)."
+    "action": "String – 指定要執行的動作（create、update、delete、read、list、push、status）。",
+    "params": "Object – 依據 action 填入對應的欄位，於呼叫時展開為 payload、uid、options 等參數後傳入伺服器。"
   },
   "output": {
-    "event": "Returned when create, update, or read succeeds, containing event details.",
-    "status": "Returned when push or status succeeds, containing synchronization status information.",
-    "error": "If an operation fails, returns an error message string."
+    "success": "Boolean – 操作成功時為 true，失敗時為 false。",
+    "result": "成功時回傳的資料內容：create、update、read、list 會給予事件紀錄；push、status 會回傳伺服器同步狀態。",
+    "resultType": "String – 指示回傳資料型別，例如 event、eventList、status。",
+    "error": "String – 當 success 為 false 時記錄錯誤原因。",
+    "value": "Object – 選填，於錯誤情境提供額外的除錯資訊或伺服器回傳細節。"
   }
 }
