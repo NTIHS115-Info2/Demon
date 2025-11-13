@@ -298,3 +298,19 @@
 - 強化本地策略的 configure 錯誤處理，並支援透過選項重設伺服器工廠
 ### Test
 - 更新 calendarSystem 單元測試改以啟動選項注入測試伺服器並於測試後還原設定
+
+<!-- 段落說明：紀錄 v1.5.2.1 版本的日誌更新摘要 -->
+# [v.1.5.2.1]
+<!-- 段落說明：說明此次更新為文件調整事項 -->
+### Docs
+<!-- 段落說明：描述整併更新紀錄與調整 tool-description 內容的細節 -->
+- 將 calendarSystem 工具更新紀錄合併至 MainVersion，並同步校正 tool-description.json 的 actions 與參數說明
+- 更新 calendarSystem README，補充工具呼叫時的輸入輸出結構與參數需求
+<!-- 段落說明：紀錄 v1.5.2.2 版本的更新摘要 -->
+# [v.1.5.2.2]
+<!-- 段落說明：此次更新針對文件細節補充 -->
+### Docs
+<!-- 段落說明：描述 tool-description actionParams 的細節補強 -->
+- 細化 calendarSystem tool-description.json 的 actionParams 欄位，逐一列出 payload 與 options 內部欄位與型別需求
+<!-- 段落說明：描述 README 補充內容 -->
+- 擴充 calendarSystem README，新增欄位對照表與 options 說明，並確認接口相容性敘述
