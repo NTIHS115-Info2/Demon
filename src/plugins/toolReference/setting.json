@@ -1,5 +1,5 @@
 {
   "name": "toolReference",
   "priority": 50,
-  "pluginType": "Tool"
+  "pluginType": "LLM"
 }

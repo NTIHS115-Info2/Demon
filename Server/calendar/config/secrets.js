@@ -46,7 +46,7 @@ function normalizeSecrets(rawModule) {
     throw new Error(message);
   }
 
-  const requiredFields = ['ICLOUD_USER', 'ICLOUD_APP_PASSWORD', 'ICLOUD_CAL_NAME'];
+  const requiredFields = ['ICLOUD_USER', 'ICLOUD_APP_PASSWORD', 'ICLOUD_CAL_NAME' , 'ICLOUD_HOME_URL'];
   const missing = requiredFields.filter(field => !secretsSource[field]);
   if (missing.length > 0) {
     const message = `tokens/icloud.js 缺少必要欄位：${missing.join(', ')}`;
@@ -58,6 +58,7 @@ function normalizeSecrets(rawModule) {
     ICLOUD_USER: String(secretsSource.ICLOUD_USER),
     ICLOUD_APP_PASSWORD: String(secretsSource.ICLOUD_APP_PASSWORD),
     ICLOUD_CAL_NAME: String(secretsSource.ICLOUD_CAL_NAME),
+    ICLOUD_HOME_URL: String(secretsSource.ICLOUD_HOME_URL),
     TIMEZONE: secretsSource.TIMEZONE ? String(secretsSource.TIMEZONE) : 'UTC',
     SYNC_INTERVAL_MINUTES: Number.isFinite(secretsSource.SYNC_INTERVAL_MINUTES)
       ? secretsSource.SYNC_INTERVAL_MINUTES

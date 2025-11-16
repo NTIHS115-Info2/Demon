@@ -2,7 +2,6 @@
 const { EventEmitter } = require('events');
 const Logger = require('../../src/utils/logger');
 const { getSecrets } = require('./config/secrets');
-const { t } = require('tar');
 
 // === 段落說明：定義 CalDAV 客戶端，涵蓋實際與模擬兩種執行模式 ===
 class CalDavClient extends EventEmitter {
@@ -15,6 +14,7 @@ class CalDavClient extends EventEmitter {
     this.dependencies = {};
     this.remoteEvents = new Map();
     this.syncToken = null;
+    this.xhr = null;
 
     // === 段落說明：嘗試載入外部套件，若失敗則進入模擬模式 ===
     this.bootstrapDependencies();
@@ -37,7 +37,10 @@ class CalDavClient extends EventEmitter {
   bootstrapDependencies() {
     try {
       this.dependencies.dav = require('dav');
-      this.dependencies.ical = require('ical-generator');
+
+      const icalModule = require('ical-generator');
+      this.dependencies.ical = icalModule.default || icalModule;
+
       this.dependencies.luxon = require('luxon');
       this.dependencies.nodeIcal = require('node-ical');
       this.mode = 'live';
@@ -52,15 +55,27 @@ class CalDavClient extends EventEmitter {
     if (this.mode !== 'live') return null;
 
     const { dav } = this.dependencies;
+
+    // Debug：看一下 dav 裡面到底有什麼
+    // this.logger.info('DAV keys: ' + Object.keys(dav).join(', '));
+    // this.logger.info('DAV transport type: ' + typeof dav.transport);
+    // this.logger.info(`DAV deps: ${Object.keys(this.dependencies.dav).join(', ')}`);
+
+    // 1) 建立 Credentials
     const credentials = new dav.Credentials({
       username: this.secrets.ICLOUD_USER,
       password: this.secrets.ICLOUD_APP_PASSWORD,
     });
 
+    // 2) 建立 XHR transport
+    this.xhr = new dav.transport.Basic(credentials);
+
+
+    // 3) 呼叫 createAccount 時傳 xhr，而不是 credentials
     try {
       const account = await dav.createAccount({
         server: this.secrets.ICLOUD_HOME_URL,
-        credentials,
+        xhr: this.xhr,
         loadCollections: true,
         loadObjects: true,
       });
@@ -69,6 +84,7 @@ class CalDavClient extends EventEmitter {
     } catch (err) {
       this.logger.error(`連線 iCloud CalDAV 失敗：${err.message}`);
       this.mode = 'mock';
+      this.xhr = null;
       return null;
     }
   }
@@ -110,6 +126,13 @@ class CalDavClient extends EventEmitter {
         };
       }
       if (syncToken) params.syncToken = syncToken;
+
+      // ★ 保險起見：檢查 xhr 是否存在
+      if (!this.xhr) {
+        throw new Error('CalDAV 傳輸層尚未初始化（xhr 為空），請確認 initializeAccount 是否成功執行');
+      }
+      this.logger.debug?.(`CalDAV listRemoteEvents mode=${this.mode}, hasXhr=${!!this.xhr}`); // debug log
+      params.xhr = this.xhr;
 
       const objects = await this.dependencies.dav.listCalendarObjects(calendar, params);
       const results = [];
@@ -248,12 +271,28 @@ class CalDavClient extends EventEmitter {
 
     try {
       const account = await this.getAccount();
-      const calendar = account.calendars.find(item => item.displayName === this.secrets.ICLOUD_CAL_NAME) || account.calendars[0];
+      const calendar = account.calendars.find(
+        item => item.displayName === this.secrets.ICLOUD_CAL_NAME
+      ) || account.calendars[0];
+
       if (!calendar) {
         throw new Error('找不到對應的 iCloud 行事曆');
       }
 
-      const ical = this.dependencies.ical({ name: this.secrets.ICLOUD_CAL_NAME });
+      if (!this.xhr) {
+        throw new Error('CalDAV 傳輸層尚未初始化（xhr 為空），無法上傳事件');
+      }
+
+      const icalFactory = this.dependencies.ical;
+      if (typeof icalFactory !== 'function') {
+        throw new Error('ical-generator 尚未正確初始化（dependencies.ical 不是 function）');
+      }
+
+      this.logger.info('ical type: ' + typeof this.dependencies.ical);
+      this.logger.info('ical keys: ' + Object.keys(this.dependencies.ical || {}).join(', '));
+
+      const ical = icalFactory({ name: this.secrets.ICLOUD_CAL_NAME });
+
       const event = ical.createEvent({
         uid: record.event.uid,
         start: new Date(record.event.startISO),
@@ -262,19 +301,24 @@ class CalDavClient extends EventEmitter {
         description: record.event.description,
         location: record.event.location,
       });
+
       if (record.event.attendees && record.event.attendees.length) {
         record.event.attendees.forEach(att => event.createAttendee(att));
       }
+
       await this.dependencies.dav.createCalendarObject(calendar, {
         filename: `${record.event.uid}.ics`,
         data: ical.toString(),
+        xhr: this.xhr,             // ★ 關鍵：把 xhr 傳進去
       });
+
       return { ...record, status: 'synced' };
     } catch (err) {
       this.logger.error(`上傳遠端事件失敗：${err.message}`);
       throw err;
     }
   }
+
 
   // === 段落說明：刪除遠端事件 ===
   async deleteRemoteEvent(uid) {
@@ -295,7 +339,9 @@ class CalDavClient extends EventEmitter {
       };
       let target = Array.isArray(calendar.objects) ? calendar.objects.find(matchUid) : null;
       if (!target) {
-        const refreshed = await this.dependencies.dav.listCalendarObjects(calendar, {});
+        const refreshed = await this.dependencies.dav.listCalendarObjects(calendar, {
+          xhr: this.xhr,
+        });
         target = refreshed.find(matchUid) || null;
         if (target) {
           if (Array.isArray(calendar.objects)) {
@@ -314,7 +360,9 @@ class CalDavClient extends EventEmitter {
         this.logger.warn(`遠端事件 ${uid} 不存在，視為成功刪除`);
         return { uid };
       }
-      await this.dependencies.dav.deleteCalendarObject(target);
+      await this.dependencies.dav.deleteCalendarObject(target, {
+        xhr: this.xhr,
+      });
       if (Array.isArray(calendar.objects)) {
         calendar.objects = calendar.objects.filter(obj => !matchUid(obj));
       }

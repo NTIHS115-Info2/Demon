@@ -314,3 +314,14 @@
 - 細化 calendarSystem tool-description.json 的 actionParams 欄位，逐一列出 payload 與 options 內部欄位與型別需求
 <!-- 段落說明：描述 README 補充內容 -->
 - 擴充 calendarSystem README，新增欄位對照表與 options 說明，並確認接口相容性敘述
+
+# [V.1.5.2.3]
+### Fix
+- 修正caldavClient在初始化客戶端時，未將xhr傳入導致無法建立成功的問題
+- 修復secrets未將homeURL傳出的問題
+- 修復fileEditer的readDir在輸出文件時，隨機排序的問題，現在他會正常排序了
+### Docs
+- 更新calendar的工具使用描述，將其從中文改為英文
+- 修改toolReference的setting，將其從tool改為LLMtool
+### Change
+- 將toolReference原本會傳出的generatedAt移除，因為會影響到LLM使用工具

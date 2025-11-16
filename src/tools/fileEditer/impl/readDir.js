@@ -18,6 +18,8 @@ async function GetFilesContent(dirPath) {
         return reject(err);
       }
 
+      files = files.sort(); // 預設依字母排序
+
       const fileReadPromises = files.map(file => {
         const fullPath = path.join(dirPath, file);
         return GetFileContent(fullPath);
