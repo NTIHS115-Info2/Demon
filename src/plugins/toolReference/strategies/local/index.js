@@ -467,11 +467,10 @@ function buildDetailResponse(cache, requestedNames) {
     mode: 'detail',
     requested: requestedNames,
     resolved,
-    generatedAt: cache.generatedAt,
     total: tools.length,
     tools,
   };
-
+  
   if (!success) {
     response.missing = missing;
     response.error = `找不到以下工具描述：${missing.join(', ')}`;
