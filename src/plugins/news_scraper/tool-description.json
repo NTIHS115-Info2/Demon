@@ -4,7 +4,7 @@
   "input": {
     "topic": "需要進行廣泛搜尋的研究主題，例如 'NVIDIA Blackwell architecture'",
     "query": "需要從搜尋結果中回答的具體問題，例如 'What are the performance improvements of Blackwell over Hopper?'",
-    "depth": "搜尋結果的深度（要分析幾個來源），可選，預設為 3"
+    "article_count": "搜尋結果的深度（要分析幾個來源），可選，預設為 3"
   },
   "output": {
     "success": true,

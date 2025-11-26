@@ -105,7 +105,7 @@ module.exports = {
             const articleText = scrapedData?.result?.article_text ?? '';
             if (!articleText.trim()) {
                 logger.warn(`Scraper for ${rawUrl} returned empty content.`);
-                return { success: true, result: { relevant_sections: [] }, resultType: 'list' };
+                return { success: true, result: { relevant_sections: [] }, resultType: 'object' };
             }
 
             return await _runPythonScript('librarian.py', [articleText, rawQuery, topK.toString(), device]);
