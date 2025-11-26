@@ -76,6 +76,7 @@ def _sanitize_article_limit(raw_limit, fallback=3):
         if parsed > 0:
             return parsed
     except (TypeError, ValueError):
+        # Ignore parsing errors and use fallback value
         pass
     return fallback
 

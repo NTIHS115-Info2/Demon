@@ -7,15 +7,15 @@
     "article_count": "搜尋結果的深度（要分析幾個來源），可選，預設為 3"
   },
   "output": {
-    "success": true,
+    "success": "Boolean – 操作成功時為 true，失敗時為 false。",
     "result": {
       "relevant_sections": [
         {
-          "chunk": "The fourth slide gives the goals for Blackwell: Optimize for new neural workloads, reduce memory footprint...",
-          "score": 0.8114
+          "chunk": "String – 與查詢最相關的文本片段。",
+          "score": "Number – 代表該段文本與查詢語意的相似度分數，通常介於 0.0 至 1.0 之間。"
         }
       ]
     },
-    "resultType": "json"
+    "resultType": "String – 固定為 'json'。"
   }
 }
