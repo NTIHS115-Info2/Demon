@@ -24,6 +24,7 @@ tmp/
 config/*.js
 !config/*.example.js
 tokens/
+!tokens/README.md
 
 # --- news_scraper_plugin additions ---
 # Python Virtual Environment
@@ -39,4 +40,3 @@ __pycache__/
 
 # News Scraper Cache
 src/plugins/news_scraper/strategies/local/cache/
-
