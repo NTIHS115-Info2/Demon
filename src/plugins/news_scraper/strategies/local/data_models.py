@@ -1,5 +1,5 @@
 # src/plugins/news_scraper/strategies/local/data_models.py
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 from typing import List, Optional
 
 # --- Researcher Models ---
@@ -39,7 +39,7 @@ class LibrarianOutput(BaseModel):
     success: bool
     result: Optional[LibrarianResult] = None
     error: Optional[str] = None
-    resultType: str = "list"
+    resultType: str = "object"
 
 # --- Summarizer Models ---
 class SummarizerInput(BaseModel):
