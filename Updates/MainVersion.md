@@ -273,3 +273,55 @@
 # [v.1.4]
 ### Change
 - 將 toolReference 插件改為 LLMTool 插件，並調整相關邏輯，使工具列表的使用與呈現更完善
+# [v.1.5]
+### New
+- 新增 calendarSystem 插件，整合本地伺服器與 CalDAV 客戶端、同步工作者與快取架構
+- 建立 Server/calendar 模組，含 secrets 載入、快取、CalDAV 客戶端與同步排程
+### Test
+- 補充 calendarSystem 單元測試，驗證 CRUD 流程與插件指令路由
+### Docs
+- 撰寫 calendarSystem 插件 README，說明指令使用方式與注意事項
+
+# [v.1.5.1]
+### Change
+- 重構 calendarSystem 插件為策略化架構，所有指令與啟停流程統一透過 local 策略管理
+- 重寫 Server/calendar 密鑰載入邏輯，強制使用 CommonJS tokens 並移除預設憑證 fallback
+### Docs
+- 更新 calendarSystem README 與 tokens/README.md，說明憑證需求與策略限制
+### Test
+- 調整 calendarSystem 單元測試以注入模擬憑證並驗證新策略行為
+
+# [v.1.5.2]
+### Fix
+- 移除 calendarSystem 插件與本地策略中的測試掛鉤，確保僅暴露符合規範的介面
+### Change
+- 強化本地策略的 configure 錯誤處理，並支援透過選項重設伺服器工廠
+### Test
+- 更新 calendarSystem 單元測試改以啟動選項注入測試伺服器並於測試後還原設定
+
+<!-- 段落說明：紀錄 v1.5.2.1 版本的日誌更新摘要 -->
+# [v.1.5.2.1]
+<!-- 段落說明：說明此次更新為文件調整事項 -->
+### Docs
+<!-- 段落說明：描述整併更新紀錄與調整 tool-description 內容的細節 -->
+- 將 calendarSystem 工具更新紀錄合併至 MainVersion，並同步校正 tool-description.json 的 actions 與參數說明
+- 更新 calendarSystem README，補充工具呼叫時的輸入輸出結構與參數需求
+<!-- 段落說明：紀錄 v1.5.2.2 版本的更新摘要 -->
+# [v.1.5.2.2]
+<!-- 段落說明：此次更新針對文件細節補充 -->
+### Docs
+<!-- 段落說明：描述 tool-description actionParams 的細節補強 -->
+- 細化 calendarSystem tool-description.json 的 actionParams 欄位，逐一列出 payload 與 options 內部欄位與型別需求
+<!-- 段落說明：描述 README 補充內容 -->
+- 擴充 calendarSystem README，新增欄位對照表與 options 說明，並確認接口相容性敘述
+
+# [V.1.5.2.3]
+### Fix
+- 修正caldavClient在初始化客戶端時，未將xhr傳入導致無法建立成功的問題
+- 修復secrets未將homeURL傳出的問題
+- 修復fileEditer的readDir在輸出文件時，隨機排序的問題，現在他會正常排序了
+### Docs
+- 更新calendar的工具使用描述，將其從中文改為英文
+- 修改toolReference的setting，將其從tool改為LLMtool
+### Change
+- 將toolReference原本會傳出的generatedAt移除，因為會影響到LLM使用工具

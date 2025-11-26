@@ -1,0 +1,105 @@
+{
+  "toolName": "calendarSystem",
+  "description": "Manages the local calendar server and synchronizes with iCloud CalDAV, providing capabilities for event creation, querying, updating, deletion, and synchronization control.",
+  "actions": {
+    "create": "Create a new event and immediately sync it to the configured iCloud calendar.",
+    "update": "Update an existing event by UID and synchronize the changes to the remote server.",
+    "delete": "Delete an event by UID; can optionally soft-delete (mark as deleted locally without removing from remote).",
+    "read": "Read a single event record and return its full details.",
+    "list": "Filter and list events by calendar name and time range; optionally include deleted records.",
+    "push": "Manually trigger the synchronization process; supports incremental and full modes.",
+    "status": "Query server status and recent synchronization information."
+  },
+  "actionParams": {
+    "create": {
+      "payload": {
+        "description": "Object – Required. Contains all fields needed to create an event. Missing required fields will cause the server to reject the request.",
+        "fields": {
+          "calendarName": "String – Required. The calendar name to write into, mapped to the local cache and remote CalDAV displayName.",
+          "summary": "String – Required. The event title.",
+          "startISO": "String – Required. Event start time (ISO 8601 UTC), e.g., 2024-01-01T00:00:00.000Z.",
+          "endISO": "String – Required. Event end time (ISO 8601 UTC); must not be earlier than startISO.",
+          "description": "String – Optional. Event description; defaults to an empty string.",
+          "location": "String – Optional. Event location; defaults to an empty string.",
+          "attendees": "Array<Object> – Optional. List of participants; each object may include fields such as address(String), name(String), role(String), compatible with CalDAV. Defaults to an empty array.",
+          "reminders": "Array<Object> – Optional. Reminder configuration compatible with CalDAV (e.g., { type: 'display', minutesBefore: 30 }). Defaults to an empty array.",
+          "recurrenceRule": "String – Optional. Recurrence rule in RFC 5545 RRULE format. Defaults to null.",
+          "metadata": "Object – Optional. Custom metadata; must be a normal object and cannot be an array. Defaults to an empty object.",
+          "etag": "String – Optional. Remote event version identifier; server fills automatically during sync if omitted.",
+          "url": "String – Optional. The event's CalDAV URL; server fills this after successful sync if omitted."
+        }
+      }
+    },
+    "update": {
+      "uid": "String – Required. UID of the event to update.",
+      "payload": {
+        "description": "Object – Required. Contains only the fields intended to be modified. Other fields remain unchanged.",
+        "fields": {
+          "calendarName": "String – Optional. Update the target calendar name.",
+          "summary": "String – Optional. Updated event title.",
+          "description": "String – Optional. Updated event description.",
+          "location": "String – Optional. Updated event location.",
+          "attendees": "Array<Object> – Optional. Full replacement of the attendees array; same structure as create.payload.attendees.",
+          "reminders": "Array<Object> – Optional. Full replacement of the reminders array; same structure as create.payload.reminders.",
+          "recurrenceRule": "String – Optional. Updated recurrence rule (RRULE format).",
+          "startISO": "String – Optional. Updated start time (ISO 8601 UTC).",
+          "endISO": "String – Optional. Updated end time (ISO 8601 UTC).",
+          "metadata": "Object – Optional. Replaces the event’s metadata.",
+          "lastModified": "String – Optional. Custom last-modified timestamp (ISO 8601). Server fills automatically if omitted.",
+          "status": "String – Optional. Event state marker, such as updated, synced, deleted. If omitted, server determines automatically.",
+          "etag": "String – Optional. Remote event version identifier, overwriting the cached etag.",
+          "url": "String – Optional. Remote event CalDAV URL, overwriting the cached url."
+        }
+      }
+    },
+    "delete": {
+      "uid": "String – Required. UID of the event to delete.",
+      "options": {
+        "description": "Object – Optional. Parameters controlling deletion behavior.",
+        "fields": {
+          "soft": "Boolean – Optional. Default false. If true, marks the event as deleted locally without issuing a remote delete."
+        }
+      }
+    },
+    "read": {
+      "uid": "String – Required. UID of the event to read."
+    },
+    "list": {
+      "options": {
+        "description": "Object – Optional. Filtering conditions for event listing. If omitted, returns all non-deleted events.",
+        "fields": {
+          "rangeStart": "String – Optional. Query start time (ISO 8601 UTC). Events ending before this time are excluded.",
+          "rangeEnd": "String – Optional. Query end time (ISO 8601 UTC). Events starting after this time are excluded.",
+          "includeDeleted": "Boolean – Optional. Default false. If true, includes entries marked as deleted."
+        }
+      }
+    },
+    "push": {
+      "options": {
+        "description": "Object – Optional. Mode settings for synchronization.",
+        "fields": {
+          "type": "String – Optional. Sync mode: incremental (default, sync only changes) or full (full resync)."
+        }
+      }
+    },
+    "status": {
+      "options": {
+        "description": "Object – Optional. Reserved for diagnostic expansion; no fields currently required.",
+        "fields": {}
+      }
+    }
+  },
+  "input": {
+    "action": "String – Specifies the action to execute (create, update, delete, read, list, push, status).",
+    "payload": "Object – Top-level payload depending on the action. Required for create and update. See actionParams for structure.",
+    "uid": "String – Top-level event UID when required. Needed for update, delete, read.",
+    "options": "Object – Top-level options depending on the action. Used by delete, list, push, status. See actionParams for structure."
+  },
+  "output": {
+    "success": "Boolean – True when the operation succeeds; false when it fails.",
+    "result": "Returned data on success. For create, update, read, list this includes event records; for push and status this includes sync status.",
+    "resultType": "String – Indicates the type of returned data, such as event, eventList, or status.",
+    "error": "String – Provides error details when success is false.",
+    "value": "Object – Optional. Additional diagnostic information or server-returned details in error scenarios."
+  }
+}
