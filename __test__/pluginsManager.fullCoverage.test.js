@@ -155,7 +155,7 @@ describe('PluginsManager 插件規範完整覆蓋測試', () => {
         }
         expect(parsed.toolName).toBeTruthy();
         expect(parsed.description).toBeTruthy();
-        expect(parsed.output).toBeDefined();   
+        expect(parsed.output).toBeDefined();
       }
     }
   });
