@@ -1,5 +1,5 @@
 {
-  "name": "news_scraper",
+  "name": "newsScraper",
   "priority": 0,
   "pluginType": "LLM"
 }

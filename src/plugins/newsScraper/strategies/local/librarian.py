@@ -1,4 +1,4 @@
-# src/plugins/news_scraper/strategies/local/librarian.py
+# src/plugins/newsScraper/strategies/local/librarian.py
 import faiss
 from sentence_transformers import SentenceTransformer
 import asyncio

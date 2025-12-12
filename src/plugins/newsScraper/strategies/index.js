@@ -1,4 +1,4 @@
-// src/plugins/news_scraper/strategies/index.js
+// src/plugins/newsScraper/strategies/index.js
 // 目的：統一導出所有策略，方便未來擴展
 module.exports = {
     local: require('./local'),

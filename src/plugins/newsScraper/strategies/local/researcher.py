@@ -1,4 +1,4 @@
-# src/plugins/news_scraper/strategies/local/researcher.py
+# src/plugins/newsScraper/strategies/local/researcher.py
 import sys, json, asyncio, requests, time, hashlib, os
 from bs4 import BeautifulSoup
 from fake_useragent import UserAgent
@@ -18,7 +18,7 @@ def find_project_root(start_path, marker_files):
 # [Copilot Fix] 確保日誌目錄存在
 PROJECT_ROOT_MARKERS = {"package.json", ".git"}
 project_root = find_project_root(os.path.abspath(__file__), PROJECT_ROOT_MARKERS)
-log_path = project_root / "logs" / "plugin_news_scraper.log"
+log_path = project_root / "logs" / "plugin_newsScraper.log"
 log_path.parent.mkdir(parents=True, exist_ok=True)
 logger.add(log_path, rotation="10 MB", retention="7 days", level="INFO")
 
