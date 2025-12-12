@@ -1,4 +1,4 @@
-# src/plugins/news_scraper/strategies/local/scraper.py
+# src/plugins/newsScraper/strategies/local/scraper.py
 import sys
 import json
 import requests

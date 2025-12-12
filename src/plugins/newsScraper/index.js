@@ -1,9 +1,9 @@
-// src/plugins/news_scraper/index.js
+// src/plugins/newsScraper/index.js
 // 職責：作為一個輕薄的轉發層，不包含任何業務邏輯。
 const Logger = require('../../utils/logger');
 const strategies = require('./strategies');
 
-const logger = new Logger('news_scraper_plugin.log');
+const logger = new Logger('newsScraper_plugin.log');
 let currentStrategy = null;
 let currentStrategyName = '';
 

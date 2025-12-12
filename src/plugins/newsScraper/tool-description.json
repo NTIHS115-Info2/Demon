@@ -1,5 +1,5 @@
 {
-  "toolName": "news_scraper.autonomous_researcher",
+  "toolName": "newsScraper.autonomous_researcher",
   "description": "接收一個研究主題和一個具體問題，自主上網搜尋、抓取、並過濾多個來源的資訊，最終回傳與具體問題最相關的文本片段。適用於需要對特定時事或主題進行快速、深度情報蒐集的場景。",
   "input": {
     "topic": "String – 需要進行廣泛搜尋的研究主題，例如 'NVIDIA Blackwell architecture'。",

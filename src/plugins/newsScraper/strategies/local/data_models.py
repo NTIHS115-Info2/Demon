@@ -1,4 +1,4 @@
-# src/plugins/news_scraper/strategies/local/data_models.py
+# src/plugins/newsScraper/strategies/local/data_models.py
 from pydantic import BaseModel
 from typing import List, Optional
 

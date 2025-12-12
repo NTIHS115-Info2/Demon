@@ -1,9 +1,9 @@
-// src/plugins/news_scraper/strategies/local/index.js
+// src/plugins/newsScraper/strategies/local/index.js
 // 職責：包含所有業務邏輯和狀態管理。
 const path = require('path');
 const { spawn } = require('child_process');
 const Logger = require('../../../../utils/logger');
-const logger = new Logger('news_scraper_local_strategy.log');
+const logger = new Logger('newsScraper_local_strategy.log');
 
 // 【狀態封裝】將狀態變量設為內部變量
 let isOnline = false;
