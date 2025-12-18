@@ -26,4 +26,3 @@ config/*.js
 tokens/
 !tokens/README.md
 Server/calendar/config/credentials.json
-Server/calendar/config/credentials.json
