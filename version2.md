@@ -1,0 +1,4 @@
+對於插件測試
+1. 現在version1沒有對每個插件進行測試，在version2的解決方式為 把預設輸入與預計輸出寫在plugin/test/的檔案中 統一測試腳本會去讀取每個插件的檔案，並直接部屬該插件進行測試 如果沒有通過測試，或是沒有test檔案 則為不通過
+2. 對於plugins的部屬方式，接下來需要詢問chatgpt如果將每個插件都設為child process來執行，這樣會不會比較好，然後互動方式全部改為event emitter的方式來進行
+3. 插件如果有需要自訂的參數，例如url/token，全部寫在plugin/config.json中，並皆使用核心提供的configMananger進行調用，config需要gitignore掉，只需留存template_config.json當作示範檔案
