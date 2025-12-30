@@ -3,6 +3,7 @@
   "priority": 0,
   "pluginType": "LLM",
   "search_sources": [
+    "google",
     "duckduckgo"
   ],
   "google_api_key": "",

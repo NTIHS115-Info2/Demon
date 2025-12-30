@@ -127,7 +127,7 @@ class SearchAggregator:
     """根據設定檔依序嘗試多個搜尋來源。"""
 
     def __init__(self, settings_path: Path):
-        self.settings_path = settings_path
+        self.settings_source_path = self._resolve_settings_path(settings_path)
         self.settings = self._load_settings()
         self.providers = {
             "google": GoogleSearchProvider,
@@ -135,10 +135,18 @@ class SearchAggregator:
             "duckduckgo": DuckDuckGoSearchProvider,
         }
 
+    def _resolve_settings_path(self, settings_path: Path) -> Path:
+        local_path = settings_path.with_name("setting.local.json")
+        if local_path.exists():
+            logger.info(f"偵測到本地設定檔，將使用: {local_path}")
+            return local_path
+        logger.info(f"未找到本地設定檔，使用預設設定檔: {settings_path}")
+        return settings_path
+
     def _load_settings(self) -> Dict[str, str]:
-        if not self.settings_path.exists():
-            raise FileNotFoundError(f"設定檔不存在: {self.settings_path}")
-        with self.settings_path.open("r", encoding="utf-8") as file:
+        if not self.settings_source_path.exists():
+            raise FileNotFoundError(f"設定檔不存在: {self.settings_source_path}")
+        with self.settings_source_path.open("r", encoding="utf-8") as file:
             return json.load(file)
 
     def search(self, query: str, num_results: int) -> List[str]:
