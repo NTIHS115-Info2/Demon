@@ -39,5 +39,5 @@ __pycache__/
 ._*
 
 # News Scraper Cache
-src/plugins/news_scraper/strategies/local/cache/
+src/plugins/newsScraper/strategies/local/cache/
 src/plugins/newsScraper/setting.local.json
