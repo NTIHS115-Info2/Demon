@@ -1,5 +1,12 @@
 {
   "name": "newsScraper",
   "priority": 0,
-  "pluginType": "LLM"
+  "pluginType": "LLM",
+  "search_sources": [
+    "google",
+    "duckduckgo"
+  ],
+  "google_api_key": "",
+  "google_cse_id": "",
+  "bing_api_key": ""
 }

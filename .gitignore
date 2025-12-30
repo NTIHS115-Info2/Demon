@@ -40,3 +40,4 @@ __pycache__/
 
 # News Scraper Cache
 src/plugins/news_scraper/strategies/local/cache/
+src/plugins/newsScraper/setting.local.json
