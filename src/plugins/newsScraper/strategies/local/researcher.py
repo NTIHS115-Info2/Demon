@@ -6,8 +6,11 @@ import os
 import sys
 import time
 from abc import ABC, abstractmethod
+from collections import Counter
+from math import inf
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict, List, Optional, Sequence, Tuple
+from urllib.parse import urlparse
 
 import requests
 from bs4 import BeautifulSoup
@@ -15,6 +18,8 @@ from fake_useragent import UserAgent
 from loguru import logger
 
 from .data_models import ResearcherOutput, ResearcherResult
+from .evaluator import ContentEvaluator, EvaluationResultExtended
+from .refiner import QueryRefiner
 
 
 class SearchProvider(ABC):
@@ -202,6 +207,8 @@ class ResearcherStrategy:
 
     def __init__(self):
         self.aggregator = SearchAggregator(Path(__file__).parents[2] / "setting.json")
+        self.evaluator = ContentEvaluator()
+        self.refiner = QueryRefiner()
         logger.info("ResearcherStrategy (Aggregator) 已初始化。")
 
     async def discover_sources(self, topic: str, num_results: int = 5) -> ResearcherOutput:
@@ -214,19 +221,190 @@ class ResearcherStrategy:
                 logger.info(f"從快取命中主題: {topic}")
                 return ResearcherOutput.model_validate(cached_data["content"])
 
+        current_query = topic
+        previous_queries = {self._normalize_query(topic)}
+        best_attempt_results: Optional[Tuple[List[str], List[str]]] = None
+        best_attempt_score = -inf
+        best_attempt_valid_count = 0
+        best_attempt_query = current_query
+        max_retries = 3
+        last_best_score: Optional[float] = None
+        no_improvement_count = 0
+        stop_reason = "max_retries"
+
         try:
             logger.info(f"正在為主題 '{topic}' 執行聚合搜尋...")
             loop = asyncio.get_event_loop()
-            results = await loop.run_in_executor(None, lambda: self.aggregator.search(topic, num_results))
-            result_obj = ResearcherResult(discovered_urls=results)
-            output_obj = ResearcherOutput(success=True, result=result_obj)
-            cache_content = {"timestamp": time.time(), "content": output_obj.model_dump()}
-            cache_file.write_text(json.dumps(cache_content, ensure_ascii=False), encoding="utf-8")
-            return output_obj
+            for attempt in range(max_retries):
+                results = await loop.run_in_executor(
+                    None,
+                    lambda: self.aggregator.search(current_query, num_results),
+                )
+                valid_items: List[str] = []
+                invalid_items: List[str] = []
+                evaluation_records: List[Tuple[str, EvaluationResultExtended]] = []
+                reasons_counter: Counter[str] = Counter()
+                attempt_best_score = -inf
+
+                for item in results:
+                    url, title, snippet = self._extract_item_fields(item)
+                    content_to_eval = self._compose_content(title, snippet, url)
+                    evaluation = self.evaluator.evaluate(content_to_eval, topic)
+                    evaluation_records.append((url, evaluation))
+                    attempt_best_score = max(attempt_best_score, evaluation.score)
+                    if evaluation.is_passing:
+                        valid_items.append(url)
+                    else:
+                        invalid_items.append(url)
+                    for reason in evaluation.reasons:
+                        reasons_counter[reason] += 1
+
+                attempt_valid_count = len(valid_items)
+                logger.info(
+                    "Attempt %s | query='%s' results=%s valid=%s best_score=%.2f",
+                    attempt + 1,
+                    current_query,
+                    len(results),
+                    attempt_valid_count,
+                    0.0 if attempt_best_score == -inf else attempt_best_score,
+                )
+                self._log_top_items(evaluation_records)
+
+                if (
+                    attempt_valid_count > best_attempt_valid_count
+                    or attempt_best_score > best_attempt_score
+                ):
+                    best_attempt_results = (valid_items, invalid_items)
+                    best_attempt_score = attempt_best_score
+                    best_attempt_valid_count = attempt_valid_count
+                    best_attempt_query = current_query
+
+                if attempt_valid_count >= 1:
+                    ordered_results = valid_items + invalid_items
+                    result_obj = ResearcherResult(discovered_urls=ordered_results)
+                    output_obj = ResearcherOutput(success=True, result=result_obj)
+                    cache_content = {"timestamp": time.time(), "content": output_obj.model_dump()}
+                    cache_file.write_text(json.dumps(cache_content, ensure_ascii=False), encoding="utf-8")
+                    logger.info(
+                        "搜尋成功，valid=%s top_score=%.2f query='%s'",
+                        attempt_valid_count,
+                        attempt_best_score,
+                        current_query,
+                    )
+                    return output_obj
+
+                fail_summary = self._build_fail_summary(
+                    current_query,
+                    attempt + 1,
+                    attempt_best_score,
+                    reasons_counter,
+                    evaluation_records,
+                )
+                new_query = self.refiner.refine_query(current_query, fail_summary, attempt + 1)
+
+                if last_best_score is not None and attempt_best_score <= last_best_score:
+                    no_improvement_count += 1
+                else:
+                    no_improvement_count = 0
+                last_best_score = attempt_best_score
+
+                normalized_new_query = self._normalize_query(new_query)
+                if normalized_new_query in previous_queries:
+                    stop_reason = "duplicate_query"
+                    break
+                if no_improvement_count >= 2:
+                    stop_reason = "no_improvement"
+                    break
+
+                previous_queries.add(normalized_new_query)
+                current_query = new_query
+
+            if best_attempt_results:
+                valid_items, invalid_items = best_attempt_results
+                ordered_results = valid_items + invalid_items
+                result_obj = ResearcherResult(discovered_urls=ordered_results)
+                output_obj = ResearcherOutput(success=True, result=result_obj)
+                cache_content = {"timestamp": time.time(), "content": output_obj.model_dump()}
+                cache_file.write_text(json.dumps(cache_content, ensure_ascii=False), encoding="utf-8")
+                logger.info(
+                    "搜尋停止 (%s)，回退 best_attempt query='%s' score=%.2f",
+                    stop_reason,
+                    best_attempt_query,
+                    best_attempt_score,
+                )
+                return output_obj
+
+            logger.warning("搜尋停止 (%s)，無可用結果。", stop_reason)
+            return ResearcherOutput(success=False, error=f"Search stopped: {stop_reason}")
         except Exception as exc:
             error_message = f"ResearcherStrategy 搜尋失敗: {exc}"
             logger.exception(error_message)
             return ResearcherOutput(success=False, error=error_message)
+
+    @staticmethod
+    def _normalize_query(query: str) -> str:
+        return (query or "").strip().lower()
+
+    @staticmethod
+    def _extract_item_fields(item: object) -> Tuple[str, str, str]:
+        if isinstance(item, dict):
+            url = item.get("url") or item.get("link") or ""
+            title = item.get("title") or item.get("name") or ""
+            snippet = item.get("snippet") or item.get("description") or ""
+            return url, title, snippet
+        if hasattr(item, "url") or hasattr(item, "link"):
+            url = getattr(item, "url", "") or getattr(item, "link", "")
+            title = getattr(item, "title", "") or ""
+            snippet = getattr(item, "snippet", "") or getattr(item, "description", "") or ""
+            return url, title, snippet
+        if isinstance(item, str):
+            return item, "", ""
+        return "", "", ""
+
+    @staticmethod
+    def _compose_content(title: str, snippet: str, url: str) -> str:
+        content = "\n".join(part for part in [title, snippet] if part)
+        return content or url
+
+    @staticmethod
+    def _build_fail_summary(
+        query: str,
+        attempt: int,
+        best_score: float,
+        reasons_counter: Counter[str],
+        evaluation_records: Sequence[Tuple[str, EvaluationResultExtended]],
+    ) -> str:
+        top_reasons = reasons_counter.most_common(3)
+        best_item = max(evaluation_records, key=lambda record: record[1].score, default=("", None))
+        best_item_score = best_item[1].score if best_item[1] else 0.0
+        best_item_reasons = best_item[1].reasons if best_item[1] else []
+        summary = {
+            "query": query,
+            "attempt": attempt,
+            "valid_count": 0,
+            "best_score": best_score if best_score != -inf else 0.0,
+            "top_reasons": dict(top_reasons),
+            "best_item_score": best_item_score,
+            "best_item_reasons": best_item_reasons,
+        }
+        return json.dumps(summary, ensure_ascii=False)
+
+    @staticmethod
+    def _log_top_items(evaluation_records: Sequence[Tuple[str, EvaluationResultExtended]]) -> None:
+        top_items = sorted(
+            evaluation_records,
+            key=lambda record: record[1].score,
+            reverse=True,
+        )[:5]
+        for url, evaluation in top_items:
+            domain = urlparse(url).netloc if url else ""
+            logger.debug(
+                "Top item score=%.2f passing=%s domain=%s url=%s",
+                evaluation.score,
+                evaluation.is_passing,
+                domain,
+                url,
+            )
 
 
 def main():
