@@ -12,6 +12,12 @@ class ResearcherOutput(BaseModel):
     error: Optional[str] = None
     resultType: str = "object"
 
+# --- Evaluation Models ---
+class EvaluationResult(BaseModel):
+    score: float
+    is_passing: bool
+    reason: str
+
 # --- Scraper Models ---
 class ScraperResult(BaseModel):
     source_url: str
