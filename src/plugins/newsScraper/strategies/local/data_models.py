@@ -60,3 +60,9 @@ class SummarizerOutput(BaseModel):
     result: Optional[SummarizerResult] = None
     error: Optional[str] = None
     resultType: str = "object"
+
+# --- Evaluator Models ---
+class EvaluationResult(BaseModel):
+    score: float
+    is_passing: bool
+    reason: str
