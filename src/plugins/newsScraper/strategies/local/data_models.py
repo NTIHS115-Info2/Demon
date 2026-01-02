@@ -1,10 +1,49 @@
 # src/plugins/newsScraper/strategies/local/data_models.py
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, field_validator
 from typing import List, Optional
+from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
 
 # --- Researcher Models ---
+class SearchItem(BaseModel):
+    url: str
+    title: str = ""
+    snippet: str = ""
+
+    @field_validator("url")
+    @classmethod
+    def normalize_url(cls, value: str) -> str:
+        if not value:
+            return value
+        if not value.startswith(("http://", "https://")):
+            if value.startswith("//"):
+                value = "https:" + value
+            else:
+                value = "https://" + value.lstrip("/")
+
+        parsed = urlparse(value)
+        if not parsed.netloc:
+            raise ValueError(f"Invalid URL (missing netloc): {value}")
+        if parsed.scheme not in ("http", "https"):
+            raise ValueError(f"Invalid scheme: {parsed.scheme}")
+
+        qs = parse_qs(parsed.query)
+        clean_qs = {
+            key: val
+            for key, val in qs.items()
+            if not key.startswith("utm_") and key not in ("gclid", "fbclid")
+        }
+        new_query = urlencode(clean_qs, doseq=True)
+        return urlunparse(
+            (parsed.scheme, parsed.netloc, parsed.path, parsed.params, new_query, "")
+        )
+
+
 class ResearcherResult(BaseModel):
-    discovered_urls: List[str]
+    items: List[SearchItem] = Field(default_factory=list)
+
+    @property
+    def discovered_urls(self) -> List[str]:
+        return [item.url for item in self.items]
 
 class ResearcherOutput(BaseModel):
     success: bool

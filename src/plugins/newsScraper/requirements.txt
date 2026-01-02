@@ -8,6 +8,7 @@ beautifulsoup4
 lxml
 playwright
 fake-useragent
+duckduckgo-search>=6.0.0,<7.0.0
 
 # AI & Vector Search
 sentence-transformers

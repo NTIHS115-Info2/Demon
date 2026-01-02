@@ -66,15 +66,19 @@ class ContentEvaluator:
                     matched_keywords=[],
                 )
 
+            content_casefold = normalized_content.casefold()
+            query_casefold = (query or "").casefold()
             reasons: List[str] = []
+
+            content_valid = len(normalized_content) >= 30
             length_score = self._calculate_length_score(len(normalized_content))
-            if len(normalized_content) < 200:
+            if not content_valid:
                 reasons.append("too_short")
             logger.debug("內容長度: {}，長度分數: {}", len(normalized_content), length_score)
 
-            keywords = self._extract_keywords(query)
+            keywords = self._extract_keywords(query_casefold)
             keyword_score, matched_keywords, url_false_positive_filtered = (
-                self._calculate_keyword_score(normalized_content, keywords)
+                self._calculate_keyword_score(content_casefold, keywords)
             )
             if not matched_keywords and keywords:
                 reasons.append("no_keyword_hit")
@@ -86,7 +90,7 @@ class ContentEvaluator:
                 + length_score * self.length_weight
             )
             score = max(0.0, min(score, 100.0))
-            is_passing = score >= self.passing_threshold
+            is_passing = score >= self.passing_threshold and content_valid
             reason = "; ".join(reasons) if reasons else "Content meets heuristic checks"
 
             logger.debug(
@@ -116,11 +120,12 @@ class ContentEvaluator:
             )
 
     def _contains_error_signature(self, content: str) -> bool:
-        lowered = content.lower()
+        lowered = content.casefold()
         return any(signature in lowered for signature in self.error_signatures)
 
     def _extract_keywords(self, query: str) -> List[str]:
-        tokens = re.findall(r"[A-Za-z0-9#.+&]+|[\u0080-\uFFFF]+", (query or "").lower())
+        token_pattern = r"(?:\.[A-Za-z0-9][A-Za-z0-9#+.-]*|[A-Za-z0-9][A-Za-z0-9#+.-]*|[\u0080-\uFFFF]+)"
+        tokens = re.findall(token_pattern, query)
         keywords = [token for token in tokens if token and token not in self.stopwords]
         logger.debug("Query 轉換後關鍵字: {}", keywords)
         return keywords
@@ -134,7 +139,7 @@ class ContentEvaluator:
 
     def _calculate_keyword_score(
         self,
-        content: str,
+        content_casefold: str,
         keywords: Iterable[str],
     ) -> tuple[float, List[str], bool]:
         keyword_set: Set[str] = {keyword for keyword in keywords if keyword}
@@ -144,7 +149,6 @@ class ContentEvaluator:
 
         matched_keywords: List[str] = []
         url_false_positive_filtered = False
-        lowered_content = content.lower()
 
         for keyword in keyword_set:
             match_type = self._classify_keyword(keyword)
@@ -153,21 +157,19 @@ class ContentEvaluator:
                     rf"(?<![A-Za-z0-9]){re.escape(keyword)}(?![A-Za-z0-9])",
                     flags=re.IGNORECASE,
                 )
-                if pattern.search(content):
+                if pattern.search(content_casefold):
                     matched_keywords.append(keyword)
             elif match_type == "cjk":
-                if keyword.lower() in lowered_content:
+                if keyword in content_casefold:
                     matched_keywords.append(keyword)
             else:
-                boundary = r"[\s\(\)\[\]\{\}<>\"'“”‘’.,;:!?/\\|`~\-_=+]"
                 pattern = re.compile(
-                    rf"(^|{boundary}){re.escape(keyword)}($|{boundary})",
+                    rf"(?<![A-Za-z0-9]){re.escape(keyword)}(?![A-Za-z0-9])",
                     flags=re.IGNORECASE,
                 )
-                match = pattern.search(content)
+                match = pattern.search(content_casefold)
                 if match:
-                    keyword_start = match.start(0) + len(match.group(1) or "")
-                    if keyword.startswith(".") and self._is_url_false_positive(content, keyword_start):
+                    if keyword.startswith(".") and self._is_url_context(content_casefold, match.start()):
                         url_false_positive_filtered = True
                         continue
                     matched_keywords.append(keyword)
@@ -190,11 +192,17 @@ class ContentEvaluator:
         return "symbolic"
 
     @staticmethod
-    def _is_url_false_positive(content: str, match_start: int) -> bool:
-        lowered = content.lower()
-        if match_start > 0 and re.search(r"[a-z0-9-]$", lowered[match_start - 1]):
-            return True
-        prefix = lowered[max(0, match_start - 20):match_start]
-        if "http://" in prefix or "https://" in prefix or "www." in prefix or "://" in prefix:
-            return True
-        return False
+    def _is_url_context(content_casefold: str, match_start: int) -> bool:
+        window_start = max(0, match_start - 15)
+        window_end = min(len(content_casefold), match_start + 15)
+        window = content_casefold[window_start:window_end]
+        url_like_pattern = re.compile(
+            r"https?://|www\.|\b[a-z0-9-]+\.(com|net|org|io|ai|dev|app|edu)\b"
+        )
+        return bool(url_like_pattern.search(window))
+
+
+if __name__ == "__main__":
+    evaluator = ContentEvaluator()
+    result = evaluator.evaluate("https://example.net", ".NET")
+    print("Evaluator .NET URL false positive:", result.matched_keywords, result.reasons)
