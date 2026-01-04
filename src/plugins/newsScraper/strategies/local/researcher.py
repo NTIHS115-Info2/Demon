@@ -123,11 +123,22 @@ class DuckDuckGoSearchProvider(SearchProvider):
         self.ua = UserAgent()
 
     def search(self, query: str, num_results: int) -> List[SearchItem]:
-        try:
-            with DDGS() as ddgs:
-                results = list(ddgs.text(query, max_results=num_results))
-        except Exception as exc:
-            logger.error("DDG Search failed: {}", exc)
+        backends = ["api", "html", "lite"]
+        results: List[Dict[str, str]] = []
+        for backend in backends:
+            try:
+                with DDGS() as ddgs:
+                    results = list(
+                        ddgs.text(query, max_results=num_results, backend=backend)
+                    )
+                if results:
+                    break
+            except Exception as exc:
+                logger.warning("DDG backend '{}' failed: {}", backend, exc)
+                continue
+
+        if not results:
+            logger.error("DDG Search failed: all backends exhausted.")
             return []
 
         items: List[SearchItem] = []
