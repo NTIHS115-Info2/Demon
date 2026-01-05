@@ -408,11 +408,7 @@ module.exports = {
         }
 
         const normalized = normalizeCompletionChunk(parsed);
-        const text =
-          normalized.choices?.[0]?.message?.content ??
-          normalized.choices?.[0]?.delta?.content ??
-          normalized.content ??
-          '';
+        const text = extractCompletionContent(normalized);
         if (!aborted) {
           emitter.emit('data', text, normalized);
           emitter.emit('end');
@@ -479,7 +475,7 @@ module.exports = {
  */
 function buildOpenAiUrl(path) {
   // 確保 baseUrl 與路徑正確拼接
-  return `${baseUrl}${path.startsWith('/') ? '' : '/'}${path}`;
+  return `${baseUrl}${path.startsWith('/') ? path : `/${path}`}`;
 }
 
 /**
@@ -632,34 +628,6 @@ async function checkModelsHealth() {
     const message = isTimeout ? '請求超時 (timeout)' : '連線失敗';
     error.type = isTimeout ? 'timeout' : 'network';
     return { ok: false, message, error };
-  }
-}
-
-/**
- * 正規化 send 輸入，支援 messages 陣列與帶有設定的物件
- * @param {Array|Object} payload - 送出資料或包含 messages 的設定物件
- * @returns {{messages: Array, options: Object}}
- */
-function normalizeSendPayload(payload) {
-  // 將輸入資料轉成固定格式，避免下游判斷錯誤
-  try {
-    if (Array.isArray(payload)) {
-      return { messages: payload, options: {} };
-    }
-
-    if (payload && typeof payload === 'object') {
-      const { messages = [], options = {} } = payload;
-      const mergedOptions = { ...payload, ...options };
-      delete mergedOptions.messages;
-      delete mergedOptions.options;
-      return { messages, options: mergedOptions };
-    }
-
-    logger.warn('send 輸入格式不正確，已回退為空資料');
-    return { messages: [], options: {} };
-  } catch (error) {
-    logger.warn(`正規化 send 輸入失敗: ${error.message}`);
-    return { messages: [], options: {} };
   }
 }
 
