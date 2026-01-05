@@ -199,11 +199,10 @@
 - 當工具呼叫缺少 input 欄位時回傳失敗並記錄警告
 ### Test
 
-## [v.1.1.2]
+# [v.1.1.2]
 ### Update
 - 對齊 LlamaServer 遠端策略串流事件契約，補上解析失敗與非預期結構的錯誤處理
 - 遠端策略支援非串流回應，並維持 data/end 事件形狀一致
-# [v.1.1.2]
 ### Change
 - LlamaServer 預設策略改為 Remote，並支援 auto 走遠端
 - LlamaServer 遠端設定改為支援 options/env/config 來源，並定義優先序

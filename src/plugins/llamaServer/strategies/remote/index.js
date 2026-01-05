@@ -128,12 +128,9 @@ module.exports = {
     let stream = null;
     let aborted = false;
     let retryCount = 0;
+    let dataTimeout = null;
     // 建立 AbortController 以支援中斷請求
     const controller = new AbortController();
-
-    // 狀態旗標與超時計時器，確保中止與超時可控
-    let aborted = false;
-    let dataTimeout = null;
 
     // 解析輸入參數，統一支援 messages 與 stream 設定
     const { messages, stream: streamEnabled } = normalizeSendOptions(options);
@@ -215,7 +212,7 @@ module.exports = {
         let streamCompleted = false;
 
         // 設置資料接收超時
-        const dataTimeout = setTimeout(() => {
+        dataTimeout = setTimeout(() => {
           if (!dataReceived && !aborted) {
             // 當長時間未收到資料時，回傳一致格式的 timeout 錯誤
             const timeoutError = createTypedError({
@@ -516,8 +513,6 @@ module.exports = {
       // 標記為中止並停止後續處理
       aborted = true;
       logger.info('收到中止請求');
-      // 主動標記中止，避免後續事件影響
-      aborted = true;
       clearTimeout(dataTimeout);
       controller.abort();
       if (stream && typeof stream.destroy === 'function') {
@@ -957,6 +952,7 @@ function handleNonStreamResponse(response, emitter) {
     if (!isExpectedPayload(json)) {
       const payloadError = new Error('非串流回應資料結構非預期');
       emitter.emit('error', payloadError);
+      return;
     }
 
     const text = extractTextFromPayload(json);
