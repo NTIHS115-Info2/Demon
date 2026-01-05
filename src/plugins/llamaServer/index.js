@@ -49,13 +49,13 @@ const resolveMode = (options = {}, config = {}) => {
     return resolvedMode === 'auto' ? 'remote' : resolvedMode;
 };
 
-// 解析遠端設定來源，統一輸出 camelCase 供策略使用
+// 解析遠端設定來源，統一輸出供策略使用
 const resolveRemoteOptions = (options = {}, config = {}) => {
     return {
         baseUrl: options.baseUrl || options.base_url || process.env.LLAMA_REMOTE_BASE_URL || config.baseUrl || config.base_url,
         model: options.model || process.env.LLAMA_REMOTE_MODEL || config.model,
         timeout: options.timeout || process.env.LLAMA_REMOTE_TIMEOUT || config.timeout,
-        reqId: options.reqId || options.req_id || process.env.LLAMA_REMOTE_REQ_ID || config.reqId || config.req_id
+        req_id: options.reqId || options.req_id || process.env.LLAMA_REMOTE_REQ_ID || config.reqId || config.req_id
     };
 };
 
