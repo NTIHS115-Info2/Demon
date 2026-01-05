@@ -35,7 +35,8 @@ const OPENAI_PATHS = Object.freeze({
 const runtimeConfig = {
   timeout: ERROR_CONFIG.REQUEST_TIMEOUT,
   req_id: null,
-  req_id_header: 'X-Request-Id'
+  req_id_header: 'X-Request-Id',
+  model: null
 };
 
 module.exports = {
@@ -63,10 +64,16 @@ module.exports = {
     runtimeConfig.timeout = resolvedConfig.timeout;
     runtimeConfig.req_id = resolvedConfig.req_id;
     runtimeConfig.req_id_header = resolvedConfig.req_id_header;
+    runtimeConfig.model = resolveDefaultModel(options, runtimeConfig);
     logger.info(`Llama remote 已設定 baseUrl: ${baseUrl}`);
     logger.info(`Llama remote 使用預設 timeout: ${runtimeConfig.timeout}ms`);
     if (runtimeConfig.req_id) {
       logger.info(`Llama remote 預設 req_id: ${runtimeConfig.req_id}`);
+    }
+    if (runtimeConfig.model) {
+      logger.info(`Llama remote 預設 model: ${runtimeConfig.model}`);
+    } else {
+      logger.warn('Llama remote 未設定預設 model，請在 options 或環境變數設定');
     }
     return true;
   },
@@ -465,10 +472,14 @@ function buildOpenAiUrl(path) {
  * @returns {{messages:Array, model:string, stream:boolean, params:Object}}
  */
 function normalizeSendOptions(options) {
+  const resolvedModel = resolveDefaultModel(
+    Array.isArray(options) ? {} : (options || {}),
+    runtimeConfig
+  );
   // 預設值設定，避免輸入異常造成錯誤
   const defaultOptions = {
     messages: [],
-    model: 'Demon',
+    model: resolvedModel,
     stream: true,
     params: {}
   };
@@ -483,7 +494,7 @@ function normalizeSendOptions(options) {
 
   const {
     messages = [],
-    model = 'Demon',
+    model = resolvedModel,
     stream = true,
     ...rest
   } = options;
@@ -504,10 +515,13 @@ function normalizeSendOptions(options) {
 function buildChatPayload(options) {
   // 組合必要欄位與額外參數
   const payload = {
-    model: options.model,
     messages: options.messages,
     ...options.params
   };
+
+  if (options.model) {
+    payload.model = options.model;
+  }
 
   // 明確指定 stream 旗標以符合需求
   payload.stream = options.stream;
@@ -679,6 +693,29 @@ function resolveRuntimeConfig(options = {}, baseConfig = {}) {
       req_id: baseConfig.req_id || null,
       req_id_header: baseConfig.req_id_header || 'X-Request-Id'
     };
+  }
+}
+
+/**
+ * 解析預設 model 來源，支援 options / config / env
+ * @param {Object} options - 請求或啟動時的設定
+ * @param {Object} baseConfig - 既有預設設定
+ * @returns {string|null}
+ */
+function resolveDefaultModel(options = {}, baseConfig = {}) {
+  // 允許從 options、config 或環境變數覆寫預設 model
+  try {
+    const config = options.config || {};
+    const resolvedModel = options.model
+      ?? config.model
+      ?? config.remote?.model
+      ?? process.env.LLAMA_REMOTE_MODEL
+      ?? baseConfig.model
+      ?? null;
+    return resolvedModel || null;
+  } catch (error) {
+    logger.warn(`解析預設 model 失敗，改用預設值: ${error.message}`);
+    return baseConfig.model || null;
   }
 }
 
