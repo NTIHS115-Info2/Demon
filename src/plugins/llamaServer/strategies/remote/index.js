@@ -53,19 +53,20 @@ module.exports = {
     // 設定遠端 baseUrl 並移除尾端斜線
     baseUrl = options.baseUrl.replace(/\/$/, '');
     logger.info(`Llama remote 已設定 baseUrl: ${baseUrl}`);
-    // 透過 /v1/models 進行健康檢查，確保遠端服務可用
-    const healthResult = await checkModelsHealth();
-    if (!healthResult.ok) {
-      logger.error(`遠端健康檢查失敗：${healthResult.message}`);
-      throw healthResult.error;
-
     // 解析並記錄遠端請求的預設設定，供後續 send 使用
     const resolvedConfig = resolveRuntimeConfig(options, runtimeConfig);
     runtimeConfig.timeout = resolvedConfig.timeout;
     runtimeConfig.req_id = resolvedConfig.req_id;
     runtimeConfig.req_id_header = resolvedConfig.req_id_header;
     runtimeConfig.model = resolveDefaultModel(options, runtimeConfig);
-    logger.info(`Llama remote 已設定 baseUrl: ${baseUrl}`);
+    
+    // 透過 /v1/models 進行健康檢查，確保遠端服務可用
+    const healthResult = await checkModelsHealth();
+    if (!healthResult.ok) {
+      logger.error(`遠端健康檢查失敗：${healthResult.message}`);
+      throw healthResult.error;
+    }
+    
     logger.info(`Llama remote 使用預設 timeout: ${runtimeConfig.timeout}ms`);
     if (runtimeConfig.req_id) {
       logger.info(`Llama remote 預設 req_id: ${runtimeConfig.req_id}`);
@@ -131,18 +132,19 @@ module.exports = {
     const normalizedOptions = normalizeSendOptions(options);
     // 組裝送出 payload，包含 model、messages 與 stream 旗標
     const payload = buildChatPayload(normalizedOptions);
-    // 正規化輸入資料與請求設定，確保兼容舊有 messages 形式
-    const messages = normalizedInput.messages;
 
     // 解析每次請求可覆寫的 timeout 與 req_id 設定
-    const requestConfig = resolveRuntimeConfig(normalizedInput.options, runtimeConfig);
+    const requestConfig = resolveRuntimeConfig(
+      typeof options === 'object' && !Array.isArray(options) ? options : {},
+      runtimeConfig
+    );
     const requestId = requestConfig.req_id;
 
-    const url = `${baseUrl}/${info.subdomain}/${info.routes.send}`;
-    const requestBody = { messages, stream: true };
+    // 建立 OpenAI 相容的 chat completions URL
+    const url = buildOpenAiUrl(OPENAI_PATHS.CHAT_COMPLETIONS);
 
     logger.info(`開始 API 請求: ${url}`);
-    logger.info(`請求參數: ${JSON.stringify({ messageCount: messages.length, stream: true })}`);
+    logger.info(`請求參數: ${JSON.stringify({ messageCount: normalizedOptions.messages.length, stream: normalizedOptions.stream })}`);
     if (requestId) {
       logger.info(`本次請求使用 req_id: ${requestId}`);
     }
@@ -165,17 +167,19 @@ module.exports = {
         const response = await axios({
           url,
           method: 'POST',
-          data: requestBody,
+          data: payload,
           responseType: 'stream',
-          headers: { 'Content-Type': 'application/json' },
-          timeout: ERROR_CONFIG.REQUEST_TIMEOUT,
+          headers,
+          timeout: requestConfig.timeout,
           signal: controller.signal,
           // 添加更詳細的超時配置
-          httpsAgent: false,
-          httpAgent: false,
+
           // 連接超時配置
-          timeoutErrorMessage: `API 請求超時 (${ERROR_CONFIG.REQUEST_TIMEOUT}ms)`
+          timeoutErrorMessage: `API 請求超時 (${requestConfig.timeout}ms)`
         });
+
+        // 注意：對於串流回應，實際錯誤狀態可能藏在回應內容中，
+        // 不在此直接依 HTTP 狀態碼中斷流程，而是延後到串流解析時處理。
 
         logger.info(`API 串流請求成功，狀態碼: ${response.status}`);
         
@@ -345,7 +349,7 @@ module.exports = {
             method: 'send',
             url: url,
             retryCount: retryCount,
-            messageCount: messages.length,
+            messageCount: normalizedOptions.messages.length,
             req_id: requestId
           });
           
@@ -369,9 +373,9 @@ module.exports = {
           data: payload,
           responseType: 'text',
           headers: { 'Content-Type': 'application/json' },
-          timeout: ERROR_CONFIG.REQUEST_TIMEOUT,
+          timeout: requestConfig.timeout,
           signal: controller.signal,
-          timeoutErrorMessage: `API 請求超時 (${ERROR_CONFIG.REQUEST_TIMEOUT}ms)`,
+          timeoutErrorMessage: `API 請求超時 (${requestConfig.timeout}ms)`,
           validateStatus: () => true
         });
 
@@ -396,7 +400,7 @@ module.exports = {
         }
 
         const normalized = normalizeCompletionChunk(parsed);
-        const text = normalized.choices?.[0]?.delta?.content || normalized.content || '';
+        const text = extractCompletionContent(normalized);
         if (!aborted) {
           emitter.emit('data', text, normalized);
           emitter.emit('end');
@@ -463,7 +467,7 @@ module.exports = {
  */
 function buildOpenAiUrl(path) {
   // 確保 baseUrl 與路徑正確拼接
-  return `${baseUrl}${path.startsWith('/') ? '' : '/'}${path}`;
+  return `${baseUrl}${path.startsWith('/') ? path : `/${path}`}`;
 }
 
 /**
@@ -616,30 +620,6 @@ async function checkModelsHealth() {
     const message = isTimeout ? '請求超時 (timeout)' : '連線失敗';
     error.type = isTimeout ? 'timeout' : 'network';
     return { ok: false, message, error };
- * 正規化 send 輸入，支援 messages 陣列與帶有設定的物件
- * @param {Array|Object} payload - 送出資料或包含 messages 的設定物件
- * @returns {{messages: Array, options: Object}}
- */
-function normalizeSendPayload(payload) {
-  // 將輸入資料轉成固定格式，避免下游判斷錯誤
-  try {
-    if (Array.isArray(payload)) {
-      return { messages: payload, options: {} };
-    }
-
-    if (payload && typeof payload === 'object') {
-      const { messages = [], options = {} } = payload;
-      const mergedOptions = { ...payload, ...options };
-      delete mergedOptions.messages;
-      delete mergedOptions.options;
-      return { messages, options: mergedOptions };
-    }
-
-    logger.warn('send 輸入格式不正確，已回退為空資料');
-    return { messages: [], options: {} };
-  } catch (error) {
-    logger.warn(`正規化 send 輸入失敗: ${error.message}`);
-    return { messages: [], options: {} };
   }
 }
 
