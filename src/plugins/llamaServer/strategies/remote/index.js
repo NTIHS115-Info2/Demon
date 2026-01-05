@@ -72,33 +72,6 @@ module.exports = {
       logger.error(`啟動 Llama remote 失敗: ${error.message}`);
       throw error;
     }
-    // 設定遠端 baseUrl 並移除尾端斜線
-    baseUrl = options.baseUrl.replace(/\/$/, '');
-    logger.info(`Llama remote 已設定 baseUrl: ${baseUrl}`);
-    // 解析並記錄遠端請求的預設設定，供後續 send 使用
-    const resolvedConfig = resolveRuntimeConfig(options, runtimeConfig);
-    runtimeConfig.timeout = resolvedConfig.timeout;
-    runtimeConfig.req_id = resolvedConfig.req_id;
-    runtimeConfig.req_id_header = resolvedConfig.req_id_header;
-    runtimeConfig.model = resolveDefaultModel(options, runtimeConfig);
-    
-    // 透過 /v1/models 進行健康檢查，確保遠端服務可用
-    const healthResult = await checkModelsHealth();
-    if (!healthResult.ok) {
-      logger.error(`遠端健康檢查失敗：${healthResult.message}`);
-      throw healthResult.error;
-    }
-    
-    logger.info(`Llama remote 使用預設 timeout: ${runtimeConfig.timeout}ms`);
-    if (runtimeConfig.req_id) {
-      logger.info(`Llama remote 預設 req_id: ${runtimeConfig.req_id}`);
-    }
-    if (runtimeConfig.model) {
-      logger.info(`Llama remote 預設 model: ${runtimeConfig.model}`);
-    } else {
-      logger.warn('Llama remote 未設定預設 model，請在 options 或環境變數設定');
-    }
-    return true;
   },
 
   /** 停止遠端策略 */
