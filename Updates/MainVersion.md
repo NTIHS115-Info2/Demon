@@ -206,6 +206,10 @@
 - 遠端策略新增 model、timeout、req_id 等參數傳遞與錯誤處理
 - 更新 toolOutputRouter 相關測試以符合新的 JSON 格式
 - 新增測試：當 JSON 包含額外欄位時不應被識別為工具呼叫
+- LlamaServer 遠端策略改用 OpenAI 相容 /v1/models 與 /v1/chat/completions 端點，並加入健康檢查與錯誤分類
+- 補上 chat/completions 串流與非串流回應正規化，確保事件序列與 local 策略一致
+### Fix
+- 強化遠端策略錯誤處理與中止流程，避免異常狀態遺留
 
 # [v.1.2]
 ### New
@@ -331,3 +335,11 @@
 - 修改toolReference的setting，將其從tool改為LLMtool
 ### Change
 - 將toolReference原本會傳出的generatedAt移除，因為會影響到LLM使用工具
+
+<!-- 段落說明：紀錄 v1.5.2.4 版本的更新摘要 -->
+# [v.1.5.2.4]
+### Change
+- 遠端 llamaServer 支援從 options/config/env 注入 timeout 與 req_id，並統一加入請求追蹤 header
+- 新增 4xx、5xx、timeout、parse error 的錯誤分類，統一錯誤物件格式供下游辨識
+### Fix
+- 強化串流解析錯誤與資料超時的錯誤回報，補齊 log/context 追蹤資訊
