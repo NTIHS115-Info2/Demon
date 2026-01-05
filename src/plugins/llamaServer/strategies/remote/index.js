@@ -248,6 +248,22 @@ module.exports = {
 
               try {
                 const json = JSON.parse(content);
+                
+                // 驗證 payload 結構是否符合預期
+                if (!isExpectedPayload(json)) {
+                  const payloadError = createTypedError({
+                    type: ERROR_TYPES.PARSE,
+                    message: '串流資料結構非預期',
+                    reqId: requestId,
+                    phase: 'stream-parse',
+                    url,
+                    details: { content }
+                  });
+                  logger.warn(`串流資料結構非預期，內容: ${content}`);
+                  emitter.emit('error', payloadError);
+                  continue;
+                }
+                
                 // 轉換為與 local 策略一致的回應結構
                 const normalized = normalizeCompletionChunk(json);
                 const text = extractCompletionContent(normalized);
