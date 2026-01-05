@@ -128,9 +128,18 @@ module.exports = {
     let stream = null;
     let aborted = false;
     let retryCount = 0;
+    let dataTimeout = null;
     // 建立 AbortController 以支援中斷請求
     const controller = new AbortController();
 
+    // 解析輸入參數，統一支援 messages 與 stream 設定
+    const { messages, stream: streamEnabled } = normalizeSendOptions(options);
+
+    const url = `${baseUrl}/${info.subdomain}/${info.routes.send}`;
+    const payload = { messages, stream: streamEnabled };
+
+    logger.info(`開始 API 請求: ${url}`);
+    logger.info(`請求參數: ${JSON.stringify({ messageCount: messages.length, stream: streamEnabled })}`);
     // 正規化輸入參數與必要欄位
     const normalizedOptions = normalizeSendOptions(options);
     // 組裝送出 payload，包含 model、messages 與 stream 旗標
@@ -171,7 +180,7 @@ module.exports = {
           url,
           method: 'POST',
           data: payload,
-          responseType: 'stream',
+          responseType: streamEnabled ? 'stream' : 'json',
           headers,
           timeout: requestConfig.timeout,
           signal: controller.signal,
@@ -181,18 +190,30 @@ module.exports = {
           timeoutErrorMessage: `API 請求超時 (${requestConfig.timeout}ms)`
         });
 
-        // 注意：對於串流回應，實際錯誤狀態可能藏在回應內容中，
-        // 不在此直接依 HTTP 狀態碼中斷流程，而是延後到串流解析時處理。
+        logger.info(`API 請求成功，狀態碼: ${response.status}`);
 
-        logger.info(`API 串流請求成功，狀態碼: ${response.status}`);
+        // 非串流回應時，以單次 data + end 模擬 Local 契約
+        if (!streamEnabled) {
+          handleNonStreamResponse(response, emitter);
+          return;
+        }
+
+        // 確認串流物件存在，避免非預期結構導致崩潰
+        if (!response.data || typeof response.data.on !== 'function') {
+          const streamError = new Error('遠端回應未提供可用的串流資料');
+          logger.error(streamError.message);
+          emitter.emit('error', streamError);
+          return;
+        }
         
         stream = response.data;
         let buffer = '';
         let dataReceived = false;
+        let streamCompleted = false;
 
         // 設置資料接收超時
-        const dataTimeout = setTimeout(() => {
-          if (!dataReceived) {
+        dataTimeout = setTimeout(() => {
+          if (!dataReceived && !aborted) {
             // 當長時間未收到資料時，回傳一致格式的 timeout 錯誤
             const timeoutError = createTypedError({
               type: ERROR_TYPES.TIMEOUT,
@@ -207,10 +228,11 @@ module.exports = {
         }, ERROR_CONFIG.CONNECTION_TIMEOUT);
 
         stream.on('data', chunk => {
-          // 已中止時忽略後續資料
+          // 若已中止則直接忽略後續資料
           if (aborted) {
             return;
           }
+
           dataReceived = true;
           clearTimeout(dataTimeout);
           
@@ -220,6 +242,25 @@ module.exports = {
             buffer = lines.pop();
             
             for (const line of lines) {
+              if (!line.startsWith('data: ')) {
+                continue;
+              }
+
+              const content = line.replace('data: ', '').trim();
+              if (content === '[DONE]') {
+                streamCompleted = true;
+                logger.info('API 串流完成');
+                emitter.emit('end');
+                return;
+              }
+
+              try {
+                const json = JSON.parse(content);
+                if (!isExpectedPayload(json)) {
+                  const payloadError = new Error('串流資料結構非預期');
+                  logger.error(`${payloadError.message}，內容: ${content}`);
+                  emitter.emit('error', payloadError);
+                  continue;
               if (line.startsWith('data: ')) {
                 const content = line.replace('data: ', '').trim();
                 if (content === '[DONE]') {
@@ -264,6 +305,12 @@ module.exports = {
                   logger.warn(`SSE 解析失敗，未知格式: ${line}`);
                   emitter.emit('error', sseErrorPayload);
                 }
+
+                const text = extractTextFromPayload(json);
+                emitter.emit('data', text, json);
+              } catch (parseError) {
+                logger.error(`JSON 解析失敗: ${parseError.message}, 內容: ${content}`);
+                emitter.emit('error', parseError);
               }
             }
           } catch (error) {
@@ -289,6 +336,21 @@ module.exports = {
 
         stream.on('end', () => {
           clearTimeout(dataTimeout);
+
+          // 若未收到完成訊號就結束，視為串流中斷
+          if (!streamCompleted && !aborted) {
+            const endError = new Error('串流意外結束，未收到完成訊號');
+            logger.error(endError.message);
+            emitter.emit('error', endError);
+          }
+
+          // 檢查是否遺留未解析資料，避免吞掉內容
+          if (buffer.trim()) {
+            const bufferError = new Error('串流結束時仍有未解析資料');
+            logger.error(bufferError.message);
+            emitter.emit('error', bufferError);
+          }
+
           // 已中止時避免重複結束事件
           if (aborted) {
             return;
@@ -451,6 +513,7 @@ module.exports = {
       // 標記為中止並停止後續處理
       aborted = true;
       logger.info('收到中止請求');
+      clearTimeout(dataTimeout);
       controller.abort();
       if (stream && typeof stream.destroy === 'function') {
         stream.destroy();
@@ -829,4 +892,73 @@ function shouldRetryError(error, currentRetryCount) {
   }
 
   return isRetryable;
+}
+
+// 將輸入參數整理成統一格式，支援陣列或物件形式
+function normalizeSendOptions(options) {
+  if (Array.isArray(options)) {
+    return { messages: options, stream: true };
+  }
+
+  if (!options || typeof options !== 'object') {
+    return { messages: [], stream: true };
+  }
+
+  return {
+    messages: Array.isArray(options.messages) ? options.messages : [],
+    stream: options.stream !== false
+  };
+}
+
+// 判斷回傳的 JSON 是否符合預期結構，避免非預期資料直接流出
+function isExpectedPayload(json) {
+  if (!json || typeof json !== 'object') {
+    return false;
+  }
+
+  if (Array.isArray(json.choices)) {
+    return true;
+  }
+
+  if (typeof json.content === 'string') {
+    return true;
+  }
+
+  if (typeof json.text === 'string') {
+    return true;
+  }
+
+  return false;
+}
+
+// 統一抽取 text 欄位，維持與 Local 相同的欄位優先順序
+function extractTextFromPayload(json) {
+  if (!json || typeof json !== 'object') {
+    return '';
+  }
+
+  const fallbackContent = typeof json.content === 'string'
+    ? json.content
+    : json.choices?.[0]?.message?.content;
+
+  return json.choices?.[0]?.delta?.content || json.text || fallbackContent || '';
+}
+
+// 處理非串流模式回應，模擬一次性 data + end 行為
+function handleNonStreamResponse(response, emitter) {
+  try {
+    const json = response?.data;
+
+    if (!isExpectedPayload(json)) {
+      const payloadError = new Error('非串流回應資料結構非預期');
+      emitter.emit('error', payloadError);
+      return;
+    }
+
+    const text = extractTextFromPayload(json);
+    emitter.emit('data', text, json);
+    emitter.emit('end');
+  } catch (error) {
+    emitter.emit('error', error);
+  }
 }
