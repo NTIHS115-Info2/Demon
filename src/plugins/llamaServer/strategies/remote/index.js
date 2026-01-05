@@ -59,13 +59,13 @@ module.exports = {
       baseUrl = options.baseUrl.replace(/\/$/, '');
       remoteModel = options.model || '';
       requestTimeout = Number(options.timeout) || ERROR_CONFIG.REQUEST_TIMEOUT;
-      requestId = options.reqId || '';
+      requestId = options.req_id || '';
       logger.info(`Llama remote 已設定 baseUrl: ${baseUrl}`);
       if (remoteModel) {
         logger.info(`Llama remote 已設定 model: ${remoteModel}`);
       }
       if (requestId) {
-        logger.info(`Llama remote 已設定 reqId: ${requestId}`);
+        logger.info(`Llama remote 已設定 req_id: ${requestId}`);
       }
       return true;
     } catch (error) {
@@ -103,17 +103,12 @@ module.exports = {
 
   /** 停止遠端策略 */
   async offline() {
-    try {
-      baseUrl = '';
-      remoteModel = '';
-      requestTimeout = ERROR_CONFIG.REQUEST_TIMEOUT;
-      requestId = '';
-      logger.info('Llama remote 已關閉');
-      return true;
-    } catch (error) {
-      logger.error(`關閉 Llama remote 失敗: ${error.message}`);
-      throw error;
-    }
+    baseUrl = '';
+    remoteModel = '';
+    requestTimeout = ERROR_CONFIG.REQUEST_TIMEOUT;
+    requestId = '';
+    logger.info('Llama remote 已關閉');
+    return true;
   },
 
   /** 重新啟動遠端策略 */
@@ -175,18 +170,8 @@ module.exports = {
     );
     const requestId = requestConfig.req_id;
 
-    // 組合 API 請求資訊，包含 model/req_id 等遠端參數
-    const url = `${baseUrl}/${info.subdomain}/${info.routes.send}`;
-    const payload = { messages, stream: true };
-    if (remoteModel) {
-      payload.model = remoteModel;
-    }
-    if (requestId) {
-      payload.req_id = requestId;
-    }
-    if (requestTimeout) {
-      payload.timeout = requestTimeout;
-    }
+    // 組合 OpenAI 相容 API 的 URL
+    const url = buildOpenAiUrl(OPENAI_PATHS.CHAT_COMPLETIONS);
 
     logger.info(`開始 API 請求: ${url}`);
     logger.info(`請求參數: ${JSON.stringify({ messageCount: normalizedOptions.messages.length, stream: normalizedOptions.stream })}`);

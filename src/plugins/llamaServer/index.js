@@ -42,31 +42,21 @@ const loadLlamaConfig = () => {
     }
 };
 
-// 解析模式來源，並確保 auto 預設採用 remote
+// 解析模式來源,並確保 auto 預設採用 remote
 const resolveMode = (options = {}, config = {}) => {
-    try {
-        const envMode = process.env.LLAMA_MODE || process.env.LLAMA_SERVER_MODE;
-        const resolvedMode = options.mode || envMode || config.mode || 'auto';
-        return resolvedMode === 'auto' ? 'remote' : resolvedMode;
-    } catch (error) {
-        logger.error(`解析 LlamaServer 模式失敗: ${error.message}`);
-        throw error;
-    }
+    const envMode = process.env.LLAMA_MODE || process.env.LLAMA_SERVER_MODE;
+    const resolvedMode = options.mode || envMode || config.mode || 'auto';
+    return resolvedMode === 'auto' ? 'remote' : resolvedMode;
 };
 
 // 解析遠端設定來源，統一輸出 camelCase 供策略使用
 const resolveRemoteOptions = (options = {}, config = {}) => {
-    try {
-        return {
-            baseUrl: options.baseUrl || options.base_url || process.env.LLAMA_REMOTE_BASE_URL || config.baseUrl || config.base_url,
-            model: options.model || process.env.LLAMA_REMOTE_MODEL || config.model,
-            timeout: options.timeout || process.env.LLAMA_REMOTE_TIMEOUT || config.timeout,
-            reqId: options.reqId || options.req_id || process.env.LLAMA_REMOTE_REQ_ID || config.reqId || config.req_id
-        };
-    } catch (error) {
-        logger.error(`解析 LlamaServer 遠端設定失敗: ${error.message}`);
-        throw error;
-    }
+    return {
+        baseUrl: options.baseUrl || options.base_url || process.env.LLAMA_REMOTE_BASE_URL || config.baseUrl || config.base_url,
+        model: options.model || process.env.LLAMA_REMOTE_MODEL || config.model,
+        timeout: options.timeout || process.env.LLAMA_REMOTE_TIMEOUT || config.timeout,
+        reqId: options.reqId || options.req_id || process.env.LLAMA_REMOTE_REQ_ID || config.reqId || config.req_id
+    };
 };
 
 module.exports = {
