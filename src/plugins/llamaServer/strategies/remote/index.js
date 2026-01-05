@@ -2,7 +2,6 @@ const axios = require('axios');
 const EventEmitter = require('events');
 const Logger = require('../../../../utils/logger');
 const GlobalErrorHandler = require('../../../../utils/globalErrorHandler');
-const info = require('../server/infor');
 
 const logger = new Logger('LlamaRemote');
 
@@ -27,11 +26,17 @@ const ERROR_CONFIG = Object.freeze({
   CONNECTION_TIMEOUT: 10000 // 10 秒連接超時
 });
 
+// OpenAI 相容 API 路徑設定
+const OPENAI_PATHS = Object.freeze({
+  MODELS: '/v1/models',
+  CHAT_COMPLETIONS: '/v1/chat/completions'
+});
 // 遠端請求預設設定，允許在線上啟動或請求時覆寫
 const runtimeConfig = {
   timeout: ERROR_CONFIG.REQUEST_TIMEOUT,
   req_id: null,
-  req_id_header: 'X-Request-Id'
+  req_id_header: 'X-Request-Id',
+  model: null
 };
 
 module.exports = {
@@ -45,17 +50,31 @@ module.exports = {
     if (!options.baseUrl) {
       throw new Error('遠端模式需要提供 baseUrl');
     }
-
+    // 設定遠端 baseUrl 並移除尾端斜線
+    baseUrl = options.baseUrl.replace(/\/$/, '');
+    logger.info(`Llama remote 已設定 baseUrl: ${baseUrl}`);
     // 解析並記錄遠端請求的預設設定，供後續 send 使用
     const resolvedConfig = resolveRuntimeConfig(options, runtimeConfig);
     runtimeConfig.timeout = resolvedConfig.timeout;
     runtimeConfig.req_id = resolvedConfig.req_id;
     runtimeConfig.req_id_header = resolvedConfig.req_id_header;
-    baseUrl = options.baseUrl.replace(/\/$/, '');
-    logger.info(`Llama remote 已設定 baseUrl: ${baseUrl}`);
+    runtimeConfig.model = resolveDefaultModel(options, runtimeConfig);
+    
+    // 透過 /v1/models 進行健康檢查，確保遠端服務可用
+    const healthResult = await checkModelsHealth();
+    if (!healthResult.ok) {
+      logger.error(`遠端健康檢查失敗：${healthResult.message}`);
+      throw healthResult.error;
+    }
+    
     logger.info(`Llama remote 使用預設 timeout: ${runtimeConfig.timeout}ms`);
     if (runtimeConfig.req_id) {
       logger.info(`Llama remote 預設 req_id: ${runtimeConfig.req_id}`);
+    }
+    if (runtimeConfig.model) {
+      logger.info(`Llama remote 預設 model: ${runtimeConfig.model}`);
+    } else {
+      logger.warn('Llama remote 未設定預設 model，請在 options 或環境變數設定');
     }
     return true;
   },
@@ -75,7 +94,17 @@ module.exports = {
 
   /** 檢查狀態：有 baseUrl 即視為上線 */
   async state() {
-    return baseUrl ? 1 : 0;
+    // 尚未設定 baseUrl 時直接視為下線
+    if (!baseUrl) {
+      return 0;
+    }
+    // 使用 /v1/models 健康檢查判斷是否可用
+    const healthResult = await checkModelsHealth();
+    if (!healthResult.ok) {
+      logger.warn(`遠端狀態檢查失敗：${healthResult.message}`);
+      return -1;
+    }
+    return 1;
   },
 
   /**
@@ -83,35 +112,49 @@ module.exports = {
    * @param {Array|Object} payload - 傳遞給 Llama 的訊息陣列或設定物件
    * @returns {EventEmitter}
    */
-  async send(payload = []) {
+  async send(options = []) {
+    // 檢查 baseUrl 是否存在
     if (!baseUrl) {
       const error = new Error('遠端未初始化');
       logger.error('嘗試使用未初始化的遠端策略');
       throw error;
     }
 
+    // 建立事件發射器以保持與 local 策略一致
     const emitter = new EventEmitter();
     let stream = null;
+    let aborted = false;
     let retryCount = 0;
+    // 建立 AbortController 以支援中斷請求
+    const controller = new AbortController();
 
-    // 正規化輸入資料與請求設定，確保兼容舊有 messages 形式
-    const normalizedInput = normalizeSendPayload(payload);
-    const messages = normalizedInput.messages;
+    // 正規化輸入參數與必要欄位
+    const normalizedOptions = normalizeSendOptions(options);
+    // 組裝送出 payload，包含 model、messages 與 stream 旗標
+    const payload = buildChatPayload(normalizedOptions);
 
     // 解析每次請求可覆寫的 timeout 與 req_id 設定
-    const requestConfig = resolveRuntimeConfig(normalizedInput.options, runtimeConfig);
+    const requestConfig = resolveRuntimeConfig(
+      typeof options === 'object' && !Array.isArray(options) ? options : {},
+      runtimeConfig
+    );
     const requestId = requestConfig.req_id;
 
-    const url = `${baseUrl}/${info.subdomain}/${info.routes.send}`;
-    const requestBody = { messages, stream: true };
+    // 建立 OpenAI 相容的 chat completions URL
+    const url = buildOpenAiUrl(OPENAI_PATHS.CHAT_COMPLETIONS);
 
     logger.info(`開始 API 請求: ${url}`);
-    logger.info(`請求參數: ${JSON.stringify({ messageCount: messages.length, stream: true })}`);
+    logger.info(`請求參數: ${JSON.stringify({ messageCount: normalizedOptions.messages.length, stream: normalizedOptions.stream })}`);
     if (requestId) {
       logger.info(`本次請求使用 req_id: ${requestId}`);
     }
 
-    const attemptRequest = async () => {
+    // 處理串流回應的請求流程
+    const attemptStreamRequest = async () => {
+      // 若已中止則不再發送請求
+      if (aborted) {
+        return;
+      }
       try {
         logger.info(`API 請求嘗試 ${retryCount + 1}/${ERROR_CONFIG.MAX_RETRIES + 1}`);
 
@@ -124,18 +167,21 @@ module.exports = {
         const response = await axios({
           url,
           method: 'POST',
-          data: requestBody,
+          data: payload,
           responseType: 'stream',
           headers,
           timeout: requestConfig.timeout,
+          signal: controller.signal,
           // 添加更詳細的超時配置
-          httpsAgent: false,
-          httpAgent: false,
+
           // 連接超時配置
           timeoutErrorMessage: `API 請求超時 (${requestConfig.timeout}ms)`
         });
 
-        logger.info(`API 請求成功，狀態碼: ${response.status}`);
+        // 注意：對於串流回應，實際錯誤狀態可能藏在回應內容中，
+        // 不在此直接依 HTTP 狀態碼中斷流程，而是延後到串流解析時處理。
+
+        logger.info(`API 串流請求成功，狀態碼: ${response.status}`);
         
         stream = response.data;
         let buffer = '';
@@ -158,6 +204,10 @@ module.exports = {
         }, ERROR_CONFIG.CONNECTION_TIMEOUT);
 
         stream.on('data', chunk => {
+          // 已中止時忽略後續資料
+          if (aborted) {
+            return;
+          }
           dataReceived = true;
           clearTimeout(dataTimeout);
           
@@ -176,8 +226,10 @@ module.exports = {
                 }
                 try {
                   const json = JSON.parse(content);
-                  const text = json.text || json.choices?.[0]?.delta?.content || '';
-                  emitter.emit('data', text, json);
+                  // 轉換為與 local 策略一致的回應結構
+                  const normalized = normalizeCompletionChunk(json);
+                  const text = normalized.choices?.[0]?.delta?.content || normalized.content || '';
+                  emitter.emit('data', text, normalized);
                 } catch (parseError) {
                   // 當 JSON 解析失敗時，回傳一致格式的 parse error 錯誤
                   const parseErrorPayload = createTypedError({
@@ -234,12 +286,20 @@ module.exports = {
 
         stream.on('end', () => {
           clearTimeout(dataTimeout);
+          // 已中止時避免重複結束事件
+          if (aborted) {
+            return;
+          }
           logger.info('API 串流自然結束');
           emitter.emit('end');
         });
 
         stream.on('error', (streamError) => {
           clearTimeout(dataTimeout);
+          // 已中止時避免重複錯誤事件
+          if (aborted) {
+            return;
+          }
           // 串流錯誤透過分類函式轉為一致錯誤格式
           const classifiedError = classifyError(streamError, {
             reqId: requestId,
@@ -259,7 +319,11 @@ module.exports = {
         });
 
       } catch (error) {
-        logger.error(`API 請求失敗: ${error.message}`);
+        // 已中止時不再處理錯誤流程
+        if (aborted) {
+          return;
+        }
+        logger.error(`API 串流請求失敗: ${error.message}`);
         
         // 分析錯誤類型並決定是否重試
         const shouldRetry = shouldRetryError(error, retryCount);
@@ -270,7 +334,7 @@ module.exports = {
           logger.info(`${delay}ms 後進行重試...`);
           
           setTimeout(() => {
-            attemptRequest();
+            attemptStreamRequest();
           }, delay);
         } else {
           // 將最終錯誤統一包裝為可辨識格式
@@ -285,7 +349,7 @@ module.exports = {
             method: 'send',
             url: url,
             retryCount: retryCount,
-            messageCount: messages.length,
+            messageCount: normalizedOptions.messages.length,
             req_id: requestId
           });
           
@@ -294,11 +358,97 @@ module.exports = {
       }
     };
 
-    // 開始請求
-    attemptRequest();
+    // 處理非串流回應的請求流程
+    const attemptNonStreamRequest = async () => {
+      // 若已中止則不再發送請求
+      if (aborted) {
+        return;
+      }
+      try {
+        logger.info(`API 非串流請求嘗試 ${retryCount + 1}/${ERROR_CONFIG.MAX_RETRIES + 1}`);
+
+        const response = await axios({
+          url,
+          method: 'POST',
+          data: payload,
+          responseType: 'text',
+          headers: { 'Content-Type': 'application/json' },
+          timeout: requestConfig.timeout,
+          signal: controller.signal,
+          timeoutErrorMessage: `API 請求超時 (${requestConfig.timeout}ms)`,
+          validateStatus: () => true
+        });
+
+        // 處理非 2xx 回應狀態
+        if (response.status >= 400) {
+          const statusType = response.status >= 500 ? '5xx' : '4xx';
+          const error = new Error(`API 非串流請求失敗，狀態碼: ${response.status}`);
+          error.status = response.status;
+          error.type = statusType;
+          error.response = { status: response.status };
+          throw error;
+        }
+
+        // 解析非串流回應內容並正規化
+        let parsed;
+        try {
+          parsed = response.data ? JSON.parse(response.data) : {};
+        } catch (parseError) {
+          const error = new Error(`API 非串流回應解析失敗: ${parseError.message}`);
+          error.type = 'parse_error';
+          throw error;
+        }
+
+        const normalized = normalizeCompletionChunk(parsed);
+        const text = extractCompletionContent(normalized);
+        if (!aborted) {
+          emitter.emit('data', text, normalized);
+          emitter.emit('end');
+        }
+      } catch (error) {
+        // 已中止時不再處理錯誤流程
+        if (aborted) {
+          return;
+        }
+        logger.error(`API 非串流請求失敗: ${error.message}`);
+
+        // 分析錯誤類型並決定是否重試
+        const shouldRetry = shouldRetryError(error, retryCount);
+
+        if (shouldRetry) {
+          retryCount++;
+          const delay = ERROR_CONFIG.RETRY_DELAY_BASE * Math.pow(2, retryCount - 1);
+          logger.info(`${delay}ms 後進行重試...`);
+
+          setTimeout(() => {
+            attemptNonStreamRequest();
+          }, delay);
+        } else {
+          GlobalErrorHandler.logError(error, {
+            module: 'LlamaRemote',
+            method: 'send',
+            url: url,
+            retryCount: retryCount,
+            messageCount: normalizedOptions.messages.length
+          });
+
+          emitter.emit('error', error);
+        }
+      }
+    };
+
+    // 根據 stream 旗標決定串流或非串流流程
+    if (normalizedOptions.stream) {
+      attemptStreamRequest();
+    } else {
+      attemptNonStreamRequest();
+    }
 
     emitter.abort = () => {
+      // 標記為中止並停止後續處理
+      aborted = true;
       logger.info('收到中止請求');
+      controller.abort();
       if (stream && typeof stream.destroy === 'function') {
         stream.destroy();
         logger.info('已中止 API 串流');
@@ -311,30 +461,165 @@ module.exports = {
 };
 
 /**
- * 正規化 send 輸入，支援 messages 陣列與帶有設定的物件
- * @param {Array|Object} payload - 送出資料或包含 messages 的設定物件
- * @returns {{messages: Array, options: Object}}
+ * 組合 OpenAI 相容 API 的完整 URL
+ * @param {string} path
+ * @returns {string}
  */
-function normalizeSendPayload(payload) {
-  // 將輸入資料轉成固定格式，避免下游判斷錯誤
+function buildOpenAiUrl(path) {
+  // 確保 baseUrl 與路徑正確拼接
+  return `${baseUrl}${path.startsWith('/') ? path : `/${path}`}`;
+}
+
+/**
+ * 正規化送出參數，確保包含 model 與 messages
+ * @param {Array|Object} options
+ * @returns {{messages:Array, model:string, stream:boolean, params:Object}}
+ */
+function normalizeSendOptions(options) {
+  const resolvedModel = resolveDefaultModel(
+    Array.isArray(options) ? {} : (options || {}),
+    runtimeConfig
+  );
+  // 預設值設定，避免輸入異常造成錯誤
+  const defaultOptions = {
+    messages: [],
+    model: resolvedModel,
+    stream: true,
+    params: {}
+  };
+
+  if (Array.isArray(options)) {
+    return { ...defaultOptions, messages: options };
+  }
+
+  if (!options || typeof options !== 'object') {
+    return defaultOptions;
+  }
+
+  const {
+    messages = [],
+    model = resolvedModel,
+    stream = true,
+    ...rest
+  } = options;
+
+  return {
+    messages: Array.isArray(messages) ? messages : [],
+    model,
+    stream: Boolean(stream),
+    params: rest
+  };
+}
+
+/**
+ * 組裝 chat/completions 的 payload
+ * @param {{messages:Array, model:string, stream:boolean, params:Object}} options
+ * @returns {Object}
+ */
+function buildChatPayload(options) {
+  // 組合必要欄位與額外參數
+  const payload = {
+    messages: options.messages,
+    ...options.params
+  };
+
+  if (options.model) {
+    payload.model = options.model;
+  }
+
+  // 明確指定 stream 旗標以符合需求
+  payload.stream = options.stream;
+
+  return payload;
+}
+
+/**
+ * 從回應中提取內容文字
+ * @param {Object} raw
+ * @returns {string}
+ */
+function extractCompletionContent(raw) {
+  return raw?.choices?.[0]?.delta?.content
+    || raw?.choices?.[0]?.message?.content
+    || raw?.content
+    || raw?.text
+    || '';
+}
+
+/**
+ * 正規化回應為 local 策略一致的結構
+ * @param {Object} raw
+ * @returns {Object}
+ */
+function normalizeCompletionChunk(raw = {}) {
+  // 保留原始資料，並補齊 local 需要的欄位結構
+  const normalized = { ...raw };
+  const content = extractCompletionContent(raw);
+  const rawChoice = Array.isArray(raw?.choices) ? raw.choices[0] : undefined;
+
+  if (!Array.isArray(normalized.choices) || normalized.choices.length === 0) {
+    normalized.choices = [{ delta: { content }, finish_reason: rawChoice?.finish_reason || null }];
+  } else {
+    const choice = normalized.choices[0] || {};
+    choice.delta = choice.delta || {};
+    if (!choice.delta.content && content) {
+      choice.delta.content = content;
+    }
+    if (!choice.finish_reason && rawChoice?.finish_reason) {
+      choice.finish_reason = rawChoice.finish_reason;
+    }
+    normalized.choices[0] = choice;
+  }
+
+  if (!normalized.content && content) {
+    normalized.content = content;
+  }
+
+  return normalized;
+}
+
+/**
+ * 使用 /v1/models 進行遠端健康檢查
+ * @returns {Promise<{ok:boolean, message:string, error:Error}>}
+ */
+async function checkModelsHealth() {
+  // 組合 /v1/models 的完整 URL
+  const url = buildOpenAiUrl(OPENAI_PATHS.MODELS);
+
   try {
-    if (Array.isArray(payload)) {
-      return { messages: payload, options: {} };
+    const response = await axios({
+      url,
+      method: 'GET',
+      responseType: 'text',
+      timeout: ERROR_CONFIG.REQUEST_TIMEOUT,
+      timeoutErrorMessage: `API 請求超時 (${ERROR_CONFIG.REQUEST_TIMEOUT}ms)`,
+      validateStatus: () => true
+    });
+
+    // 檢查 4xx/5xx 狀態碼並回傳錯誤
+    if (response.status >= 400) {
+      const error = new Error(`模型列表查詢失敗，狀態碼: ${response.status}`);
+      error.status = response.status;
+      error.type = response.status >= 500 ? '5xx' : '4xx';
+      return { ok: false, message: `狀態碼 ${error.status} (${error.type})`, error };
     }
 
-    if (payload && typeof payload === 'object') {
-      const { messages = [], options = {} } = payload;
-      const mergedOptions = { ...payload, ...options };
-      delete mergedOptions.messages;
-      delete mergedOptions.options;
-      return { messages, options: mergedOptions };
+    // 解析回應內容，區分解析錯誤
+    try {
+      JSON.parse(response.data || '{}');
+    } catch (parseError) {
+      const error = new Error(`模型列表回應解析失敗: ${parseError.message}`);
+      error.type = 'parse_error';
+      return { ok: false, message: '回應解析錯誤 (parse error)', error };
     }
 
-    logger.warn('send 輸入格式不正確，已回退為空資料');
-    return { messages: [], options: {} };
+    return { ok: true, message: '遠端服務正常', error: null };
   } catch (error) {
-    logger.warn(`正規化 send 輸入失敗: ${error.message}`);
-    return { messages: [], options: {} };
+    // 區分 timeout 與其他錯誤類型
+    const isTimeout = error.code === 'ECONNABORTED' || error.message?.includes('timeout');
+    const message = isTimeout ? '請求超時 (timeout)' : '連線失敗';
+    error.type = isTimeout ? 'timeout' : 'network';
+    return { ok: false, message, error };
   }
 }
 
@@ -388,6 +673,29 @@ function resolveRuntimeConfig(options = {}, baseConfig = {}) {
       req_id: baseConfig.req_id || null,
       req_id_header: baseConfig.req_id_header || 'X-Request-Id'
     };
+  }
+}
+
+/**
+ * 解析預設 model 來源，支援 options / config / env
+ * @param {Object} options - 請求或啟動時的設定
+ * @param {Object} baseConfig - 既有預設設定
+ * @returns {string|null}
+ */
+function resolveDefaultModel(options = {}, baseConfig = {}) {
+  // 允許從 options、config 或環境變數覆寫預設 model
+  try {
+    const config = options.config || {};
+    const resolvedModel = options.model
+      ?? config.model
+      ?? config.remote?.model
+      ?? process.env.LLAMA_REMOTE_MODEL
+      ?? baseConfig.model
+      ?? null;
+    return resolvedModel || null;
+  } catch (error) {
+    logger.warn(`解析預設 model 失敗，改用預設值: ${error.message}`);
+    return baseConfig.model || null;
   }
 }
 
