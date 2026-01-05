@@ -332,3 +332,11 @@
 - 修改toolReference的setting，將其從tool改為LLMtool
 ### Change
 - 將toolReference原本會傳出的generatedAt移除，因為會影響到LLM使用工具
+
+<!-- 段落說明：紀錄 v1.5.2.4 版本的更新摘要 -->
+# [v.1.5.2.4]
+### Change
+- 遠端 llamaServer 支援從 options/config/env 注入 timeout 與 req_id，並統一加入請求追蹤 header
+- 新增 4xx、5xx、timeout、parse error 的錯誤分類，統一錯誤物件格式供下游辨識
+### Fix
+- 強化串流解析錯誤與資料超時的錯誤回報，補齊 log/context 追蹤資訊
