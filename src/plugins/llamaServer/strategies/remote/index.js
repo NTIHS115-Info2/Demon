@@ -173,21 +173,13 @@ module.exports = {
           timeout: requestConfig.timeout,
           signal: controller.signal,
           // 添加更詳細的超時配置
-          httpsAgent: false,
-          httpAgent: false,
+
           // 連接超時配置
           timeoutErrorMessage: `API 請求超時 (${requestConfig.timeout}ms)`
         });
 
-        // 處理非 2xx 回應狀態
-        if (response.status >= 400) {
-          const statusType = response.status >= 500 ? '5xx' : '4xx';
-          const error = new Error(`API 串流請求失敗，狀態碼: ${response.status}`);
-          error.status = response.status;
-          error.type = statusType;
-          error.response = { status: response.status };
-          throw error;
-        }
+        // 注意：對於串流回應，實際錯誤狀態可能藏在回應內容中，
+        // 不在此直接依 HTTP 狀態碼中斷流程，而是延後到串流解析時處理。
 
         logger.info(`API 串流請求成功，狀態碼: ${response.status}`);
         
