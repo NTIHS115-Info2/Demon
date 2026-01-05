@@ -110,6 +110,12 @@ module.exports = {
             const useMode = resolveMode(options, config);
             const remoteOptions = resolveRemoteOptions(options, config);
             const mergedOptions = { ...options, ...remoteOptions, mode: useMode };
+            
+            // 驗證 remote 模式必須提供 baseUrl
+            if (useMode === 'remote' && !mergedOptions.baseUrl) {
+                throw new Error('遠端模式需要提供 baseUrl 設定。請在 options、環境變數 (LLAMA_REMOTE_BASE_URL) 或設定檔中指定 baseUrl');
+            }
+            
             if (!strategy || useMode !== mode) {
                 await this.updateStrategy(useMode, mergedOptions);
             }
