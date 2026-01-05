@@ -201,6 +201,11 @@
 
 # [v.1.1.2]
 ### Change
+- LlamaServer 預設策略改為 Remote，並支援 auto 走遠端
+- LlamaServer 遠端設定改為支援 options/env/config 來源，並定義優先序
+- 遠端策略新增 model、timeout、req_id 等參數傳遞與錯誤處理
+- 更新 toolOutputRouter 相關測試以符合新的 JSON 格式
+- 新增測試：當 JSON 包含額外欄位時不應被識別為工具呼叫
 - LlamaServer 遠端策略改用 OpenAI 相容 /v1/models 與 /v1/chat/completions 端點，並加入健康檢查與錯誤分類
 - 補上 chat/completions 串流與非串流回應正規化，確保事件序列與 local 策略一致
 ### Fix
