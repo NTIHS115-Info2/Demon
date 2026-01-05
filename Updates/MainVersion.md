@@ -198,6 +198,12 @@
 - 調整 toolOutputRouter.findToolJSON 僅辨識包含 toolName 與 input 的 JSON，避免誤判
 - 當工具呼叫缺少 input 欄位時回傳失敗並記錄警告
 ### Test
+
+# [v.1.1.2]
+### Change
+- LlamaServer 預設策略改為 Remote，並支援 auto 走遠端
+- LlamaServer 遠端設定改為支援 options/env/config 來源，並定義優先序
+- 遠端策略新增 model、timeout、req_id 等參數傳遞與錯誤處理
 - 更新 toolOutputRouter 相關測試以符合新的 JSON 格式
 - 新增測試：當 JSON 包含額外欄位時不應被識別為工具呼叫
 

@@ -6,7 +6,11 @@ const info = require('../server/infor');
 
 const logger = new Logger('LlamaRemote');
 
+// 遠端策略的連線設定（由策略初始化時注入）
 let baseUrl = '';
+let remoteModel = '';
+let requestTimeout = 30000;
+let requestId = '';
 
 // 此策略的預設啟動優先度
 const priority = 40;
@@ -27,30 +31,63 @@ module.exports = {
    * @param {string} options.baseUrl 遠端伺服器位址，例如 https://xxxx.ngrok.io
    */
   async online(options = {}) {
-    if (!options.baseUrl) {
-      throw new Error('遠端模式需要提供 baseUrl');
+    try {
+      if (!options.baseUrl) {
+        throw new Error('遠端模式需要提供 baseUrl');
+      }
+      // 初始化遠端連線參數，供 send 使用
+      baseUrl = options.baseUrl.replace(/\/$/, '');
+      remoteModel = options.model || '';
+      requestTimeout = Number(options.timeout) || ERROR_CONFIG.REQUEST_TIMEOUT;
+      requestId = options.reqId || '';
+      logger.info(`Llama remote 已設定 baseUrl: ${baseUrl}`);
+      if (remoteModel) {
+        logger.info(`Llama remote 已設定 model: ${remoteModel}`);
+      }
+      if (requestId) {
+        logger.info(`Llama remote 已設定 reqId: ${requestId}`);
+      }
+      return true;
+    } catch (error) {
+      logger.error(`啟動 Llama remote 失敗: ${error.message}`);
+      throw error;
     }
-    baseUrl = options.baseUrl.replace(/\/$/, '');
-    logger.info(`Llama remote 已設定 baseUrl: ${baseUrl}`);
-    return true;
   },
 
   /** 停止遠端策略 */
   async offline() {
-    baseUrl = '';
-    logger.info('Llama remote 已關閉');
-    return true;
+    try {
+      baseUrl = '';
+      remoteModel = '';
+      requestTimeout = ERROR_CONFIG.REQUEST_TIMEOUT;
+      requestId = '';
+      logger.info('Llama remote 已關閉');
+      return true;
+    } catch (error) {
+      logger.error(`關閉 Llama remote 失敗: ${error.message}`);
+      throw error;
+    }
   },
 
   /** 重新啟動遠端策略 */
   async restart(options) {
-    await this.offline();
-    return this.online(options);
+    try {
+      await this.offline();
+      return this.online(options);
+    } catch (error) {
+      logger.error(`重新啟動 Llama remote 失敗: ${error.message}`);
+      throw error;
+    }
   },
 
   /** 檢查狀態：有 baseUrl 即視為上線 */
   async state() {
-    return baseUrl ? 1 : 0;
+    try {
+      return baseUrl ? 1 : 0;
+    } catch (error) {
+      logger.error(`取得 Llama remote 狀態失敗: ${error.message}`);
+      return -1;
+    }
   },
 
   /**
@@ -69,8 +106,18 @@ module.exports = {
     let stream = null;
     let retryCount = 0;
 
+    // 組合 API 請求資訊，包含 model/req_id 等遠端參數
     const url = `${baseUrl}/${info.subdomain}/${info.routes.send}`;
     const payload = { messages, stream: true };
+    if (remoteModel) {
+      payload.model = remoteModel;
+    }
+    if (requestId) {
+      payload.req_id = requestId;
+    }
+    if (requestTimeout) {
+      payload.timeout = requestTimeout;
+    }
 
     logger.info(`開始 API 請求: ${url}`);
     logger.info(`請求參數: ${JSON.stringify({ messageCount: messages.length, stream: true })}`);
@@ -84,13 +131,16 @@ module.exports = {
           method: 'POST',
           data: payload,
           responseType: 'stream',
-          headers: { 'Content-Type': 'application/json' },
-          timeout: ERROR_CONFIG.REQUEST_TIMEOUT,
+          headers: {
+            'Content-Type': 'application/json',
+            ...(requestId ? { 'X-Request-Id': requestId } : {})
+          },
+          timeout: requestTimeout,
           // 添加更詳細的超時配置
           httpsAgent: false,
           httpAgent: false,
           // 連接超時配置
-          timeoutErrorMessage: `API 請求超時 (${ERROR_CONFIG.REQUEST_TIMEOUT}ms)`
+          timeoutErrorMessage: `API 請求超時 (${requestTimeout}ms)`
         });
 
         logger.info(`API 請求成功，狀態碼: ${response.status}`);
