@@ -198,6 +198,11 @@
 - 調整 toolOutputRouter.findToolJSON 僅辨識包含 toolName 與 input 的 JSON，避免誤判
 - 當工具呼叫缺少 input 欄位時回傳失敗並記錄警告
 ### Test
+
+## [v.1.1.2]
+### Update
+- 對齊 LlamaServer 遠端策略串流事件契約，補上解析失敗與非預期結構的錯誤處理
+- 遠端策略支援非串流回應，並維持 data/end 事件形狀一致
 - 更新 toolOutputRouter 相關測試以符合新的 JSON 格式
 - 新增測試：當 JSON 包含額外欄位時不應被識別為工具呼叫
 
