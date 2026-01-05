@@ -42,7 +42,7 @@ const loadLlamaConfig = () => {
     }
 };
 
-// 解析模式來源,並確保 auto 預設採用 remote
+// 解析模式來源，並確保 auto 預設採用 remote
 const resolveMode = (options = {}, config = {}) => {
     const envMode = process.env.LLAMA_MODE || process.env.LLAMA_SERVER_MODE;
     const resolvedMode = options.mode || envMode || config.mode || 'auto';
