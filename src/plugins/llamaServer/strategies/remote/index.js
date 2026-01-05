@@ -59,61 +59,29 @@ module.exports = {
       baseUrl = options.baseUrl.replace(/\/$/, '');
       remoteModel = options.model || '';
       requestTimeout = Number(options.timeout) || ERROR_CONFIG.REQUEST_TIMEOUT;
-      requestId = options.reqId || '';
+      requestId = options.req_id || '';
       logger.info(`Llama remote 已設定 baseUrl: ${baseUrl}`);
       if (remoteModel) {
         logger.info(`Llama remote 已設定 model: ${remoteModel}`);
       }
       if (requestId) {
-        logger.info(`Llama remote 已設定 reqId: ${requestId}`);
+        logger.info(`Llama remote 已設定 req_id: ${requestId}`);
       }
       return true;
     } catch (error) {
       logger.error(`啟動 Llama remote 失敗: ${error.message}`);
       throw error;
     }
-    // 設定遠端 baseUrl 並移除尾端斜線
-    baseUrl = options.baseUrl.replace(/\/$/, '');
-    logger.info(`Llama remote 已設定 baseUrl: ${baseUrl}`);
-    // 解析並記錄遠端請求的預設設定，供後續 send 使用
-    const resolvedConfig = resolveRuntimeConfig(options, runtimeConfig);
-    runtimeConfig.timeout = resolvedConfig.timeout;
-    runtimeConfig.req_id = resolvedConfig.req_id;
-    runtimeConfig.req_id_header = resolvedConfig.req_id_header;
-    runtimeConfig.model = resolveDefaultModel(options, runtimeConfig);
-    
-    // 透過 /v1/models 進行健康檢查，確保遠端服務可用
-    const healthResult = await checkModelsHealth();
-    if (!healthResult.ok) {
-      logger.error(`遠端健康檢查失敗：${healthResult.message}`);
-      throw healthResult.error;
-    }
-    
-    logger.info(`Llama remote 使用預設 timeout: ${runtimeConfig.timeout}ms`);
-    if (runtimeConfig.req_id) {
-      logger.info(`Llama remote 預設 req_id: ${runtimeConfig.req_id}`);
-    }
-    if (runtimeConfig.model) {
-      logger.info(`Llama remote 預設 model: ${runtimeConfig.model}`);
-    } else {
-      logger.warn('Llama remote 未設定預設 model，請在 options 或環境變數設定');
-    }
-    return true;
   },
 
   /** 停止遠端策略 */
   async offline() {
-    try {
-      baseUrl = '';
-      remoteModel = '';
-      requestTimeout = ERROR_CONFIG.REQUEST_TIMEOUT;
-      requestId = '';
-      logger.info('Llama remote 已關閉');
-      return true;
-    } catch (error) {
-      logger.error(`關閉 Llama remote 失敗: ${error.message}`);
-      throw error;
-    }
+    baseUrl = '';
+    remoteModel = '';
+    requestTimeout = ERROR_CONFIG.REQUEST_TIMEOUT;
+    requestId = '';
+    logger.info('Llama remote 已關閉');
+    return true;
   },
 
   /** 重新啟動遠端策略 */
@@ -175,18 +143,8 @@ module.exports = {
     );
     const requestId = requestConfig.req_id;
 
-    // 組合 API 請求資訊，包含 model/req_id 等遠端參數
-    const url = `${baseUrl}/${info.subdomain}/${info.routes.send}`;
-    const payload = { messages, stream: true };
-    if (remoteModel) {
-      payload.model = remoteModel;
-    }
-    if (requestId) {
-      payload.req_id = requestId;
-    }
-    if (requestTimeout) {
-      payload.timeout = requestTimeout;
-    }
+    // 組合 OpenAI 相容 API 的 URL
+    const url = buildOpenAiUrl(OPENAI_PATHS.CHAT_COMPLETIONS);
 
     logger.info(`開始 API 請求: ${url}`);
     logger.info(`請求參數: ${JSON.stringify({ messageCount: normalizedOptions.messages.length, stream: normalizedOptions.stream })}`);
