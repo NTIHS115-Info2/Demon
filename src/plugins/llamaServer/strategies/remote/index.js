@@ -174,7 +174,7 @@ module.exports = {
           httpsAgent: false,
           httpAgent: false,
           // 連接超時配置
-          timeoutErrorMessage: `API 請求超時 (${requestConfig.timeout}ms)`
+          timeoutErrorMessage: `API 請求超時 (${ERROR_CONFIG.REQUEST_TIMEOUT}ms)`
         });
 
         logger.info(`API 串流請求成功，狀態碼: ${response.status}`);
