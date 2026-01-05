@@ -95,6 +95,7 @@
     "uid": "String – Top-level event UID when required. Needed for update, delete, read.",
     "options": "Object – Top-level options depending on the action. Used by delete, list, push, status. See actionParams for structure."
   },
+  "required": ["action"],
   "output": {
     "success": "Boolean – True when the operation succeeds; false when it fails.",
     "result": "Returned data on success. For create, update, read, list this includes event records; for push and status this includes sync status.",

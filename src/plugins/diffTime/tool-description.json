@@ -5,6 +5,7 @@
     "baseTime": "String, optional. The starting timestamp for the calculation. Format: 'YYYY-MM-DD hh:mm:ss' (24-hour). If omitted, the system will use the current time (UTC+8) as the base. This field defines the 'from' time in the difference calculation.",
     "targetTime": "String, required. The comparison timestamp. Format: 'YYYY-MM-DD hh:mm:ss' (24-hour). This field defines the 'to' time in the difference calculation. The result will represent the elapsed time from baseTime to targetTime."
   },
+  "required": ["targetTime"],
   "output": {
     "result": "String. The time difference between the two timestamps, formatted as 'YY-MM-DD hh:mm:ss' (years, months, days, hours, minutes, seconds).",
     "resultType": "String. Always 'time'.",

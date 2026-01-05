@@ -2,12 +2,14 @@ const axios = require('axios');
 const EventEmitter = require('events');
 const Logger = require('../../../../utils/logger');
 const GlobalErrorHandler = require('../../../../utils/globalErrorHandler');
+const { cleanAndValidateMessages, validateChatPayload } = require('./messageValidator');
+// ★ 已移除 ResponseEventParser import（改回 chat/completions）
 
 const logger = new Logger('LlamaRemote');
 
 // 遠端策略的連線設定（由策略初始化時注入）
 let baseUrl = '';
-let remoteModel = '';
+let remoteModel = 'gpt-oss-120b';
 let requestTimeout = 30000;
 let requestId = '';
 
@@ -33,14 +35,22 @@ const ERROR_CONFIG = Object.freeze({
 // OpenAI 相容 API 路徑設定
 const OPENAI_PATHS = Object.freeze({
   MODELS: '/v1/models',
-  CHAT_COMPLETIONS: '/v1/chat/completions'
+  CHAT_COMPLETIONS: '/v1/chat/completions',
+  RESPONSES: '/v1/responses'  // ★ 新增 responses API 路徑
 });
+
+// API 模式設定
+const API_MODE = Object.freeze({
+  CHAT_COMPLETIONS: 'chat'     // ★ 使用 /v1/chat/completions
+});
+
 // 遠端請求預設設定，允許在線上啟動或請求時覆寫
 const runtimeConfig = {
   timeout: ERROR_CONFIG.REQUEST_TIMEOUT,
   req_id: null,
   req_id_header: 'X-Request-Id',
-  model: null
+  model: null,
+  apiMode: API_MODE.CHAT_COMPLETIONS  // ★ 使用 chat/completions API
 };
 
 module.exports = {
@@ -112,6 +122,7 @@ module.exports = {
 
   /**
    * 透過 HTTP 與遠端伺服器互動
+   * ★ 使用 /v1/chat/completions API（OpenAI Chat Completions）
    * @param {Array|Object} payload - 傳遞給 Llama 的訊息陣列或設定物件
    * @returns {EventEmitter}
    */
@@ -134,23 +145,30 @@ module.exports = {
 
     // 正規化輸入參數與必要欄位
     const normalizedOptions = normalizeSendOptions(options);
-    // 組裝送出 payload，包含 model、messages 與 stream 旗標
-    const payload = buildChatPayload(normalizedOptions);
-
+    
     // 解析每次請求可覆寫的 timeout 與 req_id 設定
     const requestConfig = resolveRuntimeConfig(
       typeof options === 'object' && !Array.isArray(options) ? options : {},
       runtimeConfig
     );
-    const requestId = requestConfig.req_id;
+    const reqId = requestConfig.req_id;
 
-    // 組合 OpenAI 相容 API 的 URL
+    // ★ 使用 /v1/chat/completions API
     const url = buildOpenAiUrl(OPENAI_PATHS.CHAT_COMPLETIONS);
+    
+    // ★ 建立 chat/completions API payload（不送 tools/tool_choice）
+    const payload = buildChatPayload({
+      messages: normalizedOptions.messages,
+      model: normalizedOptions.model,
+      stream: true,
+      // ★ 不送 tools/tool_choice（使用偽協議）
+      params: normalizedOptions.params || {}
+    });
 
-    logger.info(`開始 API 請求: ${url}`);
-    logger.info(`請求參數: ${JSON.stringify({ messageCount: normalizedOptions.messages.length, stream: normalizedOptions.stream })}`);
-    if (requestId) {
-      logger.info(`本次請求使用 req_id: ${requestId}`);
+    logger.info(`開始 /v1/chat/completions 請求: ${url}`);
+    logger.info(`請求參數: ${JSON.stringify({ messageCount: payload.messages?.length || 0 })}`);
+    if (reqId) {
+      logger.info(`本次請求使用 req_id: ${reqId}`);
     }
 
     // 處理串流回應的請求流程
@@ -160,37 +178,31 @@ module.exports = {
         return;
       }
       try {
-        logger.info(`API 請求嘗試 ${retryCount + 1}/${ERROR_CONFIG.MAX_RETRIES + 1}`);
+        logger.info(`/v1/chat/completions 請求嘗試 ${retryCount + 1}/${ERROR_CONFIG.MAX_RETRIES + 1}`);
 
-        // 組合請求標頭，必要時加入 req_id 追蹤資訊
+        // 組合請求標頭
         const headers = {
           'Content-Type': 'application/json',
-          ...(requestId ? { [requestConfig.req_id_header]: requestId } : {})
+          ...(reqId ? { [requestConfig.req_id_header]: reqId } : {})
         };
         
+        // 詳細記錄完整 payload
+        logger.info(`[chat/completions] 完整請求 payload:\n${JSON.stringify(payload, null, 2)}`);
+        
         const response = await axios({
-          url,
-          method: 'POST',
-          data: payload,
-          responseType: streamEnabled ? 'stream' : 'json',
-          headers,
-          timeout: requestConfig.timeout,
-          signal: controller.signal,
-          // 添加更詳細的超時配置
-
-          // 連接超時配置
-          timeoutErrorMessage: `API 請求超時 (${requestConfig.timeout}ms)`
+           url,
+           method: 'POST',
+           data: payload,
+           responseType: 'stream',
+           headers,
+           timeout: requestConfig.timeout,
+           signal: controller.signal,
+           timeoutErrorMessage: `API 請求超時 (${requestConfig.timeout}ms)`
         });
 
-        logger.info(`API 請求成功，狀態碼: ${response.status}`);
+        logger.info(`/v1/chat/completions 請求成功，狀態碼: ${response.status}`);
 
-        // 非串流回應時，以單次 data + end 模擬 Local 契約
-        if (!streamEnabled) {
-          handleNonStreamResponse(response, emitter);
-          return;
-        }
-
-        // 確認串流物件存在，避免非預期結構導致崩潰
+        // 確認串流物件存在
         if (!response.data || typeof response.data.on !== 'function') {
           const streamError = new Error('遠端回應未提供可用的串流資料');
           logger.error(streamError.message);
@@ -201,16 +213,14 @@ module.exports = {
         stream = response.data;
         let buffer = '';
         let dataReceived = false;
-        let streamCompleted = false;
 
         // 設置資料接收超時
         dataTimeout = setTimeout(() => {
           if (!dataReceived && !aborted) {
-            // 當長時間未收到資料時，回傳一致格式的 timeout 錯誤
             const timeoutError = createTypedError({
               type: ERROR_TYPES.TIMEOUT,
               message: 'API 資料接收超時',
-              reqId: requestId,
+              reqId,
               phase: 'stream-timeout',
               url
             });
@@ -220,10 +230,7 @@ module.exports = {
         }, ERROR_CONFIG.CONNECTION_TIMEOUT);
 
         stream.on('data', chunk => {
-          // 若已中止則直接忽略後續資料
-          if (aborted) {
-            return;
-          }
+          if (aborted) return;
 
           dataReceived = true;
           clearTimeout(dataTimeout);
@@ -234,134 +241,82 @@ module.exports = {
             buffer = lines.pop();
             
             for (const line of lines) {
-              if (!line.startsWith('data: ')) {
+              if (!line.startsWith('data:')) {
                 continue;
               }
 
-              const content = line.replace('data: ', '').trim();
-              if (content === '[DONE]') {
-                streamCompleted = true;
-                logger.info('API 串流完成');
-                emitter.emit('end');
-                return;
+              const content = line.replace(/^data:\s*/, '').trim();
+              if (!content || content === '[DONE]') {
+                if (content === '[DONE]') {
+                  logger.info('[chat/completions] 收到 [DONE] 信號');
+                }
+                continue;
               }
 
               try {
                 const json = JSON.parse(content);
                 
-                // 驗證 payload 結構是否符合預期
-                if (!isExpectedPayload(json)) {
-                  const payloadError = createTypedError({
-                    type: ERROR_TYPES.PARSE,
-                    message: '串流資料結構非預期',
-                    reqId: requestId,
-                    phase: 'stream-parse',
-                    url,
-                    details: { content }
-                  });
-                  logger.warn(`串流資料結構非預期，內容: ${content}`);
-                  emitter.emit('error', payloadError);
-                  continue;
-                }
-                
-                // 轉換為與 local 策略一致的回應結構
+                // ★ 標準 chat/completions 格式解析
                 const normalized = normalizeCompletionChunk(json);
                 const text = extractCompletionContent(normalized);
-                emitter.emit('data', text, normalized);
+                const reasoning = extractReasoningContent(normalized);
+                
+                // ★ 只要有 text 或 reasoning 就發送 data 事件
+                // reasoning_content 中可能包含工具呼叫，必須傳遞給上層偵測
+                if (text || reasoning) {
+                  emitter.emit('data', text || '', normalized, reasoning || null);
+                }
+                
+                // ★ 記錄 reasoning_content（用於除錯）
+                if (reasoning) {
+                  logger.info(`[chat/completions-reasoning] ${reasoning}`);
+                }
+                
               } catch (parseError) {
-                // 當 JSON 解析失敗時，回傳一致格式的 parse error 錯誤
-                const parseErrorPayload = createTypedError({
-                  type: ERROR_TYPES.PARSE,
-                  message: `JSON 解析失敗: ${parseError.message}`,
-                  reqId: requestId,
-                  phase: 'stream-parse',
-                  url,
-                  details: { content }
-                });
                 logger.warn(`JSON 解析失敗: ${parseError.message}, 內容: ${content}`);
-                emitter.emit('error', parseErrorPayload);
               }
             }
           } catch (error) {
-            // 串流處理異常時，封裝為統一錯誤格式回傳
             const dataError = createTypedError({
               type: ERROR_TYPES.SERVER,
               message: `處理串流資料時發生錯誤: ${error.message}`,
-              reqId: requestId,
+              reqId,
               phase: 'data-processing',
               url,
               originalError: error
             });
             logger.error(`處理串流資料時發生錯誤: ${error.message}`);
-            GlobalErrorHandler.logError(error, { 
-              module: 'LlamaRemote', 
-              method: 'send',
-              phase: 'data-processing',
-              req_id: requestId
-            });
             emitter.emit('error', dataError);
           }
         });
 
         stream.on('end', () => {
           clearTimeout(dataTimeout);
-
-          // 若未收到完成訊號就結束，視為串流中斷
-          if (!streamCompleted && !aborted) {
-            const endError = new Error('串流意外結束，未收到完成訊號');
-            logger.error(endError.message);
-            emitter.emit('error', endError);
-            return;
-          }
-
-          // 檢查是否遺留未解析資料，避免吞掉內容
-          if (buffer.trim()) {
-            const bufferError = new Error('串流結束時仍有未解析資料');
-            logger.error(bufferError.message);
-            emitter.emit('error', bufferError);
-            return;
-          }
-
-          // 已中止時避免重複結束事件
-          if (aborted) {
-            return;
-          }
-          logger.info('API 串流自然結束');
+          
+          if (aborted) return;
+          
+          logger.info('/v1/chat/completions 串流結束');
           emitter.emit('end');
         });
 
         stream.on('error', (streamError) => {
           clearTimeout(dataTimeout);
-          // 已中止時避免重複錯誤事件
-          if (aborted) {
-            return;
-          }
-          // 串流錯誤透過分類函式轉為一致錯誤格式
+          if (aborted) return;
+          
           const classifiedError = classifyError(streamError, {
-            reqId: requestId,
+            reqId,
             phase: 'stream-error',
             url
           });
           logger.error(`串流錯誤: ${streamError.message}`);
-          
-          // 區分不同類型的串流錯誤
-          if (streamError.code === 'ECONNRESET') {
-            logger.warn('連接被重置，可能是網路不穩定');
-          } else if (streamError.code === 'ETIMEDOUT') {
-            logger.warn('串流讀取超時');
-          }
-          
           emitter.emit('error', classifiedError);
         });
 
       } catch (error) {
-        // 已中止時不再處理錯誤流程
-        if (aborted) {
-          return;
-        }
-        logger.error(`API 串流請求失敗: ${error.message}`);
+        if (aborted) return;
         
-        // 分析錯誤類型並決定是否重試
+        logger.error(`/v1/chat/completions 請求失敗: ${error.message}`);
+        
         const shouldRetry = shouldRetryError(error, retryCount);
         
         if (shouldRetry) {
@@ -373,20 +328,18 @@ module.exports = {
             attemptStreamRequest();
           }, delay);
         } else {
-          // 將最終錯誤統一包裝為可辨識格式
           const classifiedError = classifyError(error, {
-            reqId: requestId,
+            reqId,
             phase: 'request',
             url
           });
-          // 記錄最終失敗
+          
           GlobalErrorHandler.logError(error, {
             module: 'LlamaRemote',
             method: 'send',
-            url: url,
-            retryCount: retryCount,
-            messageCount: normalizedOptions.messages.length,
-            req_id: requestId
+            url,
+            retryCount,
+            req_id: reqId
           });
           
           emitter.emit('error', classifiedError);
@@ -394,100 +347,10 @@ module.exports = {
       }
     };
 
-    // 處理非串流回應的請求流程
-    const attemptNonStreamRequest = async () => {
-      // 若已中止則不再發送請求
-      if (aborted) {
-        return;
-      }
-      try {
-        logger.info(`API 非串流請求嘗試 ${retryCount + 1}/${ERROR_CONFIG.MAX_RETRIES + 1}`);
-
-        const response = await axios({
-          url,
-          method: 'POST',
-          data: payload,
-          responseType: 'text',
-          headers: { 'Content-Type': 'application/json' },
-          timeout: requestConfig.timeout,
-          signal: controller.signal,
-          timeoutErrorMessage: `API 請求超時 (${requestConfig.timeout}ms)`,
-          validateStatus: () => true
-        });
-
-        // 處理非 2xx 回應狀態
-        if (response.status >= 400) {
-          const statusType = response.status >= 500 ? '5xx' : '4xx';
-          const error = new Error(`API 非串流請求失敗，狀態碼: ${response.status}`);
-          error.status = response.status;
-          error.type = statusType;
-          error.response = { status: response.status };
-          throw error;
-        }
-
-        // 解析非串流回應內容並正規化
-        let parsed;
-        try {
-          parsed = response.data ? JSON.parse(response.data) : {};
-        } catch (parseError) {
-          const error = new Error(`API 非串流回應解析失敗: ${parseError.message}`);
-          error.type = 'parse_error';
-          throw error;
-        }
-
-        const normalized = normalizeCompletionChunk(parsed);
-        const text = extractCompletionContent(normalized);
-        if (!aborted) {
-          emitter.emit('data', text, normalized);
-          emitter.emit('end');
-        }
-      } catch (error) {
-        // 已中止時不再處理錯誤流程
-        if (aborted) {
-          return;
-        }
-        logger.error(`API 非串流請求失敗: ${error.message}`);
-
-        // 分析錯誤類型並決定是否重試
-        const shouldRetry = shouldRetryError(error, retryCount);
-
-        if (shouldRetry) {
-          retryCount++;
-          const delay = ERROR_CONFIG.RETRY_DELAY_BASE * Math.pow(2, retryCount - 1);
-          logger.info(`${delay}ms 後進行重試...`);
-
-          setTimeout(() => {
-            attemptNonStreamRequest();
-          }, delay);
-        } else {
-          GlobalErrorHandler.logError(error, {
-            module: 'LlamaRemote',
-            method: 'send',
-            url: url,
-            retryCount: retryCount,
-            messageCount: normalizedOptions.messages.length
-          });
-
-          const classifiedError = classifyError(error, {
-            reqId: requestId,
-            phase: 'non_stream',
-            url
-          });
-
-          emitter.emit('error', classifiedError);
-        }
-      }
-    };
-
-    // 根據 stream 旗標決定串流或非串流流程
-    if (normalizedOptions.stream) {
-      attemptStreamRequest();
-    } else {
-      attemptNonStreamRequest();
-    }
+    // 啟動串流請求流程
+    attemptStreamRequest();
 
     emitter.abort = () => {
-      // 標記為中止並停止後續處理
       aborted = true;
       logger.info('收到中止請求');
       clearTimeout(dataTimeout);
@@ -515,8 +378,9 @@ function buildOpenAiUrl(path) {
 
 /**
  * 正規化送出參數，確保包含 model 與 messages
+ * ★ 支援 tools、tool_choice 與 previous_response_id 參數
  * @param {Array|Object} options
- * @returns {{messages:Array, model:string, stream:boolean, params:Object}}
+ * @returns {{messages:Array, model:string, stream:boolean, tools:Array|null, tool_choice:string|Object|null, previous_response_id:string|null, params:Object}}
  */
 function normalizeSendOptions(options) {
   const resolvedModel = resolveDefaultModel(
@@ -528,6 +392,9 @@ function normalizeSendOptions(options) {
     messages: [],
     model: resolvedModel,
     stream: true,
+    tools: null,
+    tool_choice: null,
+    previous_response_id: null,  // ★ 新增：用於 multi-turn conversation
     params: {}
   };
 
@@ -543,6 +410,9 @@ function normalizeSendOptions(options) {
     messages = [],
     model = resolvedModel,
     stream = true,
+    tools = null,
+    tool_choice = null,
+    previous_response_id = null,  // ★ 新增
     ...rest
   } = options;
 
@@ -550,19 +420,35 @@ function normalizeSendOptions(options) {
     messages: Array.isArray(messages) ? messages : [],
     model,
     stream: Boolean(stream),
+    tools: Array.isArray(tools) && tools.length > 0 ? tools : null,
+    tool_choice: tool_choice || null,
+    previous_response_id: previous_response_id || null,  // ★ 新增
     params: rest
   };
 }
 
 /**
  * 組裝 chat/completions 的 payload
- * @param {{messages:Array, model:string, stream:boolean, params:Object}} options
+ * 新增：支援 tools 與 tool_choice 參數
+ * @param {{messages:Array, model:string, stream:boolean, tools:Array|null, tool_choice:string|Object|null, params:Object}} options
  * @returns {Object}
  */
 function buildChatPayload(options) {
+  // 清理並驗證 messages，確保符合 OpenAI 規範
+  logger.info(`[buildChatPayload] 開始清理 ${options.messages?.length || 0} 則訊息`);
+  
+  let cleanedMessages = [];
+  try {
+    cleanedMessages = cleanAndValidateMessages(options.messages || []);
+    logger.info(`[buildChatPayload] 清理完成，保留 ${cleanedMessages.length} 則合法訊息`);
+  } catch (err) {
+    logger.error(`[buildChatPayload] 訊息清理失敗: ${err.message}`);
+    throw new Error(`訊息驗證失敗: ${err.message}`);
+  }
+  
   // 組合必要欄位與額外參數
   const payload = {
-    messages: options.messages,
+    messages: cleanedMessages,
     ...options.params
   };
 
@@ -572,6 +458,36 @@ function buildChatPayload(options) {
 
   // 明確指定 stream 旗標以符合需求
   payload.stream = options.stream;
+
+  // 加入 tools 與 tool_choice（OpenAI function calling 支援）
+  if (options.tools && Array.isArray(options.tools) && options.tools.length > 0) {
+    payload.tools = options.tools;
+    logger.info(`[buildChatPayload] 加入 ${options.tools.length} 個工具定義`);
+    
+    // 設定 tool_choice，預設為 "auto"
+    if (options.tool_choice) {
+      payload.tool_choice = options.tool_choice;
+    } else {
+      payload.tool_choice = 'auto';
+    }
+    logger.info(`[buildChatPayload] tool_choice: ${typeof payload.tool_choice === 'string' ? payload.tool_choice : JSON.stringify(payload.tool_choice)}`);
+  }
+
+  // 驗證完整 payload
+  const validation = validateChatPayload(payload);
+  if (!validation.valid) {
+    const errMsg = `Payload 驗證失敗: ${validation.errors.join('; ')}`;
+    logger.error(`[buildChatPayload] ${errMsg}`);
+    throw new Error(errMsg);
+  }
+
+  // 詳細記錄完整 payload 用於除錯（尤其是二次請求時）
+  try {
+    logger.info(`[buildChatPayload] ✓ Payload 驗證通過`);
+    logger.info(`[buildChatPayload] 完整請求 payload:\n${JSON.stringify(payload, null, 2)}`);
+  } catch (err) {
+    logger.warn(`[buildChatPayload] 無法序列化 payload: ${err.message}`);
+  }
 
   return payload;
 }
@@ -590,6 +506,18 @@ function extractCompletionContent(raw) {
 }
 
 /**
+ * 從回應中提取 reasoning_content
+ * @param {Object} raw
+ * @returns {string}
+ */
+function extractReasoningContent(raw) {
+  return raw?.choices?.[0]?.delta?.reasoning_content
+    || raw?.choices?.[0]?.reasoning_content
+    || raw?.reasoning_content
+    || '';
+}
+
+/**
  * 正規化回應為 local 策略一致的結構
  * @param {Object} raw
  * @returns {Object}
@@ -598,6 +526,7 @@ function normalizeCompletionChunk(raw = {}) {
   // 保留原始資料，並補齊 local 需要的欄位結構
   const normalized = { ...raw };
   const content = extractCompletionContent(raw);
+  const reasoningContent = extractReasoningContent(raw);
   const rawChoice = Array.isArray(raw?.choices) ? raw.choices[0] : undefined;
 
   if (!Array.isArray(normalized.choices) || normalized.choices.length === 0) {
@@ -608,6 +537,9 @@ function normalizeCompletionChunk(raw = {}) {
     if (!choice.delta.content && content) {
       choice.delta.content = content;
     }
+    if (!choice.delta.reasoning_content && reasoningContent) {
+      choice.delta.reasoning_content = reasoningContent;
+    }
     if (!choice.finish_reason && rawChoice?.finish_reason) {
       choice.finish_reason = rawChoice.finish_reason;
     }
@@ -616,6 +548,10 @@ function normalizeCompletionChunk(raw = {}) {
 
   if (!normalized.content && content) {
     normalized.content = content;
+  }
+
+  if (!normalized.reasoning_content && reasoningContent) {
+    normalized.reasoning_content = reasoningContent;
   }
 
   return normalized;
@@ -892,34 +828,4 @@ function isExpectedPayload(json) {
   return false;
 }
 
-// 統一抽取 text 欄位，維持與 Local 相同的欄位優先順序
-function extractTextFromPayload(json) {
-  if (!json || typeof json !== 'object') {
-    return '';
-  }
 
-  const fallbackContent = typeof json.content === 'string'
-    ? json.content
-    : json.choices?.[0]?.message?.content;
-
-  return json.choices?.[0]?.delta?.content || json.text || fallbackContent || '';
-}
-
-// 處理非串流模式回應，模擬一次性 data + end 行為
-function handleNonStreamResponse(response, emitter) {
-  try {
-    const json = response?.data;
-
-    if (!isExpectedPayload(json)) {
-      const payloadError = new Error('非串流回應資料結構非預期');
-      emitter.emit('error', payloadError);
-      return;
-    }
-
-    const text = extractTextFromPayload(json);
-    emitter.emit('data', text, json);
-    emitter.emit('end');
-  } catch (error) {
-    emitter.emit('error', error);
-  }
-}

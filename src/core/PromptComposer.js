@@ -14,6 +14,60 @@ const MESSAGE_ROLES = {
   TOOL: 'tool'
 };
 
+// 不得出現在送往 LLM 的 payload 中的欄位
+const FORBIDDEN_PAYLOAD_FIELDS = [
+  'reasoning_content',
+  'timestamp',
+  'talker'
+];
+
+/**
+ * 清理訊息物件，移除不合法欄位，確保符合 OpenAI 規範
+ * @param {Object} message - 原始訊息
+ * @returns {Object} - 清理後的訊息
+ */
+function cleanMessageForPayload(message) {
+  if (!message || typeof message !== 'object') {
+    return message;
+  }
+
+  const { role, content, name, tool_call_id, tool_calls } = message;
+  
+  // ★ 使用偵測协議時，工具結果以 user role 送出
+  // （不使用 OpenAI 原生 tool_calls）
+  const safeRole = role;
+  
+  // 建立乾淨的訊息物件，只保留合法欄位
+  const cleaned = { role: safeRole };
+  
+  // content 處理：assistant 有 tool_calls 時允許 null
+  if (content !== undefined && content !== null) {
+    cleaned.content = typeof content === 'string' ? content : JSON.stringify(content);
+  } else if (role === MESSAGE_ROLES.ASSISTANT && Array.isArray(tool_calls) && tool_calls.length > 0) {
+    // OpenAI 規範：assistant 訊息若有 tool_calls，content 可為 null
+    cleaned.content = null;
+  } else {
+    cleaned.content = '';
+  }
+  
+  // ★ user role 且有 tool_call_id 表示這是工具結果訊息
+  if (role === MESSAGE_ROLES.USER && tool_call_id) {
+    if (name && typeof name === 'string') {
+      cleaned.name = name;
+    }
+    if (tool_call_id && typeof tool_call_id === 'string') {
+      cleaned.tool_call_id = tool_call_id;
+    }
+  }
+  
+  // assistant 可能有 tool_calls
+  if (role === MESSAGE_ROLES.ASSISTANT && Array.isArray(tool_calls)) {
+    cleaned.tool_calls = tool_calls;
+  }
+  
+  return cleaned;
+}
+
 // 驗證訊息格式
 function validateMessage(message) {
   if (!message || typeof message !== 'object') {
@@ -28,8 +82,24 @@ function validateMessage(message) {
     throw new Error(`不支援的訊息角色: ${message.role}`);
   }
   
-  if (!message.content || typeof message.content !== 'string') {
+  // content 驗證：assistant 有 tool_calls 時允許 null
+  const hasToolCalls = message.role === MESSAGE_ROLES.ASSISTANT && 
+                       Array.isArray(message.tool_calls) && 
+                       message.tool_calls.length > 0;
+  
+  if (!hasToolCalls && (!message.content || typeof message.content !== 'string')) {
     throw new Error('訊息必須包含有效的內容 (content)');
+  }
+  
+  // ★ user role 且有 tool_call_id 時的特殊驗證（工具結果訊息）
+  if (message.role === MESSAGE_ROLES.USER && message.tool_call_id) {
+    if (!message.name || typeof message.name !== 'string') {
+      throw new Error('工具結果訊息必須包含有效的 name 欄位');
+    }
+    
+    if (!message.tool_call_id) {
+      logger.warn('工具結果訊息建議包含 tool_call_id 欄位');
+    }
   }
   
   return true;
@@ -186,27 +256,43 @@ async function composeToolPrompt(state = {}) {
 /**
  * 產生工具訊息物件
  * @param {{called?:boolean,toolName?:string,success?:boolean,result?:any,error?:string,value?:any}} state
- * @returns {Promise<{role:string,content:string,timestamp:number}>}
+ * @returns {Promise<{role:string,name:string,content:string,tool_call_id:string,timestamp:number}>}
  */
 async function createToolMessage(state = {}) {
   try {
+    if (!state.toolName || typeof state.toolName !== 'string') {
+      throw new Error('toolName 必須是有效字串');
+    }
+
     const content = await composeToolPrompt(state);
+    
+    // 確保 content 是字串
+    const contentStr = typeof content === 'string' ? content : JSON.stringify(content);
+    
+    // 生成符合偵測協議的 user 訊息
     const message = {
-      role: MESSAGE_ROLES.TOOL,
-      content,
+      role: MESSAGE_ROLES.USER,  // ★ 改成 user
+      name: state.toolName,
+      content: contentStr,
+      tool_call_id: state.tool_call_id || `call_${state.toolName}_${Date.now()}`,
       timestamp: Date.now()
     };
     
     // 驗證產生的訊息
     validateMessage(message);
     
+    logger.info(`✓ 成功建立工具訊息: ${state.toolName}`);
+    logger.info(`工具訊息內容: ${JSON.stringify(message, null, 2)}`);
+    
     return message;
   } catch (error) {
     logger.error(`建立工具訊息失敗：${error.message}`);
     // 回傳安全的錯誤訊息
     return {
-      role: MESSAGE_ROLES.TOOL,
+      role: MESSAGE_ROLES.USER,  // ★ 改成 user
+      name: state.toolName || 'unknown_tool',
       content: `工具訊息產生失敗：${error.message}`,
+      tool_call_id: `call_error_${Date.now()}`,
       timestamp: Date.now()
     };
   }
@@ -222,15 +308,21 @@ function validateAndCleanMessages(messages) {
     throw new Error('訊息必須是陣列格式');
   }
   
-  return messages.filter((msg, index) => {
+  const cleaned = [];
+  
+  for (let index = 0; index < messages.length; index++) {
+    const msg = messages[index];
     try {
       validateMessage(msg);
-      return true;
+      // 驗證通過後，清理掉不合法欄位
+      const cleanedMsg = cleanMessageForPayload(msg);
+      cleaned.push(cleanedMsg);
     } catch (error) {
       logger.warn(`訊息 ${index} 格式不正確，已跳過：${error.message}`);
-      return false;
     }
-  });
+  }
+  
+  return cleaned;
 }
 
 /**
@@ -269,12 +361,35 @@ async function composeMessages(history = [], toolResultBuffer = [], extra = []) 
     result.push(...validHistory);
 
     // 3. 驗證並加入工具結果緩衝區
-    const validToolResults = validateAndCleanMessages(toolResultBuffer);
+    // 注意：先排序再清理，因為 cleanMessageForPayload 會移除 timestamp
+    let sortedToolResults = [...toolResultBuffer];
+    sortedToolResults.sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
+    const validToolResults = validateAndCleanMessages(sortedToolResults);
+    
     if (validToolResults.length > 0) {
-      // 按時間戳排序工具結果
-      validToolResults.sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
       result.push(...validToolResults);
-      logger.info(`加入了 ${validToolResults.length} 個工具結果`);
+      logger.info(`✓ 加入了 ${validToolResults.length} 個工具結果到 messages`);
+      
+      // 詳細記錄每個工具訊息（用於除錯二次回傳）
+      validToolResults.forEach((msg, idx) => {
+        logger.info(`  [Tool ${idx}] role="${msg.role}", name="${msg.name}", content 長度=${msg.content?.length || 0}`);
+        logger.info(`  [Tool ${idx}] 完整內容: ${JSON.stringify(msg, null, 2)}`);
+      });
+    } else if (toolResultBuffer.length > 0) {
+      logger.warn(`⚠️ toolResultBuffer 有 ${toolResultBuffer.length} 個項目，但驗證後為空，將以安全模式強制注入`);
+      const forced = toolResultBuffer.map((msg, idx) => {
+        const cleaned = cleanMessageForPayload(msg);
+        logger.warn(`  [forced ToolResult ${idx}] role="${cleaned.role}", name="${cleaned.name || ''}", tool_call_id="${cleaned.tool_call_id || ''}", content 長度=${cleaned.content?.length || 0}`);
+        return cleaned;
+      }).filter(Boolean);
+      if (forced.length > 0) {
+        result.push(...forced);
+        logger.warn(`⚠️ 已強制注入 ${forced.length} 個工具結果訊息（role: user, 使用偽協議）`);
+      }
+      // 輸出原始 toolResultBuffer 供除錯
+      toolResultBuffer.forEach((msg, idx) => {
+        logger.warn(`  [原始 Tool ${idx}] role="${msg.role}", name="${msg.name}", keys=${Object.keys(msg).join(',')}`);
+      });
     }
 
     // 4. 加入額外訊息
@@ -290,11 +405,47 @@ async function composeMessages(history = [], toolResultBuffer = [], extra = []) 
     }
     
     if (finalMessages[0].role !== MESSAGE_ROLES.SYSTEM) {
-      logger.warn('第一個訊息不是系統訊息，這可能影響LLM行為');
+      logger.warn('⚠️ 第一個訊息不是系統訊息，這可能影響LLM行為');
     }
 
-    logger.info(`成功組合訊息陣列：${finalMessages.length} 則訊息`);
-    logger.info(`訊息類型分布：${getMessageTypeDistribution(finalMessages)}`);
+    // 檢查是否包含工具結果訊息（判斷是否為二次回傳）
+    const hasToolMessages = finalMessages.some(m => m.role === MESSAGE_ROLES.USER && m.tool_call_id);
+    if (hasToolMessages) {
+      logger.info(`🔧 此為工具回傳的二次請求，共 ${finalMessages.filter(m => m.role === MESSAGE_ROLES.USER && m.tool_call_id).length} 個工具結果訊息（偽協議）`);
+      
+      // 二次回傳時，輸出完整 payload 供除錯
+      logger.info(`📦 [二次回傳] 完整 messages payload (pretty print):`);
+      try {
+        const payloadStr = JSON.stringify(finalMessages, null, 2);
+        logger.info(payloadStr);
+      } catch (err) {
+        logger.error(`[二次回傳] 無法序列化 payload: ${err.message}`);
+      }
+      
+      // 驗證每個訊息的欄位是否合法
+      finalMessages.forEach((msg, idx) => {
+        const forbiddenFound = FORBIDDEN_PAYLOAD_FIELDS.filter(f => msg[f] !== undefined);
+        if (forbiddenFound.length > 0) {
+          logger.error(`❌ [二次回傳] messages[${idx}] 含有禁止欄位: ${forbiddenFound.join(', ')}`);
+        }
+        if (msg.role === MESSAGE_ROLES.USER && msg.tool_call_id && !msg.name) {
+          logger.error(`❌ [二次回傳] messages[${idx}] 工具結果訊息（role=user, tool_call_id存在）但缺少 name`);
+        }
+        if (msg.content !== undefined && typeof msg.content !== 'string') {
+          logger.error(`❌ [二次回傳] messages[${idx}] content 不是字串 (是 ${typeof msg.content})`);
+        }
+      });
+    }
+
+    logger.info(`✓ 成功組合訊息陣列：${finalMessages.length} 則訊息`);
+    logger.info(`📊 訊息類型分布：${getMessageTypeDistribution(finalMessages)}`);
+    
+    // 詳細輸出最終 messages（用於除錯）
+    try {
+      logger.info(`📋 最終 messages 結構:\n${JSON.stringify(finalMessages, null, 2)}`);
+    } catch (err) {
+      logger.warn(`無法序列化最終 messages: ${err.message}`);
+    }
     
     return finalMessages;
 
