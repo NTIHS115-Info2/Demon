@@ -334,6 +334,10 @@ function isExpectedPayload(json) {
     return true;
   }
 
+  if (typeof json.text === 'string') {
+    return true;
+  }
+
   return false;
 }
 
@@ -347,7 +351,7 @@ function extractTextFromPayload(json) {
     ? json.content
     : json.choices?.[0]?.message?.content;
 
-  return json.choices?.[0]?.delta?.content || fallbackContent || '';
+  return json.choices?.[0]?.delta?.content || json.text || fallbackContent || '';
 }
 
 // 處理非串流模式回應，模擬一次性 data + end 行為
