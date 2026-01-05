@@ -198,6 +198,13 @@
 - 調整 toolOutputRouter.findToolJSON 僅辨識包含 toolName 與 input 的 JSON，避免誤判
 - 當工具呼叫缺少 input 欄位時回傳失敗並記錄警告
 ### Test
+
+# [v.1.1.2]
+### Change
+- LlamaServer 遠端策略改用 OpenAI 相容 /v1/models 與 /v1/chat/completions 端點，並加入健康檢查與錯誤分類
+- 補上 chat/completions 串流與非串流回應正規化，確保事件序列與 local 策略一致
+### Fix
+- 強化遠端策略錯誤處理與中止流程，避免異常狀態遺留
 - 更新 toolOutputRouter 相關測試以符合新的 JSON 格式
 - 新增測試：當 JSON 包含額外欄位時不應被識別為工具呼叫
 
