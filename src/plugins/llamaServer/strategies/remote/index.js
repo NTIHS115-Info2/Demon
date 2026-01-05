@@ -132,14 +132,6 @@ module.exports = {
     // 建立 AbortController 以支援中斷請求
     const controller = new AbortController();
 
-    // 解析輸入參數，統一支援 messages 與 stream 設定
-    const { messages, stream: streamEnabled } = normalizeSendOptions(options);
-
-    const url = `${baseUrl}/${info.subdomain}/${info.routes.send}`;
-    const payload = { messages, stream: streamEnabled };
-
-    logger.info(`開始 API 請求: ${url}`);
-    logger.info(`請求參數: ${JSON.stringify({ messageCount: messages.length, stream: streamEnabled })}`);
     // 正規化輸入參數與必要欄位
     const normalizedOptions = normalizeSendOptions(options);
     // 組裝送出 payload，包含 model、messages 與 stream 旗標
@@ -256,61 +248,38 @@ module.exports = {
 
               try {
                 const json = JSON.parse(content);
+                
+                // 驗證 payload 結構是否符合預期
                 if (!isExpectedPayload(json)) {
-                  const payloadError = new Error('串流資料結構非預期');
-                  logger.error(`${payloadError.message}，內容: ${content}`);
-                  emitter.emit('error', payloadError);
-                  continue;
-              if (line.startsWith('data: ')) {
-                const content = line.replace('data: ', '').trim();
-                if (content === '[DONE]') {
-                  logger.info('API 串流完成');
-                  emitter.emit('end');
-                  return;
-                }
-                try {
-                  const json = JSON.parse(content);
-                  // 轉換為與 local 策略一致的回應結構
-                  const normalized = normalizeCompletionChunk(json);
-                  const text = normalized.choices?.[0]?.delta?.content || normalized.content || '';
-                  emitter.emit('data', text, normalized);
-                } catch (parseError) {
-                  // 當 JSON 解析失敗時，回傳一致格式的 parse error 錯誤
-                  const parseErrorPayload = createTypedError({
+                  const payloadError = createTypedError({
                     type: ERROR_TYPES.PARSE,
-                    message: `JSON 解析失敗: ${parseError.message}`,
+                    message: '串流資料結構非預期',
                     reqId: requestId,
                     phase: 'stream-parse',
                     url,
                     details: { content }
                   });
-                  logger.warn(`JSON 解析失敗: ${parseError.message}, 內容: ${content}`);
-                  emitter.emit('error', parseErrorPayload);
+                  logger.warn(`串流資料結構非預期，內容: ${content}`);
+                  emitter.emit('error', payloadError);
+                  continue;
                 }
-              } else if (line.trim()) {
-                // 當 SSE 行資料格式不符合預期時，回傳 parse error 供下游辨識
-                const isKnownSseField = line.startsWith('event:')
-                  || line.startsWith('id:')
-                  || line.startsWith('retry:')
-                  || line.startsWith(':');
-                if (!isKnownSseField) {
-                  const sseErrorPayload = createTypedError({
-                    type: ERROR_TYPES.PARSE,
-                    message: 'SSE 資料格式解析失敗',
-                    reqId: requestId,
-                    phase: 'stream-parse',
-                    url,
-                    details: { line }
-                  });
-                  logger.warn(`SSE 解析失敗，未知格式: ${line}`);
-                  emitter.emit('error', sseErrorPayload);
-                }
-
-                const text = extractTextFromPayload(json);
-                emitter.emit('data', text, json);
+                
+                // 轉換為與 local 策略一致的回應結構
+                const normalized = normalizeCompletionChunk(json);
+                const text = extractCompletionContent(normalized);
+                emitter.emit('data', text, normalized);
               } catch (parseError) {
-                logger.error(`JSON 解析失敗: ${parseError.message}, 內容: ${content}`);
-                emitter.emit('error', parseError);
+                // 當 JSON 解析失敗時，回傳一致格式的 parse error 錯誤
+                const parseErrorPayload = createTypedError({
+                  type: ERROR_TYPES.PARSE,
+                  message: `JSON 解析失敗: ${parseError.message}`,
+                  reqId: requestId,
+                  phase: 'stream-parse',
+                  url,
+                  details: { content }
+                });
+                logger.warn(`JSON 解析失敗: ${parseError.message}, 內容: ${content}`);
+                emitter.emit('error', parseErrorPayload);
               }
             }
           } catch (error) {
@@ -342,6 +311,7 @@ module.exports = {
             const endError = new Error('串流意外結束，未收到完成訊號');
             logger.error(endError.message);
             emitter.emit('error', endError);
+            return;
           }
 
           // 檢查是否遺留未解析資料，避免吞掉內容
@@ -349,6 +319,7 @@ module.exports = {
             const bufferError = new Error('串流結束時仍有未解析資料');
             logger.error(bufferError.message);
             emitter.emit('error', bufferError);
+            return;
           }
 
           // 已中止時避免重複結束事件
@@ -497,7 +468,13 @@ module.exports = {
             messageCount: normalizedOptions.messages.length
           });
 
-          emitter.emit('error', error);
+          const classifiedError = classifyError(error, {
+            reqId: requestId,
+            phase: 'non_stream',
+            url
+          });
+
+          emitter.emit('error', classifiedError);
         }
       }
     };
@@ -892,22 +869,6 @@ function shouldRetryError(error, currentRetryCount) {
   }
 
   return isRetryable;
-}
-
-// 將輸入參數整理成統一格式，支援陣列或物件形式
-function normalizeSendOptions(options) {
-  if (Array.isArray(options)) {
-    return { messages: options, stream: true };
-  }
-
-  if (!options || typeof options !== 'object') {
-    return { messages: [], stream: true };
-  }
-
-  return {
-    messages: Array.isArray(options.messages) ? options.messages : [],
-    stream: options.stream !== false
-  };
 }
 
 // 判斷回傳的 JSON 是否符合預期結構，避免非預期資料直接流出
