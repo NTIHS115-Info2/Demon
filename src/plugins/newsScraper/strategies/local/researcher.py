@@ -10,13 +10,11 @@ from collections import Counter
 from math import inf
 from pathlib import Path
 from typing import Dict, List, Optional, Sequence, Tuple
-from urllib.parse import parse_qs, unquote, urlparse
+from urllib.parse import urlparse
 
 import requests
-from bs4 import BeautifulSoup
-from duckduckgo_search import DDGS
-from fake_useragent import UserAgent
 from loguru import logger
+from tavily import TavilyClient
 
 from .data_models import ResearcherOutput, ResearcherResult, SearchItem
 from .evaluator import ContentEvaluator, EvaluationResultExtended
@@ -115,85 +113,65 @@ class BingSearchProvider(SearchProvider):
             raise requests.HTTPError(f"Bing Search API 錯誤: {exc} | 內容: {content}")
 
 
-class DuckDuckGoSearchProvider(SearchProvider):
-    base_url = "https://html.duckduckgo.com/html/"
-
-    def __init__(self, settings: Dict[str, str]):
-        super().__init__(settings)
-        self.ua = UserAgent()
-
+class TavilySearchProvider(SearchProvider):
     def search(self, query: str, num_results: int) -> List[SearchItem]:
-        backends = ["api", "html", "lite"]
-        results: List[Dict[str, str]] = []
-        for backend in backends:
-            try:
-                with DDGS() as ddgs:
-                    results = list(
-                        ddgs.text(query, max_results=num_results, backend=backend)
-                    )
-                if results:
-                    break
-            except Exception as exc:
-                logger.warning("DDG backend '{}' failed: {}", backend, exc)
-                continue
+        api_key = self.settings.get("tavily_api_key", "")
+        if not api_key:
+            raise ValueError("Tavily API 金鑰未設定。")
 
+        client = TavilyClient(api_key=api_key)
+        response = client.search(
+            query=query,
+            max_results=max(1, min(num_results, 20)),
+            search_depth="basic",
+            include_answer=False,
+            include_raw_content=False,
+            include_images=False,
+        )
+        results = response.get("results", [])
         if not results:
-            logger.error("DDG Search failed: all backends exhausted.")
-            return []
-
+            logger.warning("Tavily Search 沒有返回任何結果。")
         items: List[SearchItem] = []
-        for result in results:
-            raw_url = result.get("href") or result.get("url")
-            if not raw_url:
+        for result in results[:num_results]:
+            url = result.get("url")
+            if not url:
                 continue
-            final_url = self._unwrap_duckduckgo_url(raw_url)
             title = result.get("title", "")
-            snippet = result.get("body") or result.get("snippet") or result.get("description") or ""
+            snippet = result.get("content") or result.get("snippet") or ""
             try:
-                items.append(SearchItem(url=final_url, title=title, snippet=snippet))
+                items.append(SearchItem(url=url, title=title, snippet=snippet))
             except ValueError as exc:
                 logger.debug("跳過無效 URL: {}", exc)
-        if not items:
-            logger.warning("DuckDuckGo Search 沒有返回任何結果。")
         return items
 
-    @staticmethod
-    def _unwrap_duckduckgo_url(raw_url: str) -> str:
-        final_url = raw_url
-        try:
-            parsed = urlparse(raw_url)
-            if parsed.netloc.endswith("duckduckgo.com") and parsed.path.startswith("/l/"):
-                qs = parse_qs(parsed.query)
-                if "uddg" in qs and qs["uddg"]:
-                    decoded = unquote(qs["uddg"][0])
-                    if decoded.startswith(("http://", "https://")):
-                        final_url = decoded
-        except Exception:
-            return raw_url
-        return final_url
 
-    def legacy_html_search(self, query: str, num_results: int) -> List[SearchItem]:
-        headers = {"User-Agent": self.ua.random}
-        params = {"q": f"{query} news"}
-        response = requests.get(self.base_url, headers=headers, params=params, timeout=15)
-        self._raise_for_status(response)
-        soup = BeautifulSoup(response.text, "lxml")
-        link_tags = soup.select("a.result__a")
-        links: List[SearchItem] = []
-        for tag in link_tags[:num_results]:
-            href = tag.get("href")
-            if not href:
+class SearXNGSearchProvider(SearchProvider):
+    def search(self, query: str, num_results: int) -> List[SearchItem]:
+        base_url = self.settings.get("searxng_base_url", "http://localhost:8080").rstrip("/")
+        search_url = f"{base_url}/search"
+        params = {"q": f"{query} news", "format": "json"}
+        try:
+            response = requests.get(search_url, params=params, timeout=15)
+            self._raise_for_status(response)
+        except requests.ConnectionError as exc:
+            logger.warning("SearXNG 連線失敗，請確認 Docker 是否啟動: {}", exc)
+            return []
+        data = response.json()
+        results = data.get("results", [])
+        if not results:
+            logger.warning("SearXNG Search 沒有返回任何結果。")
+        items: List[SearchItem] = []
+        for result in results[:num_results]:
+            url = result.get("url")
+            if not url:
                 continue
-            final_url = href
-            if href.startswith("//"):
-                final_url = "https:" + href
+            title = result.get("title", "")
+            snippet = result.get("content") or result.get("snippet") or ""
             try:
-                links.append(SearchItem(url=final_url, title=tag.get_text(strip=True), snippet=""))
+                items.append(SearchItem(url=url, title=title, snippet=snippet))
             except ValueError as exc:
                 logger.debug("跳過無效 URL: {}", exc)
-        if not links:
-            logger.warning("DuckDuckGo Search 沒有返回任何結果。")
-        return links
+        return items
 
     @staticmethod
     def _raise_for_status(response: requests.Response) -> None:
@@ -201,19 +179,22 @@ class DuckDuckGoSearchProvider(SearchProvider):
             response.raise_for_status()
         except requests.HTTPError as exc:  # pragma: no cover - 直接拋出詳細錯誤
             content = exc.response.text if exc.response else ""
-            raise requests.HTTPError(f"DuckDuckGo Search 錯誤: {exc} | 內容: {content}")
+            raise requests.HTTPError(f"SearXNG Search 錯誤: {exc} | 內容: {content}")
 
 
 class SearchAggregator:
     """根據設定檔依序嘗試多個搜尋來源。"""
 
+    DEFAULT_SEARCH_PRIORITY = ["tavily", "google", "bing", "searxng"]
+
     def __init__(self, settings_path: Path):
         self.settings_source_path = self._resolve_settings_path(settings_path)
         self.settings = self._load_settings()
         self.providers = {
+            "tavily": TavilySearchProvider,
             "google": GoogleSearchProvider,
             "bing": BingSearchProvider,
-            "duckduckgo": DuckDuckGoSearchProvider,
+            "searxng": SearXNGSearchProvider,
         }
 
     def _resolve_settings_path(self, settings_path: Path) -> Path:
@@ -228,18 +209,31 @@ class SearchAggregator:
         if not self.settings_source_path.exists():
             raise FileNotFoundError(f"設定檔不存在: {self.settings_source_path}")
         with self.settings_source_path.open("r", encoding="utf-8") as file:
-            return json.load(file)
+            settings = json.load(file)
+        defaults = {
+            "tavily_api_key": "",
+            "bing_api_key": "",
+            "searxng_base_url": "http://localhost:8080",
+            "search_priority": list(self.DEFAULT_SEARCH_PRIORITY),
+        }
+        for key, value in defaults.items():
+            if settings.get(key) is None:
+                settings[key] = value
+        return settings
 
     def search(self, query: str, num_results: int) -> List[SearchItem]:
-        search_sources = self.settings.get("search_sources", []) or []
-        if not search_sources:
-            raise ValueError("search_sources 配置為空，無法執行搜尋。")
+        search_sources = self.settings.get("search_priority") or self.settings.get("search_sources")
+        if not isinstance(search_sources, list) or not search_sources:
+            search_sources = list(self.DEFAULT_SEARCH_PRIORITY)
 
         errors = []
         for source in search_sources:
             provider_class = self.providers.get(source.lower())
             if not provider_class:
                 logger.warning(f"未知的搜尋來源: {source}")
+                continue
+            if not self._has_required_keys(source.lower()):
+                logger.info("跳過 %s，因為缺少必要的 API 金鑰設定。", source)
                 continue
 
             provider = provider_class(self.settings)
@@ -256,6 +250,19 @@ class SearchAggregator:
                 continue
 
         raise RuntimeError(f"所有搜尋來源均失敗。詳細資訊: {'; '.join(errors)}")
+
+    def _has_required_keys(self, source: str) -> bool:
+        if source == "google":
+            return bool(self.settings.get("google_api_key")) and bool(
+                self.settings.get("google_cse_id")
+            )
+        if source == "bing":
+            return bool(self.settings.get("bing_api_key"))
+        if source == "tavily":
+            return bool(self.settings.get("tavily_api_key"))
+        if source == "searxng":
+            return True
+        return False
 
 
 def find_project_root(start_path: str, marker_files) -> Path:
@@ -528,12 +535,5 @@ if __name__ == "__main__":
         evaluator = ContentEvaluator()
         result = evaluator.evaluate("https://example.net", ".NET")
         print("Evaluator .NET URL false positive:", result.matched_keywords, result.reasons)
-
-        redirect_url = (
-            "https://duckduckgo.com/l/?uddg="
-            "https%3A%2F%2Fexample.com%2Fnews%3Futm_source%3Dddg"
-        )
-        unwrapped = DuckDuckGoSearchProvider._unwrap_duckduckgo_url(redirect_url)
-        print("DDG Redirect Unwrap:", unwrapped)
     else:
         main()
