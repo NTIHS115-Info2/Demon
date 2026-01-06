@@ -188,6 +188,17 @@ function collectTalkerResponseInternal(username, message, timeoutMs) {
     timeoutId = setTimeout(() => {
       if (finished) return;
       finished = true;
+      // 嘗試中止底層 LLM 對話，避免逾時後仍持續佔用資源
+      if (typeof talker.abort === 'function') {
+        try {
+          talker.abort();
+        } catch (abortErr) {
+          // 中止失敗不應覆蓋原本的逾時錯誤，只記錄日誌
+          if (logger && typeof logger.error === 'function') {
+            logger.error('Failed to abort talker on timeout', abortErr);
+          }
+        }
+      }
       
       // 嘗試中止底層 LLM 對話，避免逾時後仍持續佔用資源
       if (typeof talker.stop === 'function') {
