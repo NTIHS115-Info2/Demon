@@ -2,11 +2,15 @@
   "name": "newsScraper",
   "priority": 0,
   "pluginType": "LLM",
-  "search_sources": [
+  "search_priority": [
+    "tavily",
     "google",
-    "duckduckgo"
+    "bing",
+    "searxng"
   ],
   "google_api_key": "",
   "google_cse_id": "",
-  "bing_api_key": ""
+  "tavily_api_key": "",
+  "bing_api_key": "",
+  "searxng_base_url": ""
 }
