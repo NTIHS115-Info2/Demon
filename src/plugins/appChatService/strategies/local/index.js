@@ -10,7 +10,7 @@ const Logger = require('../../../../utils/logger');
 // 區段：建立記錄器
 // 用途：輸出插件日誌，便於追蹤服務流程
 // ───────────────────────────────────────────────
-const logger = new Logger('appChatService.log');
+const logger = new Logger('appChatService');
 
 // ───────────────────────────────────────────────
 // 區段：基礎常數與狀態
@@ -19,22 +19,49 @@ const logger = new Logger('appChatService.log');
 const SUBDOMAIN = 'ios-app';
 const ROUTE_PATH = '/chat';
 const DEFAULT_TIMEOUT_MS = 60000;
-const priority = 85;
+const MAX_USERNAME_LENGTH = 100;
+const MAX_MESSAGE_LENGTH = 10000;
+const priority = 70;
 let registered = false;
+
+// ───────────────────────────────────────────────
+// 區段：請求佇列管理
+// 用途：確保同一時間只有一個請求使用 talker，避免事件混淆
+// ───────────────────────────────────────────────
+let requestQueue = [];
+let isProcessing = false;
 
 // ───────────────────────────────────────────────
 // 區段：統一錯誤訊息
 // 用途：回傳對外一致的錯誤提示文字
 // ───────────────────────────────────────────────
-const GENERIC_ERROR_MESSAGE = '系統暫時無法處理，請稍後再試。';
+const ERROR_MESSAGES = {
+  400: '請求格式無效，請確認 username 和 message 欄位。',
+  404: '找不到該路徑。',
+  415: '不支援的 Content-Type，請使用 application/json。',
+  500: '系統暫時無法處理，請稍後再試。'
+};
 
 // ───────────────────────────────────────────────
-// 區段：字串正規化工具
-// 用途：確保輸入為字串並完成 trim
+// 區段：字串正規化與驗證工具
+// 用途：確保輸入為字串並完成 trim，同時驗證長度限制
 // ───────────────────────────────────────────────
 function normalizeString(value) {
   if (typeof value !== 'string') return '';
   return value.trim();
+}
+
+function validateInput(username, message) {
+  if (!username || !message) {
+    return { valid: false, error: '欄位 username 和 message 不可為空。' };
+  }
+  if (username.length > MAX_USERNAME_LENGTH) {
+    return { valid: false, error: `username 長度不可超過 ${MAX_USERNAME_LENGTH} 字元。` };
+  }
+  if (message.length > MAX_MESSAGE_LENGTH) {
+    return { valid: false, error: `message 長度不可超過 ${MAX_MESSAGE_LENGTH} 字元。` };
+  }
+  return { valid: true };
 }
 
 // ───────────────────────────────────────────────
@@ -42,15 +69,50 @@ function normalizeString(value) {
 // 用途：封裝 HTTP 錯誤回應格式
 // ───────────────────────────────────────────────
 function sendErrorResponse(res, statusCode) {
-  return res.status(statusCode).json({ message: GENERIC_ERROR_MESSAGE });
+  const message = ERROR_MESSAGES[statusCode] || ERROR_MESSAGES[500];
+  return res.status(statusCode).json({ message });
 }
 
 // ───────────────────────────────────────────────
-// 區段：收集 LLM 串流回應
+// 區段：處理請求佇列
+// 用途：依序處理排隊的請求，避免併發衝突
+// ───────────────────────────────────────────────
+async function processNextRequest() {
+  if (isProcessing || requestQueue.length === 0) {
+    return;
+  }
+
+  isProcessing = true;
+  const { username, message, timeoutMs, resolve, reject } = requestQueue.shift();
+
+  try {
+    const result = await collectTalkerResponseInternal(username, message, timeoutMs);
+    resolve(result);
+  } catch (err) {
+    reject(err);
+  } finally {
+    isProcessing = false;
+    // 處理下一個請求
+    setImmediate(() => processNextRequest());
+  }
+}
+
+// ───────────────────────────────────────────────
+// 區段：將請求加入佇列
+// 用途：確保請求依序執行，避免 talker 事件混淆
+// ───────────────────────────────────────────────
+function enqueueRequest(username, message, timeoutMs) {
+  return new Promise((resolve, reject) => {
+    requestQueue.push({ username, message, timeoutMs, resolve, reject });
+    processNextRequest();
+  });
+}
+
+// ───────────────────────────────────────────────
+// 區段：收集 LLM 串流回應（內部實作）
 // 用途：監聽 TalkToDemon 串流事件並累積回應內容
 // ───────────────────────────────────────────────
-function collectTalkerResponse(username, message, options = {}) {
-  const timeoutMs = Number(options.timeoutMs) || DEFAULT_TIMEOUT_MS;
+function collectTalkerResponseInternal(username, message, timeoutMs) {
   return new Promise((resolve, reject) => {
     let buffer = '';
     let finished = false;
@@ -121,11 +183,22 @@ function collectTalkerResponse(username, message, options = {}) {
 
     // ───────────────────────────────────────────
     // 區段：啟動超時機制
-    // 用途：避免長時間等待造成請求卡住
+    // 用途：避免長時間等待造成請求卡住，並中止底層對話
     // ───────────────────────────────────────────
     timeoutId = setTimeout(() => {
       if (finished) return;
       finished = true;
+      
+      // 嘗試中止底層 LLM 對話，避免逾時後仍持續佔用資源
+      if (typeof talker.stop === 'function') {
+        try {
+          talker.stop();
+        } catch (abortErr) {
+          // 中止失敗不應覆蓋原本的逾時錯誤，只記錄日誌
+          logger.error(`[appChatService] 逾時後中止 talker 失敗: ${abortErr.message || abortErr}`);
+        }
+      }
+      
       cleanup();
       reject(new Error('LLM 回應逾時'));
     }, timeoutMs);
@@ -145,18 +218,26 @@ function collectTalkerResponse(username, message, options = {}) {
 }
 
 // ───────────────────────────────────────────────
+// 區段：收集 LLM 串流回應（對外介面）
+// 用途：將請求加入佇列，確保依序處理
+// ───────────────────────────────────────────────
+function collectTalkerResponse(username, message, options = {}) {
+  const timeoutMs = Number(options.timeoutMs) || DEFAULT_TIMEOUT_MS;
+  return enqueueRequest(username, message, timeoutMs);
+}
+
+// ───────────────────────────────────────────────
 // 區段：組裝請求路由處理器
 // 用途：符合 /ios-app/chat 規格並回傳 non-stream 回應
 // ───────────────────────────────────────────────
 function buildRequestHandler() {
   return async (req, res) => {
     // ───────────────────────────────────────────
-    // 區段：路由與方法檢查
-    // 用途：確保只接受 POST /ios-app/chat
+    // 區段：方法檢查
+    // 用途：確保只接受 POST 請求
     // ───────────────────────────────────────────
-    const requestPath = `/${req.params[0] || ''}`;
-    if (req.method !== 'POST' || requestPath !== ROUTE_PATH) {
-      return res.status(404).json({ message: GENERIC_ERROR_MESSAGE });
+    if (req.method !== 'POST') {
+      return sendErrorResponse(res, 404);
     }
 
     // ───────────────────────────────────────────
@@ -170,13 +251,14 @@ function buildRequestHandler() {
 
     // ───────────────────────────────────────────
     // 區段：Payload 解析與驗證
-    // 用途：確保 username 與 message 合法
+    // 用途：確保 username 與 message 合法且符合長度限制
     // ───────────────────────────────────────────
     const username = normalizeString(req.body?.username);
     const message = normalizeString(req.body?.message);
-    if (!username || !message) {
-      logger.warn('[appChatService] 收到無效 payload');
-      return sendErrorResponse(res, 400);
+    const validation = validateInput(username, message);
+    if (!validation.valid) {
+      logger.warn(`[appChatService] 輸入驗證失敗: ${validation.error}`);
+      return res.status(400).json({ message: validation.error });
     }
 
     // ───────────────────────────────────────────
@@ -241,17 +323,24 @@ module.exports = {
   async offline() {
     // ───────────────────────────────────────────
     // 區段：解除註冊處理
-    // 用途：離線時釋放既有路由
+    // 用途：離線時釋放既有路由，只有成功才更新狀態
     // ───────────────────────────────────────────
-    if (registered) {
-      try {
-        await pluginsManager.send('ngrok', { action: 'unregister', subdomain: SUBDOMAIN });
-      } catch (err) {
-        logger.error(`[appChatService] 解除註冊失敗: ${err.message || err}`);
-      }
+    if (!registered) {
+      return true;
     }
-    registered = false;
-    return true;
+
+    try {
+      const result = await pluginsManager.send('ngrok', { action: 'unregister', subdomain: SUBDOMAIN });
+      if (!result) {
+        logger.error('[appChatService] 解除註冊失敗：未收到成功回應');
+        return false;
+      }
+      registered = false;
+      return true;
+    } catch (err) {
+      logger.error(`[appChatService] 解除註冊失敗: ${err.message || err}`);
+      return false;
+    }
   },
 
   /**
