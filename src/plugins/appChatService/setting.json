@@ -1,0 +1,5 @@
+{
+  "name": "appChatService",
+  "priority": 70,
+  "pluginType": "Other"
+}
