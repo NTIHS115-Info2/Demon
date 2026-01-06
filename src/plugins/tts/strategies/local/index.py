@@ -176,7 +176,7 @@ def play_worker():
         safe_audio = np.clip(audio, -1.0, 1.0)
         pcm = (safe_audio * 32767).astype(np.int16)
         play_obj = sa.play_buffer(pcm, 1, 2, sample_rate)
-        logger.debug(f"播放「{text}」, 時長 {len(audio)/sample_rate:.2f}s")
+        logger.info(f"播放「{text}」, 時長 {len(audio)/sample_rate:.2f}s")
         play_obj.wait_done()
         with lock:
             cache_audio.append(audio)

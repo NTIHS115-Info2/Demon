@@ -196,10 +196,16 @@ function findMarkdownTool(buffer) {
 }
 
 class ToolStreamRouter extends EventEmitter {
+  /**
+   * @param {Object} options
+   * @param {number} [options.timeout=1500] - 工具執行超時（毫秒）
+   * @param {string} [options.source='content'] - 來源標記（'content' 或 'reasoning'）
+   */
   constructor(options = {}) {
     super();
     this.buffer  = '';
     this.timeout = options.timeout || 1500;
+    this.source  = options.source || 'content';  // ★ 標記來源
     this.processing = Promise.resolve();
   }
 
@@ -265,7 +271,18 @@ class ToolStreamRouter extends EventEmitter {
         break;
       }
 
-      logger.info(`偵測到${found.markdown ? ' Markdown 包裹的' : ''}工具呼叫: ${found.data.toolName}`);
+      // ★ 詳細記錄工具偵測資訊（用於除錯與追蹤）
+      const toolDetectionInfo = {
+        source: this.source,
+        toolName: found.data.toolName,
+        input: found.data.input,
+        markdown: !!found.markdown,
+        chunkPosition: { start: found.start, end: found.end },
+        bufferLengthBefore: this.buffer.length,
+        timestamp: Date.now()
+      };
+      logger.info(`[tool-detection] 來源=${this.source}, 工具=${found.data.toolName}, Markdown包裹=${found.markdown || false}`);
+      logger.info(`[tool-detection-detail] ${JSON.stringify(toolDetectionInfo)}`);
 
       // 取出工具呼叫前的純文字區段
       const plain = this.buffer.slice(0, found.start);
@@ -279,8 +296,9 @@ class ToolStreamRouter extends EventEmitter {
           emitWaiting: (s) => this.emit('waiting', s),
           timeout: this.timeout
         });
-        this.emit('tool', message);
-        logger.info(`工具 ${found.data.toolName} 處理完成並發送結果`);
+        // ★ 發射 tool 事件時帶上來源與偵測資訊
+        this.emit('tool', message, { source: this.source, detection: toolDetectionInfo });
+        logger.info(`[tool-executed] 來源=${this.source}, 工具=${found.data.toolName} 處理完成`);
       } catch (err) {
         logger.error(`工具處理失敗: ${err.message}`);
       }
