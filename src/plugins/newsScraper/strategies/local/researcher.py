@@ -14,7 +14,10 @@ from typing import Dict, List, Optional, Sequence, Tuple
 from urllib.parse import urlparse
 
 import requests
+from fake_useragent import UserAgent
+from filelock import FileLock
 from loguru import logger
+from pydantic import BaseModel, ValidationError
 from tavily import TavilyClient
 
 from .data_models import ResearcherOutput, ResearcherResult, SearchItem
@@ -25,8 +28,12 @@ from .refiner import QueryRefiner
 class SearchProvider(ABC):
     """抽象搜尋供應商。"""
 
-    def __init__(self, settings: Dict[str, str]):
+    RATE_LIMIT_PENALTY_SECONDS = 30.0
+
+    def __init__(self, settings: Dict[str, str], dispatcher: "BionicDispatcher", user_agent: UserAgent):
         self.settings = settings
+        self.dispatcher = dispatcher
+        self.user_agent = user_agent
 
     @abstractmethod
     def search(self, query: str, num_results: int) -> List[SearchItem]:
@@ -48,7 +55,8 @@ class GoogleSearchProvider(SearchProvider):
             "q": f"{query} news",
             "num": max(1, min(num_results, 10)),
         }
-        response = requests.get(self.api_url, params=params, timeout=15)
+        headers = {"User-Agent": self.user_agent.random}
+        response = requests.get(self.api_url, params=params, headers=headers, timeout=15)
         self._raise_for_status(response)
         data = response.json()
         items = data.get("items", [])
@@ -67,11 +75,12 @@ class GoogleSearchProvider(SearchProvider):
                 logger.debug("跳過無效 URL: {}", exc)
         return results
 
-    @staticmethod
-    def _raise_for_status(response: requests.Response) -> None:
+    def _raise_for_status(self, response: requests.Response) -> None:
         try:
             response.raise_for_status()
         except requests.HTTPError as exc:  # pragma: no cover - 直接拋出詳細錯誤
+            if response.status_code in (403, 429):
+                self.dispatcher.apply_penalty(self.RATE_LIMIT_PENALTY_SECONDS)
             content = exc.response.text if exc.response else ""
             raise requests.HTTPError(f"Google Search API 錯誤: {exc} | 內容: {content}")
 
@@ -84,7 +93,10 @@ class BingSearchProvider(SearchProvider):
         if not api_key:
             raise ValueError("Bing API 金鑰未設定。")
 
-        headers = {"Ocp-Apim-Subscription-Key": api_key}
+        headers = {
+            "Ocp-Apim-Subscription-Key": api_key,
+            "User-Agent": self.user_agent.random,
+        }
         params = {"q": f"{query} news", "count": max(1, min(num_results, 50))}
         response = requests.get(self.api_url, headers=headers, params=params, timeout=15)
         self._raise_for_status(response)
@@ -105,11 +117,12 @@ class BingSearchProvider(SearchProvider):
                 logger.debug("跳過無效 URL: {}", exc)
         return results
 
-    @staticmethod
-    def _raise_for_status(response: requests.Response) -> None:
+    def _raise_for_status(self, response: requests.Response) -> None:
         try:
             response.raise_for_status()
         except requests.HTTPError as exc:  # pragma: no cover - 直接拋出詳細錯誤
+            if response.status_code in (403, 429):
+                self.dispatcher.apply_penalty(self.RATE_LIMIT_PENALTY_SECONDS)
             content = exc.response.text if exc.response else ""
             raise requests.HTTPError(f"Bing Search API 錯誤: {exc} | 內容: {content}")
 
@@ -152,7 +165,8 @@ class SearXNGSearchProvider(SearchProvider):
         search_url = f"{base_url}/search"
         params = {"q": f"{query} news", "format": "json"}
         try:
-            response = requests.get(search_url, params=params, timeout=15)
+            headers = {"User-Agent": self.user_agent.random}
+            response = requests.get(search_url, params=params, headers=headers, timeout=15)
             self._raise_for_status(response)
         except requests.ConnectionError as exc:
             logger.warning("SearXNG 連線失敗，請確認 Docker 是否啟動: {}", exc)
@@ -174,13 +188,56 @@ class SearXNGSearchProvider(SearchProvider):
                 logger.debug("跳過無效 URL: {}", exc)
         return items
 
-    @staticmethod
-    def _raise_for_status(response: requests.Response) -> None:
+    def _raise_for_status(self, response: requests.Response) -> None:
         try:
             response.raise_for_status()
         except requests.HTTPError as exc:  # pragma: no cover - 直接拋出詳細錯誤
+            if response.status_code in (403, 429):
+                self.dispatcher.apply_penalty(self.RATE_LIMIT_PENALTY_SECONDS)
             content = exc.response.text if exc.response else ""
             raise requests.HTTPError(f"SearXNG Search 錯誤: {exc} | 內容: {content}")
+
+
+class BionicDispatcher:
+    """跨進程持久化仿生調度器。"""
+
+    def __init__(self, state_path: Path, cooldown_seconds: float, penalty_seconds: float):
+        self.state_path = state_path
+        self.lock_path = state_path.with_name(f"{state_path.name}.lock")
+        self.cooldown_seconds = cooldown_seconds
+        self.penalty_seconds = penalty_seconds
+        self._lock = FileLock(str(self.lock_path))
+
+    def wait_for_cooldown(self) -> None:
+        with self._lock:
+            next_allowed = self._read_timestamp()
+            now = time.time()
+            wait_seconds = max(0.0, next_allowed - now)
+            if wait_seconds > 0:
+                time.sleep(wait_seconds)
+            now = time.time()
+            self._write_timestamp(now + self.cooldown_seconds)
+
+    def apply_penalty(self, penalty_seconds: Optional[float] = None) -> None:
+        penalty = penalty_seconds if penalty_seconds is not None else self.penalty_seconds
+        with self._lock:
+            next_allowed = max(self._read_timestamp(), time.time() + penalty)
+            self._write_timestamp(next_allowed)
+
+    def _read_timestamp(self) -> float:
+        if not self.state_path.exists():
+            return 0.0
+        content = self.state_path.read_text(encoding="utf-8").strip()
+        if not content:
+            return 0.0
+        try:
+            return float(content)
+        except ValueError:
+            return 0.0
+
+    def _write_timestamp(self, timestamp: float) -> None:
+        self.state_path.parent.mkdir(parents=True, exist_ok=True)
+        self.state_path.write_text(f"{timestamp:.6f}", encoding="utf-8")
 
 
 class SearchAggregator:
@@ -190,10 +247,20 @@ class SearchAggregator:
     REQUEST_JITTER_MIN_SECONDS = 1.0
     REQUEST_JITTER_MAX_SECONDS = 3.0
     FAILURE_COOLDOWN_SECONDS = 2.0
+    BIONIC_COOLDOWN_SECONDS = 2.0
+    RATE_LIMIT_PENALTY_SECONDS = 30.0
+    TRACE_ENV_VAR = "BIONIC_TRACE"
+    TRACE_PREFIX = "BIONIC_REQUEST_TS"
 
     def __init__(self, settings_path: Path):
         self.settings_source_path = self._resolve_settings_path(settings_path)
         self.settings = self._load_settings()
+        self.dispatcher = BionicDispatcher(
+            state_path=Path(__file__).with_name(".bionic_state"),
+            cooldown_seconds=self.BIONIC_COOLDOWN_SECONDS,
+            penalty_seconds=self.RATE_LIMIT_PENALTY_SECONDS,
+        )
+        self.user_agent = UserAgent()
         self.providers = {
             "tavily": TavilySearchProvider,
             "google": GoogleSearchProvider,
@@ -240,14 +307,16 @@ class SearchAggregator:
                 logger.info("跳過 %s，因為缺少必要的 API 金鑰設定。", source)
                 continue
 
-            provider = provider_class(self.settings)
+            provider = provider_class(self.settings, self.dispatcher, self.user_agent)
             try:
                 logger.info(f"嘗試使用 {source} 進行搜尋...")
+                self.dispatcher.wait_for_cooldown()
                 time.sleep(
                     random.uniform(
                         self.REQUEST_JITTER_MIN_SECONDS, self.REQUEST_JITTER_MAX_SECONDS
                     )
                 )
+                self._emit_trace()
                 results = provider.search(query, num_results)
                 if results:
                     logger.info(f"使用 {source} 搜尋成功，取得 {len(results)} 筆結果。")
@@ -275,6 +344,11 @@ class SearchAggregator:
             return True
         return False
 
+    def _emit_trace(self) -> None:
+        if os.environ.get(self.TRACE_ENV_VAR) == "1":
+            timestamp = time.time()
+            print(f"{self.TRACE_PREFIX} {timestamp:.6f}", file=sys.stderr, flush=True)
+
 
 def find_project_root(start_path: str, marker_files) -> Path:
     path = Path(start_path).resolve()
@@ -296,6 +370,12 @@ CACHE_EXPIRATION = 86400
 CACHE_DIR.mkdir(exist_ok=True)
 
 
+class ResearcherInput(BaseModel):
+    topic: str
+    query: str = ""
+    detail_level: str = "normal"  # normal, deep_dive, quick
+
+
 class ResearcherStrategy:
     """Search Aggregator 版本。"""
 
@@ -308,8 +388,15 @@ class ResearcherStrategy:
         self.refiner = QueryRefiner()
         logger.info("ResearcherStrategy (Aggregator) 已初始化。")
 
-    async def discover_sources(self, topic: str, num_results: int = 5) -> ResearcherOutput:
-        cache_key = hashlib.md5(topic.encode("utf-8")).hexdigest() + f"_n{num_results}.json"
+    async def discover_sources(
+        self,
+        topic: str,
+        num_results: int = 5,
+        max_iterations: int = 3,
+        initial_query: Optional[str] = None,
+    ) -> ResearcherOutput:
+        cache_seed = f"{topic}:{initial_query or ''}:{num_results}:{max_iterations}"
+        cache_key = hashlib.md5(cache_seed.encode("utf-8")).hexdigest() + f"_n{num_results}.json"
         cache_file = CACHE_DIR / cache_key
 
         if cache_file.exists():
@@ -318,22 +405,23 @@ class ResearcherStrategy:
                 logger.info(f"從快取命中主題: {topic}")
                 return ResearcherOutput.model_validate(cached_data["content"])
 
-        current_query = topic
-        previous_queries = {self._normalize_query(topic)}
+        current_query = initial_query or topic
+        previous_queries = {self._normalize_query(current_query)}
         best_attempt_results: Optional[Tuple[List[SearchItem], List[SearchItem]]] = None
         best_attempt_score = -inf
         best_attempt_valid_count = 0
         best_attempt_query = current_query
-        max_retries = 3
         last_best_score: Optional[float] = None
         no_improvement_count = 0
-        stop_reason = "max_retries"
+        stop_reason = "max_iterations"
         query_keywords = self.evaluator._extract_keywords((topic or "").casefold())
 
         try:
             logger.info(f"正在為主題 '{topic}' 執行聚合搜尋...")
             loop = asyncio.get_event_loop()
-            for attempt in range(max_retries):
+            attempt = 0
+            while attempt < max_iterations:
+                attempt += 1
                 results = await loop.run_in_executor(
                     None,
                     lambda: self.aggregator.search(current_query, num_results),
@@ -371,7 +459,7 @@ class ResearcherStrategy:
                 attempt_valid_count = len(valid_items)
                 logger.info(
                     "Attempt %s | query='%s' results=%s valid=%s best_score=%.2f",
-                    attempt + 1,
+                    attempt,
                     current_query,
                     len(results),
                     attempt_valid_count,
@@ -404,7 +492,7 @@ class ResearcherStrategy:
 
                 fail_summary = self._build_fail_summary(
                     current_query,
-                    attempt + 1,
+                    attempt,
                     attempt_best_score,
                     reasons_counter,
                     missing_keywords_counter,
@@ -412,7 +500,7 @@ class ResearcherStrategy:
                     evaluation_records,
                 )
 
-                new_query = self.refiner.refine_query(current_query, fail_summary, attempt + 1)
+                new_query = self.refiner.refine_query(current_query, fail_summary, attempt)
                 time.sleep(
                     random.uniform(
                         self.REFINEMENT_PAUSE_MIN_SECONDS,
@@ -517,17 +605,36 @@ class ResearcherStrategy:
 
 
 def main():
-    if len(sys.argv) > 2:
+    if len(sys.argv) == 2:
         try:
-            topic = sys.argv[1]
-            num_results = int(sys.argv[2])
+            payload = json.loads(sys.argv[1])
+            input_model = ResearcherInput.model_validate(payload)
+            detail_level = input_model.detail_level.casefold()
+            if detail_level == "quick":
+                num_results = 3
+                max_iterations = 1
+            elif detail_level == "deep_dive":
+                num_results = 10
+                max_iterations = 3
+            else:
+                num_results = 5
+                max_iterations = 2
+            initial_query = input_model.query or input_model.topic
 
             async def async_main():
                 researcher = ResearcherStrategy()
-                result_model = await researcher.discover_sources(topic, num_results=num_results)
+                result_model = await researcher.discover_sources(
+                    input_model.topic,
+                    num_results=num_results,
+                    max_iterations=max_iterations,
+                    initial_query=initial_query,
+                )
                 sys.stdout.buffer.write(result_model.model_dump_json().encode("utf-8"))
 
             asyncio.run(async_main())
+        except (json.JSONDecodeError, ValidationError) as exc:
+            error_output = ResearcherOutput(success=False, error=f"Invalid input: {exc}")
+            sys.stdout.buffer.write(error_output.model_dump_json().encode("utf-8"))
         except Exception as exc:  # pragma: no cover - CLI 主流程錯誤處理
             error_output = ResearcherOutput(success=False, error=str(exc))
             sys.stdout.buffer.write(error_output.model_dump_json().encode("utf-8"))
