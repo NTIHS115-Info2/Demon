@@ -5,9 +5,11 @@ import json
 import os
 import random
 import sys
+import tempfile
 import time
 from abc import ABC, abstractmethod
 from collections import Counter
+from enum import Enum
 from math import inf
 from pathlib import Path
 from typing import Dict, List, Optional, Sequence, Tuple
@@ -17,7 +19,7 @@ import requests
 from fake_useragent import UserAgent
 from filelock import FileLock
 from loguru import logger
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel, Field, ValidationError, field_validator
 from tavily import TavilyClient
 
 from .data_models import ResearcherOutput, ResearcherResult, SearchItem
@@ -134,14 +136,21 @@ class TavilySearchProvider(SearchProvider):
             raise ValueError("Tavily API 金鑰未設定。")
 
         client = TavilyClient(api_key=api_key)
-        response = client.search(
-            query=query,
-            max_results=max(1, min(num_results, 20)),
-            search_depth="basic",
-            include_answer=False,
-            include_raw_content=False,
-            include_images=False,
-        )
+        try:
+            response = client.search(
+                query=query,
+                max_results=max(1, min(num_results, 20)),
+                search_depth="basic",
+                include_answer=False,
+                include_raw_content=False,
+                include_images=False,
+            )
+        except Exception as exc:
+            error_name = exc.__class__.__name__
+            error_text = str(exc)
+            if "UsageLimitExceeded" in error_name or "429" in error_text:
+                self.dispatcher.apply_penalty(self.RATE_LIMIT_PENALTY_SECONDS)
+            raise
         results = response.get("results", [])
         if not results:
             logger.warning("Tavily Search 沒有返回任何結果。")
@@ -255,8 +264,9 @@ class SearchAggregator:
     def __init__(self, settings_path: Path):
         self.settings_source_path = self._resolve_settings_path(settings_path)
         self.settings = self._load_settings()
+        cache_root = Path(os.environ.get("NEWS_SCRAPER_CACHE_DIR") or tempfile.gettempdir())
         self.dispatcher = BionicDispatcher(
-            state_path=Path(__file__).with_name(".bionic_state"),
+            state_path=cache_root / ".bionic_state",
             cooldown_seconds=self.BIONIC_COOLDOWN_SECONDS,
             penalty_seconds=self.RATE_LIMIT_PENALTY_SECONDS,
         )
@@ -371,9 +381,25 @@ CACHE_DIR.mkdir(exist_ok=True)
 
 
 class ResearcherInput(BaseModel):
-    topic: str
-    query: str = ""
-    detail_level: str = "normal"  # normal, deep_dive, quick
+    class DetailLevel(str, Enum):
+        QUICK = "quick"
+        NORMAL = "normal"
+        DEEP_DIVE = "deep_dive"
+
+    topic: str = Field(..., max_length=200)
+    query: str = Field("", max_length=200)
+    detail_level: DetailLevel = DetailLevel.NORMAL  # normal, deep_dive, quick
+
+    @field_validator("detail_level", mode="before")
+    @classmethod
+    def normalize_detail_level(cls, value):
+        if isinstance(value, ResearcherInput.DetailLevel):
+            return value
+        if isinstance(value, str):
+            normalized = value.strip().lower()
+            if normalized in ResearcherInput.DetailLevel._value2member_map_:
+                return ResearcherInput.DetailLevel(normalized)
+        return ResearcherInput.DetailLevel.NORMAL
 
 
 class ResearcherStrategy:
@@ -609,11 +635,11 @@ def main():
         try:
             payload = json.loads(sys.argv[1])
             input_model = ResearcherInput.model_validate(payload)
-            detail_level = input_model.detail_level.casefold()
-            if detail_level == "quick":
+            detail_level = input_model.detail_level.value
+            if detail_level == ResearcherInput.DetailLevel.QUICK.value:
                 num_results = 3
                 max_iterations = 1
-            elif detail_level == "deep_dive":
+            elif detail_level == ResearcherInput.DetailLevel.DEEP_DIVE.value:
                 num_results = 10
                 max_iterations = 3
             else:

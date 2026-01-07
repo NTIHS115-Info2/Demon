@@ -17,6 +17,7 @@ def run_instance(script_path: Path, payload: Dict[str, str]) -> Tuple[float, flo
         capture_output=True,
         text=True,
         env=env,
+        timeout=30,
     )
     end_time = time.time()
     request_time = _extract_request_time(completed.stderr)
