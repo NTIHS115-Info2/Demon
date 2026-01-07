@@ -3,6 +3,7 @@ import asyncio
 import hashlib
 import json
 import os
+import random
 import sys
 import time
 from abc import ABC, abstractmethod
@@ -186,6 +187,9 @@ class SearchAggregator:
     """根據設定檔依序嘗試多個搜尋來源。"""
 
     DEFAULT_SEARCH_PRIORITY = ["tavily", "google", "bing", "searxng"]
+    REQUEST_JITTER_MIN_SECONDS = 1.0
+    REQUEST_JITTER_MAX_SECONDS = 3.0
+    FAILURE_COOLDOWN_SECONDS = 2.0
 
     def __init__(self, settings_path: Path):
         self.settings_source_path = self._resolve_settings_path(settings_path)
@@ -239,14 +243,21 @@ class SearchAggregator:
             provider = provider_class(self.settings)
             try:
                 logger.info(f"嘗試使用 {source} 進行搜尋...")
+                time.sleep(
+                    random.uniform(
+                        self.REQUEST_JITTER_MIN_SECONDS, self.REQUEST_JITTER_MAX_SECONDS
+                    )
+                )
                 results = provider.search(query, num_results)
                 if results:
                     logger.info(f"使用 {source} 搜尋成功，取得 {len(results)} 筆結果。")
                     return results
                 logger.warning(f"{source} 搜尋未取得結果，嘗試下一個來源。")
+                time.sleep(self.FAILURE_COOLDOWN_SECONDS)
             except Exception as exc:
                 logger.exception(f"{source} 搜尋失敗，嘗試下一個來源。原因: {exc}")
                 errors.append(f"{source}: {exc}")
+                time.sleep(self.FAILURE_COOLDOWN_SECONDS)
                 continue
 
         raise RuntimeError(f"所有搜尋來源均失敗。詳細資訊: {'; '.join(errors)}")
@@ -287,6 +298,9 @@ CACHE_DIR.mkdir(exist_ok=True)
 
 class ResearcherStrategy:
     """Search Aggregator 版本。"""
+
+    REFINEMENT_PAUSE_MIN_SECONDS = 2.0
+    REFINEMENT_PAUSE_MAX_SECONDS = 4.0
 
     def __init__(self):
         self.aggregator = SearchAggregator(Path(__file__).parents[2] / "setting.json")
@@ -399,6 +413,12 @@ class ResearcherStrategy:
                 )
 
                 new_query = self.refiner.refine_query(current_query, fail_summary, attempt + 1)
+                time.sleep(
+                    random.uniform(
+                        self.REFINEMENT_PAUSE_MIN_SECONDS,
+                        self.REFINEMENT_PAUSE_MAX_SECONDS,
+                    )
+                )
 
                 if last_best_score is not None and attempt_best_score <= last_best_score:
                     no_improvement_count += 1
