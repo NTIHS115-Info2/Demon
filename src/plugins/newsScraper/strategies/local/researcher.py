@@ -7,6 +7,7 @@ import random
 import sys
 import tempfile
 import time
+from datetime import timezone
 from email.utils import parsedate_to_datetime
 from abc import ABC, abstractmethod
 from collections import Counter
@@ -235,8 +236,7 @@ class SearXNGSearchProvider(SearchProvider):
                 return None
             now = time.time()
             if retry_time.tzinfo is None:
-                retry_time = retry_time.replace(tzinfo=None)
-                return max(0.0, retry_time.timestamp() - now)
+                retry_time = retry_time.replace(tzinfo=timezone.utc)
             return max(0.0, retry_time.timestamp() - now)
 
     def _has_rate_limit_signal(self, payload: Dict[str, object]) -> bool:
