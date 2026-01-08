@@ -7,6 +7,7 @@ import random
 import sys
 import tempfile
 import time
+from email.utils import parsedate_to_datetime
 from abc import ABC, abstractmethod
 from collections import Counter
 from enum import Enum
@@ -176,6 +177,8 @@ class TavilySearchProvider(SearchProvider):
 
 
 class SearXNGSearchProvider(SearchProvider):
+    RATE_LIMIT_HINTS = ("rate limit", "too many requests", "429", "forbidden", "blocked")
+
     def search(self, query: str, num_results: int) -> List[SearchItem]:
         base_url = self.settings.get("searxng_base_url", "http://localhost:8080").rstrip("/")
         search_url = f"{base_url}/search"
@@ -188,6 +191,10 @@ class SearXNGSearchProvider(SearchProvider):
             logger.warning("SearXNG 連線失敗，請確認 Docker 是否啟動: {}", exc)
             return []
         data = response.json()
+        if self._has_rate_limit_signal(data):
+            self.dispatcher.apply_penalty(self.RATE_LIMIT_PENALTY_SECONDS)
+            logger.warning("SearXNG 回應包含限流或封鎖訊號，已觸發冷卻。")
+            return []
         results = data.get("results", [])
         if not results:
             logger.warning("SearXNG Search 沒有返回任何結果。")
@@ -209,9 +216,49 @@ class SearXNGSearchProvider(SearchProvider):
             response.raise_for_status()
         except requests.HTTPError as exc:  # pragma: no cover - 直接拋出詳細錯誤
             if response.status_code in (403, 429):
-                self.dispatcher.apply_penalty(self.RATE_LIMIT_PENALTY_SECONDS)
+                retry_after = self._parse_retry_after(response)
+                penalty = max(self.RATE_LIMIT_PENALTY_SECONDS, retry_after or 0.0)
+                self.dispatcher.apply_penalty(penalty)
             content = exc.response.text if exc.response else ""
             raise requests.HTTPError(f"SearXNG Search 錯誤: {exc} | 內容: {content}")
+
+    def _parse_retry_after(self, response: requests.Response) -> Optional[float]:
+        retry_after = response.headers.get("Retry-After")
+        if not retry_after:
+            return None
+        try:
+            return float(retry_after)
+        except ValueError:
+            try:
+                retry_time = parsedate_to_datetime(retry_after)
+            except (TypeError, ValueError):
+                return None
+            now = time.time()
+            if retry_time.tzinfo is None:
+                retry_time = retry_time.replace(tzinfo=None)
+                return max(0.0, retry_time.timestamp() - now)
+            return max(0.0, retry_time.timestamp() - now)
+
+    def _has_rate_limit_signal(self, payload: Dict[str, object]) -> bool:
+        errors = payload.get("errors")
+        if isinstance(errors, list):
+            for error in errors:
+                if self._contains_rate_limit_hint(str(error)):
+                    return True
+        unresponsive = payload.get("unresponsive_engines")
+        if isinstance(unresponsive, list):
+            for engine in unresponsive:
+                if self._contains_rate_limit_hint(str(engine)):
+                    return True
+        if isinstance(payload.get("error"), str) and self._contains_rate_limit_hint(
+            payload.get("error", "")
+        ):
+            return True
+        return False
+
+    def _contains_rate_limit_hint(self, message: str) -> bool:
+        lowered = message.lower()
+        return any(hint in lowered for hint in self.RATE_LIMIT_HINTS)
 
 
 class BionicDispatcher:
@@ -230,7 +277,8 @@ class BionicDispatcher:
         self.penalty_seconds = penalty_seconds
         self._lock = FileLock(str(self.lock_path))
 
-    def wait_for_cooldown(self) -> None:
+    def wait_for_cooldown(self, cooldown_seconds: Optional[float] = None) -> None:
+        cooldown = self.cooldown_seconds if cooldown_seconds is None else cooldown_seconds
         with self._lock:
             next_allowed = self._read_timestamp()
             now = time.time()
@@ -238,7 +286,7 @@ class BionicDispatcher:
             if wait_seconds > 0:
                 time.sleep(wait_seconds)
             now = time.time()
-            self._write_timestamp(now + self.cooldown_seconds)
+            self._write_timestamp(now + cooldown)
 
     def apply_penalty(self, penalty_seconds: Optional[float] = None) -> None:
         penalty = penalty_seconds if penalty_seconds is not None else self.penalty_seconds
@@ -270,6 +318,7 @@ class SearchAggregator:
     REQUEST_JITTER_MAX_SECONDS = 3.0
     FAILURE_COOLDOWN_SECONDS = 2.0
     BIONIC_COOLDOWN_SECONDS = 2.0
+    SEARXNG_COOLDOWN_SECONDS = 5.0
     RATE_LIMIT_PENALTY_SECONDS = 30.0
     TRACE_ENV_VAR = "BIONIC_TRACE"
     TRACE_PREFIX = "BIONIC_REQUEST_TS"
@@ -279,6 +328,7 @@ class SearchAggregator:
         self.settings = self._load_settings()
         cache_root = Path(os.environ.get("NEWS_SCRAPER_CACHE_DIR") or tempfile.gettempdir())
         project_id = Path(__file__).resolve().parents[2].name
+        self.searxng_cooldown_seconds = self._resolve_searxng_cooldown()
         self.dispatcher = BionicDispatcher(
             state_path=cache_root / f".bionic_state_{project_id}",
             lock_path=cache_root / f".bionic_lock_{project_id}",
@@ -310,6 +360,7 @@ class SearchAggregator:
             "tavily_api_key": "",
             "bing_api_key": "",
             "searxng_base_url": "http://localhost:8080",
+            "searxng_cooldown_seconds": self.SEARXNG_COOLDOWN_SECONDS,
             "search_priority": list(self.DEFAULT_SEARCH_PRIORITY),
         }
         for key, value in defaults.items():
@@ -335,7 +386,7 @@ class SearchAggregator:
             provider = provider_class(self.settings, self.dispatcher, self.user_agent)
             try:
                 logger.info(f"嘗試使用 {source} 進行搜尋...")
-                self.dispatcher.wait_for_cooldown()
+                self.dispatcher.wait_for_cooldown(self._get_cooldown_for_source(source.lower()))
                 time.sleep(
                     random.uniform(
                         self.REQUEST_JITTER_MIN_SECONDS, self.REQUEST_JITTER_MAX_SECONDS
@@ -368,6 +419,24 @@ class SearchAggregator:
         if source == "searxng":
             return True
         return False
+
+    def _resolve_searxng_cooldown(self) -> float:
+        env_value = os.environ.get("SEARXNG_COOLDOWN_SECONDS")
+        if env_value:
+            try:
+                return max(0.0, float(env_value))
+            except ValueError:
+                logger.warning("SEARXNG_COOLDOWN_SECONDS 無效，將使用設定檔值。")
+        value = self.settings.get("searxng_cooldown_seconds", self.SEARXNG_COOLDOWN_SECONDS)
+        try:
+            return max(0.0, float(value))
+        except (TypeError, ValueError):
+            return self.SEARXNG_COOLDOWN_SECONDS
+
+    def _get_cooldown_for_source(self, source: str) -> float:
+        if source == "searxng":
+            return self.searxng_cooldown_seconds
+        return self.BIONIC_COOLDOWN_SECONDS
 
     def _emit_trace(self) -> None:
         if os.environ.get(self.TRACE_ENV_VAR) == "1":

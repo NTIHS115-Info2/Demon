@@ -44,6 +44,7 @@ def main() -> None:
         "query": "",
         "detail_level": "quick",
     }
+    min_gap_seconds = float(os.environ.get("BIONIC_MIN_GAP_SECONDS", "2.0"))
 
     results: List[Tuple[float, float, float, Optional[str]]] = []
     with ThreadPoolExecutor(max_workers=5) as executor:
@@ -67,6 +68,10 @@ def main() -> None:
         print("Request gaps:")
         for gap in gaps:
             print(f"- {gap:.2f}s")
+        if any(gap < min_gap_seconds for gap in gaps):
+            print(f"FAIL: 偵測到低於最小間隔 {min_gap_seconds:.2f}s 的請求間距。")
+        else:
+            print(f"PASS: 所有請求間距皆大於等於 {min_gap_seconds:.2f}s。")
 
 
 if __name__ == "__main__":
