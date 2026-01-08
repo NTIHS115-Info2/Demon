@@ -1,0 +1,23 @@
+version: "3.9"
+
+services:
+  searxng:
+    image: searxng/searxng:latest
+    ports:
+      - "8080:8080"
+    volumes:
+      # 確保冒號左邊是本地檔案，右邊是容器內路徑
+      - ./settings.yml:/etc/searxng/settings.yml:ro
+    environment:
+      - BASE_URL=http://localhost:8080/
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - SETGID
+      - SETUID
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "1m"
+        max-file: "1"

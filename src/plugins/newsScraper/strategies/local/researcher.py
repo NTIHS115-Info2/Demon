@@ -3,20 +3,26 @@ import asyncio
 import hashlib
 import json
 import os
+import random
 import sys
+import tempfile
 import time
+from datetime import timezone
+from email.utils import parsedate_to_datetime
 from abc import ABC, abstractmethod
 from collections import Counter
+from enum import Enum
 from math import inf
 from pathlib import Path
 from typing import Dict, List, Optional, Sequence, Tuple
-from urllib.parse import parse_qs, unquote, urlparse
+from urllib.parse import urlparse
 
 import requests
-from bs4 import BeautifulSoup
-from duckduckgo_search import DDGS
 from fake_useragent import UserAgent
+from filelock import FileLock
 from loguru import logger
+from pydantic import BaseModel, Field, ValidationError, field_validator
+from tavily import TavilyClient
 
 from .data_models import ResearcherOutput, ResearcherResult, SearchItem
 from .evaluator import ContentEvaluator, EvaluationResultExtended
@@ -26,8 +32,12 @@ from .refiner import QueryRefiner
 class SearchProvider(ABC):
     """抽象搜尋供應商。"""
 
-    def __init__(self, settings: Dict[str, str]):
+    RATE_LIMIT_PENALTY_SECONDS = 30.0
+
+    def __init__(self, settings: Dict[str, str], dispatcher: "BionicDispatcher", user_agent: UserAgent):
         self.settings = settings
+        self.dispatcher = dispatcher
+        self.user_agent = user_agent
 
     @abstractmethod
     def search(self, query: str, num_results: int) -> List[SearchItem]:
@@ -49,7 +59,8 @@ class GoogleSearchProvider(SearchProvider):
             "q": f"{query} news",
             "num": max(1, min(num_results, 10)),
         }
-        response = requests.get(self.api_url, params=params, timeout=15)
+        headers = {"User-Agent": self.user_agent.random}
+        response = requests.get(self.api_url, params=params, headers=headers, timeout=15)
         self._raise_for_status(response)
         data = response.json()
         items = data.get("items", [])
@@ -68,11 +79,12 @@ class GoogleSearchProvider(SearchProvider):
                 logger.debug("跳過無效 URL: {}", exc)
         return results
 
-    @staticmethod
-    def _raise_for_status(response: requests.Response) -> None:
+    def _raise_for_status(self, response: requests.Response) -> None:
         try:
             response.raise_for_status()
         except requests.HTTPError as exc:  # pragma: no cover - 直接拋出詳細錯誤
+            if response.status_code in (403, 429):
+                self.dispatcher.apply_penalty(self.RATE_LIMIT_PENALTY_SECONDS)
             content = exc.response.text if exc.response else ""
             raise requests.HTTPError(f"Google Search API 錯誤: {exc} | 內容: {content}")
 
@@ -85,7 +97,10 @@ class BingSearchProvider(SearchProvider):
         if not api_key:
             raise ValueError("Bing API 金鑰未設定。")
 
-        headers = {"Ocp-Apim-Subscription-Key": api_key}
+        headers = {
+            "Ocp-Apim-Subscription-Key": api_key,
+            "User-Agent": self.user_agent.random,
+        }
         params = {"q": f"{query} news", "count": max(1, min(num_results, 50))}
         response = requests.get(self.api_url, headers=headers, params=params, timeout=15)
         self._raise_for_status(response)
@@ -106,114 +121,226 @@ class BingSearchProvider(SearchProvider):
                 logger.debug("跳過無效 URL: {}", exc)
         return results
 
-    @staticmethod
-    def _raise_for_status(response: requests.Response) -> None:
+    def _raise_for_status(self, response: requests.Response) -> None:
         try:
             response.raise_for_status()
         except requests.HTTPError as exc:  # pragma: no cover - 直接拋出詳細錯誤
+            if response.status_code in (403, 429):
+                self.dispatcher.apply_penalty(self.RATE_LIMIT_PENALTY_SECONDS)
             content = exc.response.text if exc.response else ""
             raise requests.HTTPError(f"Bing Search API 錯誤: {exc} | 內容: {content}")
 
 
-class DuckDuckGoSearchProvider(SearchProvider):
-    base_url = "https://html.duckduckgo.com/html/"
-
-    def __init__(self, settings: Dict[str, str]):
-        super().__init__(settings)
-        self.ua = UserAgent()
-
+class TavilySearchProvider(SearchProvider):
     def search(self, query: str, num_results: int) -> List[SearchItem]:
-        backends = ["api", "html", "lite"]
-        results: List[Dict[str, str]] = []
-        for backend in backends:
-            try:
-                with DDGS() as ddgs:
-                    results = list(
-                        ddgs.text(query, max_results=num_results, backend=backend)
-                    )
-                if results:
-                    break
-            except Exception as exc:
-                logger.warning("DDG backend '{}' failed: {}", backend, exc)
-                continue
+        api_key = self.settings.get("tavily_api_key", "")
+        if not api_key:
+            raise ValueError("Tavily API 金鑰未設定。")
 
+        client = TavilyClient(api_key=api_key)
+        try:
+            response = client.search(
+                query=query,
+                max_results=max(1, min(num_results, 20)),
+                search_depth="basic",
+                include_answer=False,
+                include_raw_content=False,
+                include_images=False,
+            )
+        except Exception as exc:
+            status_code = getattr(exc, "status_code", None)
+            response = getattr(exc, "response", None)
+            if status_code is None and response is not None:
+                status_code = getattr(response, "status_code", None)
+            if status_code in (403, 429):
+                self.dispatcher.apply_penalty(self.RATE_LIMIT_PENALTY_SECONDS)
+            else:
+                error_name = exc.__class__.__name__
+                error_text = str(exc)
+                if "UsageLimitExceeded" in error_name or "429" in error_text:
+                    self.dispatcher.apply_penalty(self.RATE_LIMIT_PENALTY_SECONDS)
+            raise
+        results = response.get("results", [])
         if not results:
-            logger.error("DDG Search failed: all backends exhausted.")
-            return []
-
+            logger.warning("Tavily Search 沒有返回任何結果。")
         items: List[SearchItem] = []
-        for result in results:
-            raw_url = result.get("href") or result.get("url")
-            if not raw_url:
+        for result in results[:num_results]:
+            url = result.get("url")
+            if not url:
                 continue
-            final_url = self._unwrap_duckduckgo_url(raw_url)
             title = result.get("title", "")
-            snippet = result.get("body") or result.get("snippet") or result.get("description") or ""
+            snippet = result.get("content") or result.get("snippet") or ""
             try:
-                items.append(SearchItem(url=final_url, title=title, snippet=snippet))
+                items.append(SearchItem(url=url, title=title, snippet=snippet))
             except ValueError as exc:
                 logger.debug("跳過無效 URL: {}", exc)
-        if not items:
-            logger.warning("DuckDuckGo Search 沒有返回任何結果。")
         return items
 
-    @staticmethod
-    def _unwrap_duckduckgo_url(raw_url: str) -> str:
-        final_url = raw_url
-        try:
-            parsed = urlparse(raw_url)
-            if parsed.netloc.endswith("duckduckgo.com") and parsed.path.startswith("/l/"):
-                qs = parse_qs(parsed.query)
-                if "uddg" in qs and qs["uddg"]:
-                    decoded = unquote(qs["uddg"][0])
-                    if decoded.startswith(("http://", "https://")):
-                        final_url = decoded
-        except Exception:
-            return raw_url
-        return final_url
 
-    def legacy_html_search(self, query: str, num_results: int) -> List[SearchItem]:
-        headers = {"User-Agent": self.ua.random}
-        params = {"q": f"{query} news"}
-        response = requests.get(self.base_url, headers=headers, params=params, timeout=15)
-        self._raise_for_status(response)
-        soup = BeautifulSoup(response.text, "lxml")
-        link_tags = soup.select("a.result__a")
-        links: List[SearchItem] = []
-        for tag in link_tags[:num_results]:
-            href = tag.get("href")
-            if not href:
+class SearXNGSearchProvider(SearchProvider):
+    RATE_LIMIT_HINTS = ("rate limit", "too many requests", "429", "forbidden", "blocked")
+
+    def search(self, query: str, num_results: int) -> List[SearchItem]:
+        base_url = self.settings.get("searxng_base_url", "http://localhost:8080").rstrip("/")
+        search_url = f"{base_url}/search"
+        params = {"q": f"{query} news", "format": "json"}
+        try:
+            headers = {"User-Agent": self.user_agent.random}
+            response = requests.get(search_url, params=params, headers=headers, timeout=15)
+            self._raise_for_status(response)
+        except requests.ConnectionError as exc:
+            logger.warning("SearXNG 連線失敗，請確認 Docker 是否啟動: {}", exc)
+            return []
+        data = response.json()
+        if self._has_rate_limit_signal(data):
+            self.dispatcher.apply_penalty(self.RATE_LIMIT_PENALTY_SECONDS)
+            logger.warning("SearXNG 回應包含限流或封鎖訊號，已觸發冷卻。")
+            return []
+        results = data.get("results", [])
+        if not results:
+            logger.warning("SearXNG Search 沒有返回任何結果。")
+        items: List[SearchItem] = []
+        for result in results[:num_results]:
+            url = result.get("url")
+            if not url:
                 continue
-            final_url = href
-            if href.startswith("//"):
-                final_url = "https:" + href
+            title = result.get("title", "")
+            snippet = result.get("content") or result.get("snippet") or ""
             try:
-                links.append(SearchItem(url=final_url, title=tag.get_text(strip=True), snippet=""))
+                items.append(SearchItem(url=url, title=title, snippet=snippet))
             except ValueError as exc:
                 logger.debug("跳過無效 URL: {}", exc)
-        if not links:
-            logger.warning("DuckDuckGo Search 沒有返回任何結果。")
-        return links
+        return items
 
-    @staticmethod
-    def _raise_for_status(response: requests.Response) -> None:
+    def _raise_for_status(self, response: requests.Response) -> None:
         try:
             response.raise_for_status()
         except requests.HTTPError as exc:  # pragma: no cover - 直接拋出詳細錯誤
+            if response.status_code in (403, 429):
+                retry_after = self._parse_retry_after(response)
+                penalty = max(self.RATE_LIMIT_PENALTY_SECONDS, retry_after or 0.0)
+                self.dispatcher.apply_penalty(penalty)
             content = exc.response.text if exc.response else ""
-            raise requests.HTTPError(f"DuckDuckGo Search 錯誤: {exc} | 內容: {content}")
+            raise requests.HTTPError(f"SearXNG Search 錯誤: {exc} | 內容: {content}")
+
+    def _parse_retry_after(self, response: requests.Response) -> Optional[float]:
+        retry_after = response.headers.get("Retry-After")
+        if not retry_after:
+            return None
+        try:
+            return float(retry_after)
+        except ValueError:
+            try:
+                retry_time = parsedate_to_datetime(retry_after)
+            except (TypeError, ValueError):
+                return None
+            now = time.time()
+            if retry_time.tzinfo is None:
+                retry_time = retry_time.replace(tzinfo=timezone.utc)
+            return max(0.0, retry_time.timestamp() - now)
+
+    def _has_rate_limit_signal(self, payload: Dict[str, object]) -> bool:
+        errors = payload.get("errors")
+        if isinstance(errors, list):
+            for error in errors:
+                if self._contains_rate_limit_hint(str(error)):
+                    return True
+        unresponsive = payload.get("unresponsive_engines")
+        if isinstance(unresponsive, list):
+            for engine in unresponsive:
+                if self._contains_rate_limit_hint(str(engine)):
+                    return True
+        if isinstance(payload.get("error"), str) and self._contains_rate_limit_hint(
+            payload.get("error", "")
+        ):
+            return True
+        return False
+
+    def _contains_rate_limit_hint(self, message: str) -> bool:
+        lowered = message.lower()
+        return any(hint in lowered for hint in self.RATE_LIMIT_HINTS)
+
+
+class BionicDispatcher:
+    """跨進程持久化仿生調度器。"""
+
+    def __init__(
+        self,
+        state_path: Path,
+        lock_path: Path,
+        cooldown_seconds: float,
+        penalty_seconds: float,
+    ):
+        self.state_path = state_path
+        self.lock_path = lock_path
+        self.cooldown_seconds = cooldown_seconds
+        self.penalty_seconds = penalty_seconds
+        self._lock = FileLock(str(self.lock_path))
+
+    def wait_for_cooldown(self, cooldown_seconds: Optional[float] = None) -> None:
+        cooldown = self.cooldown_seconds if cooldown_seconds is None else cooldown_seconds
+        with self._lock:
+            next_allowed = self._read_timestamp()
+            now = time.time()
+            wait_seconds = max(0.0, next_allowed - now)
+            if wait_seconds > 0:
+                time.sleep(wait_seconds)
+            now = time.time()
+            self._write_timestamp(now + cooldown)
+
+    def apply_penalty(self, penalty_seconds: Optional[float] = None) -> None:
+        penalty = penalty_seconds if penalty_seconds is not None else self.penalty_seconds
+        with self._lock:
+            next_allowed = max(self._read_timestamp(), time.time() + penalty)
+            self._write_timestamp(next_allowed)
+
+    def _read_timestamp(self) -> float:
+        if not self.state_path.exists():
+            return 0.0
+        content = self.state_path.read_text(encoding="utf-8").strip()
+        if not content:
+            return 0.0
+        try:
+            return float(content)
+        except ValueError:
+            return 0.0
+
+    def _write_timestamp(self, timestamp: float) -> None:
+        self.state_path.parent.mkdir(parents=True, exist_ok=True)
+        self.state_path.write_text(f"{timestamp:.6f}", encoding="utf-8")
 
 
 class SearchAggregator:
     """根據設定檔依序嘗試多個搜尋來源。"""
 
+    DEFAULT_SEARCH_PRIORITY = ["tavily", "google", "bing", "searxng"]
+    REQUEST_JITTER_MIN_SECONDS = 1.0
+    REQUEST_JITTER_MAX_SECONDS = 3.0
+    FAILURE_COOLDOWN_SECONDS = 2.0
+    BIONIC_COOLDOWN_SECONDS = 2.0
+    SEARXNG_COOLDOWN_SECONDS = 5.0
+    RATE_LIMIT_PENALTY_SECONDS = 30.0
+    TRACE_ENV_VAR = "BIONIC_TRACE"
+    TRACE_PREFIX = "BIONIC_REQUEST_TS"
+
     def __init__(self, settings_path: Path):
         self.settings_source_path = self._resolve_settings_path(settings_path)
         self.settings = self._load_settings()
+        cache_root = Path(os.environ.get("NEWS_SCRAPER_CACHE_DIR") or tempfile.gettempdir())
+        project_id = Path(__file__).resolve().parents[2].name
+        self.searxng_cooldown_seconds = self._resolve_searxng_cooldown()
+        self.dispatcher = BionicDispatcher(
+            state_path=cache_root / f".bionic_state_{project_id}",
+            lock_path=cache_root / f".bionic_lock_{project_id}",
+            cooldown_seconds=self.BIONIC_COOLDOWN_SECONDS,
+            penalty_seconds=self.RATE_LIMIT_PENALTY_SECONDS,
+        )
+        self.user_agent = UserAgent()
         self.providers = {
+            "tavily": TavilySearchProvider,
             "google": GoogleSearchProvider,
             "bing": BingSearchProvider,
-            "duckduckgo": DuckDuckGoSearchProvider,
+            "searxng": SearXNGSearchProvider,
         }
 
     def _resolve_settings_path(self, settings_path: Path) -> Path:
@@ -228,12 +355,23 @@ class SearchAggregator:
         if not self.settings_source_path.exists():
             raise FileNotFoundError(f"設定檔不存在: {self.settings_source_path}")
         with self.settings_source_path.open("r", encoding="utf-8") as file:
-            return json.load(file)
+            settings = json.load(file)
+        defaults = {
+            "tavily_api_key": "",
+            "bing_api_key": "",
+            "searxng_base_url": "http://localhost:8080",
+            "searxng_cooldown_seconds": self.SEARXNG_COOLDOWN_SECONDS,
+            "search_priority": list(self.DEFAULT_SEARCH_PRIORITY),
+        }
+        for key, value in defaults.items():
+            if settings.get(key) is None:
+                settings[key] = value
+        return settings
 
     def search(self, query: str, num_results: int) -> List[SearchItem]:
-        search_sources = self.settings.get("search_sources", []) or []
-        if not search_sources:
-            raise ValueError("search_sources 配置為空，無法執行搜尋。")
+        search_sources = self.settings.get("search_priority") or self.settings.get("search_sources")
+        if not isinstance(search_sources, list) or not search_sources:
+            search_sources = list(self.DEFAULT_SEARCH_PRIORITY)
 
         errors = []
         for source in search_sources:
@@ -241,21 +379,69 @@ class SearchAggregator:
             if not provider_class:
                 logger.warning(f"未知的搜尋來源: {source}")
                 continue
+            if not self._has_required_keys(source.lower()):
+                logger.info("跳過 %s，因為缺少必要的 API 金鑰設定。", source)
+                continue
 
-            provider = provider_class(self.settings)
+            provider = provider_class(self.settings, self.dispatcher, self.user_agent)
             try:
                 logger.info(f"嘗試使用 {source} 進行搜尋...")
+                self.dispatcher.wait_for_cooldown(self._get_cooldown_for_source(source.lower()))
+                time.sleep(
+                    random.uniform(
+                        self.REQUEST_JITTER_MIN_SECONDS, self.REQUEST_JITTER_MAX_SECONDS
+                    )
+                )
+                self._emit_trace()
                 results = provider.search(query, num_results)
                 if results:
                     logger.info(f"使用 {source} 搜尋成功，取得 {len(results)} 筆結果。")
                     return results
                 logger.warning(f"{source} 搜尋未取得結果，嘗試下一個來源。")
+                time.sleep(self.FAILURE_COOLDOWN_SECONDS)
             except Exception as exc:
                 logger.exception(f"{source} 搜尋失敗，嘗試下一個來源。原因: {exc}")
                 errors.append(f"{source}: {exc}")
+                time.sleep(self.FAILURE_COOLDOWN_SECONDS)
                 continue
 
         raise RuntimeError(f"所有搜尋來源均失敗。詳細資訊: {'; '.join(errors)}")
+
+    def _has_required_keys(self, source: str) -> bool:
+        if source == "google":
+            return bool(self.settings.get("google_api_key")) and bool(
+                self.settings.get("google_cse_id")
+            )
+        if source == "bing":
+            return bool(self.settings.get("bing_api_key"))
+        if source == "tavily":
+            return bool(self.settings.get("tavily_api_key"))
+        if source == "searxng":
+            return True
+        return False
+
+    def _resolve_searxng_cooldown(self) -> float:
+        env_value = os.environ.get("SEARXNG_COOLDOWN_SECONDS")
+        if env_value:
+            try:
+                return max(0.0, float(env_value))
+            except ValueError:
+                logger.warning("SEARXNG_COOLDOWN_SECONDS 無效，將使用設定檔值。")
+        value = self.settings.get("searxng_cooldown_seconds", self.SEARXNG_COOLDOWN_SECONDS)
+        try:
+            return max(0.0, float(value))
+        except (TypeError, ValueError):
+            return self.SEARXNG_COOLDOWN_SECONDS
+
+    def _get_cooldown_for_source(self, source: str) -> float:
+        if source == "searxng":
+            return self.searxng_cooldown_seconds
+        return self.BIONIC_COOLDOWN_SECONDS
+
+    def _emit_trace(self) -> None:
+        if os.environ.get(self.TRACE_ENV_VAR) == "1":
+            timestamp = time.time()
+            print(f"{self.TRACE_PREFIX} {timestamp:.6f}", file=sys.stderr, flush=True)
 
 
 def find_project_root(start_path: str, marker_files) -> Path:
@@ -278,8 +464,55 @@ CACHE_EXPIRATION = 86400
 CACHE_DIR.mkdir(exist_ok=True)
 
 
+class ResearcherInput(BaseModel):
+    class DetailLevel(str, Enum):
+        QUICK = "quick"
+        NORMAL = "normal"
+        DEEP_DIVE = "deep_dive"
+
+    topic: str = Field(..., max_length=200)
+    query: str = Field("", max_length=200)
+    detail_level: DetailLevel = DetailLevel.NORMAL  # normal, deep_dive, quick
+
+    @field_validator("detail_level", mode="before")
+    @classmethod
+    def normalize_detail_level(cls, value):
+        if isinstance(value, ResearcherInput.DetailLevel):
+            return value
+        if isinstance(value, str):
+            normalized = value.strip().lower()
+            if normalized in ResearcherInput.DetailLevel._value2member_map_:
+                return ResearcherInput.DetailLevel(normalized)
+        return ResearcherInput.DetailLevel.NORMAL
+
+    @field_validator("topic", mode="before")
+    @classmethod
+    def validate_topic(cls, value):
+        if value is None:
+            raise ValueError("Topic cannot be empty")
+        if isinstance(value, str):
+            stripped = value.strip()
+            if not stripped:
+                raise ValueError("Topic cannot be empty")
+            return stripped
+        return value
+
+    @field_validator("query", mode="before")
+    @classmethod
+    def normalize_query(cls, value):
+        if value is None:
+            return ""
+        if isinstance(value, str):
+            stripped = value.strip()
+            return stripped if stripped else ""
+        return value
+
+
 class ResearcherStrategy:
     """Search Aggregator 版本。"""
+
+    REFINEMENT_PAUSE_MIN_SECONDS = 2.0
+    REFINEMENT_PAUSE_MAX_SECONDS = 4.0
 
     def __init__(self):
         self.aggregator = SearchAggregator(Path(__file__).parents[2] / "setting.json")
@@ -287,8 +520,15 @@ class ResearcherStrategy:
         self.refiner = QueryRefiner()
         logger.info("ResearcherStrategy (Aggregator) 已初始化。")
 
-    async def discover_sources(self, topic: str, num_results: int = 5) -> ResearcherOutput:
-        cache_key = hashlib.md5(topic.encode("utf-8")).hexdigest() + f"_n{num_results}.json"
+    async def discover_sources(
+        self,
+        topic: str,
+        num_results: int = 5,
+        max_iterations: int = 3,
+        initial_query: Optional[str] = None,
+    ) -> ResearcherOutput:
+        cache_seed = f"{topic}:{initial_query or ''}:{num_results}:{max_iterations}"
+        cache_key = hashlib.md5(cache_seed.encode("utf-8")).hexdigest() + f"_n{num_results}.json"
         cache_file = CACHE_DIR / cache_key
 
         if cache_file.exists():
@@ -297,22 +537,23 @@ class ResearcherStrategy:
                 logger.info(f"從快取命中主題: {topic}")
                 return ResearcherOutput.model_validate(cached_data["content"])
 
-        current_query = topic
-        previous_queries = {self._normalize_query(topic)}
+        current_query = initial_query or topic
+        previous_queries = {self._normalize_query(current_query)}
         best_attempt_results: Optional[Tuple[List[SearchItem], List[SearchItem]]] = None
         best_attempt_score = -inf
         best_attempt_valid_count = 0
         best_attempt_query = current_query
-        max_retries = 3
         last_best_score: Optional[float] = None
         no_improvement_count = 0
-        stop_reason = "max_retries"
+        stop_reason = "max_iterations"
         query_keywords = self.evaluator._extract_keywords((topic or "").casefold())
 
         try:
             logger.info(f"正在為主題 '{topic}' 執行聚合搜尋...")
             loop = asyncio.get_event_loop()
-            for attempt in range(max_retries):
+            attempt = 0
+            while attempt < max_iterations:
+                attempt += 1
                 results = await loop.run_in_executor(
                     None,
                     lambda: self.aggregator.search(current_query, num_results),
@@ -350,7 +591,7 @@ class ResearcherStrategy:
                 attempt_valid_count = len(valid_items)
                 logger.info(
                     "Attempt %s | query='%s' results=%s valid=%s best_score=%.2f",
-                    attempt + 1,
+                    attempt,
                     current_query,
                     len(results),
                     attempt_valid_count,
@@ -383,7 +624,7 @@ class ResearcherStrategy:
 
                 fail_summary = self._build_fail_summary(
                     current_query,
-                    attempt + 1,
+                    attempt,
                     attempt_best_score,
                     reasons_counter,
                     missing_keywords_counter,
@@ -391,7 +632,13 @@ class ResearcherStrategy:
                     evaluation_records,
                 )
 
-                new_query = self.refiner.refine_query(current_query, fail_summary, attempt + 1)
+                new_query = self.refiner.refine_query(current_query, fail_summary, attempt)
+                time.sleep(
+                    random.uniform(
+                        self.REFINEMENT_PAUSE_MIN_SECONDS,
+                        self.REFINEMENT_PAUSE_MAX_SECONDS,
+                    )
+                )
 
                 if last_best_score is not None and attempt_best_score <= last_best_score:
                     no_improvement_count += 1
@@ -490,17 +737,36 @@ class ResearcherStrategy:
 
 
 def main():
-    if len(sys.argv) > 2:
+    if len(sys.argv) == 2:
         try:
-            topic = sys.argv[1]
-            num_results = int(sys.argv[2])
+            payload = json.loads(sys.argv[1])
+            input_model = ResearcherInput.model_validate(payload)
+            detail_level = input_model.detail_level.value
+            if detail_level == ResearcherInput.DetailLevel.QUICK.value:
+                num_results = 3
+                max_iterations = 1
+            elif detail_level == ResearcherInput.DetailLevel.DEEP_DIVE.value:
+                num_results = 10
+                max_iterations = 3
+            else:
+                num_results = 5
+                max_iterations = 2
+            initial_query = input_model.query or input_model.topic
 
             async def async_main():
                 researcher = ResearcherStrategy()
-                result_model = await researcher.discover_sources(topic, num_results=num_results)
+                result_model = await researcher.discover_sources(
+                    input_model.topic,
+                    num_results=num_results,
+                    max_iterations=max_iterations,
+                    initial_query=initial_query,
+                )
                 sys.stdout.buffer.write(result_model.model_dump_json().encode("utf-8"))
 
             asyncio.run(async_main())
+        except (json.JSONDecodeError, ValidationError) as exc:
+            error_output = ResearcherOutput(success=False, error=f"Invalid input: {exc}")
+            sys.stdout.buffer.write(error_output.model_dump_json().encode("utf-8"))
         except Exception as exc:  # pragma: no cover - CLI 主流程錯誤處理
             error_output = ResearcherOutput(success=False, error=str(exc))
             sys.stdout.buffer.write(error_output.model_dump_json().encode("utf-8"))
@@ -528,12 +794,5 @@ if __name__ == "__main__":
         evaluator = ContentEvaluator()
         result = evaluator.evaluate("https://example.net", ".NET")
         print("Evaluator .NET URL false positive:", result.matched_keywords, result.reasons)
-
-        redirect_url = (
-            "https://duckduckgo.com/l/?uddg="
-            "https%3A%2F%2Fexample.com%2Fnews%3Futm_source%3Dddg"
-        )
-        unwrapped = DuckDuckGoSearchProvider._unwrap_duckduckgo_url(redirect_url)
-        print("DDG Redirect Unwrap:", unwrapped)
     else:
         main()
