@@ -5,23 +5,28 @@ import sys
 import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple
 
 
-def run_instance(script_path: Path, payload: Dict[str, str]) -> Tuple[float, float, float]:
+def run_instance(script_path: Path, payload: Dict[str, str]) -> Tuple[float, float, float, Optional[str]]:
     env = os.environ.copy()
     env["BIONIC_TRACE"] = "1"
     start_time = time.time()
-    completed = subprocess.run(
-        [sys.executable, str(script_path), json.dumps(payload)],
-        capture_output=True,
-        text=True,
-        env=env,
-        timeout=30,
-    )
-    end_time = time.time()
-    request_time = _extract_request_time(completed.stderr)
-    return start_time, request_time, end_time
+    try:
+        completed = subprocess.run(
+            [sys.executable, str(script_path), json.dumps(payload)],
+            capture_output=True,
+            text=True,
+            env=env,
+            timeout=30,
+        )
+        end_time = time.time()
+        request_time = _extract_request_time(completed.stderr)
+        error = None if completed.returncode == 0 else "Non-zero exit"
+        return start_time, request_time, end_time, error
+    except subprocess.TimeoutExpired:
+        end_time = time.time()
+        return start_time, 0.0, end_time, "Timeout"
 
 
 def _extract_request_time(stderr_output: str) -> float:
@@ -40,13 +45,19 @@ def main() -> None:
         "detail_level": "quick",
     }
 
-    results: List[Tuple[float, float, float]] = []
+    results: List[Tuple[float, float, float, Optional[str]]] = []
     with ThreadPoolExecutor(max_workers=5) as executor:
         futures = [executor.submit(run_instance, script_path, payload) for _ in range(5)]
         for future in futures:
             results.append(future.result())
 
-    request_times = sorted(ts for _, ts, _ in results if ts > 0)
+    failed = [error for _, _, _, error in results if error]
+    if failed:
+        print("Failures:")
+        for reason in failed:
+            print(f"- {reason}")
+
+    request_times = sorted(ts for _, ts, _, _ in results if ts > 0)
     print("Request timestamps:")
     for ts in request_times:
         print(f"- {ts:.6f}")

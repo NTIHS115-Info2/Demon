@@ -146,10 +146,17 @@ class TavilySearchProvider(SearchProvider):
                 include_images=False,
             )
         except Exception as exc:
-            error_name = exc.__class__.__name__
-            error_text = str(exc)
-            if "UsageLimitExceeded" in error_name or "429" in error_text:
+            status_code = getattr(exc, "status_code", None)
+            response = getattr(exc, "response", None)
+            if status_code is None and response is not None:
+                status_code = getattr(response, "status_code", None)
+            if status_code in (403, 429):
                 self.dispatcher.apply_penalty(self.RATE_LIMIT_PENALTY_SECONDS)
+            else:
+                error_name = exc.__class__.__name__
+                error_text = str(exc)
+                if "UsageLimitExceeded" in error_name or "429" in error_text:
+                    self.dispatcher.apply_penalty(self.RATE_LIMIT_PENALTY_SECONDS)
             raise
         results = response.get("results", [])
         if not results:
@@ -210,9 +217,15 @@ class SearXNGSearchProvider(SearchProvider):
 class BionicDispatcher:
     """跨進程持久化仿生調度器。"""
 
-    def __init__(self, state_path: Path, cooldown_seconds: float, penalty_seconds: float):
+    def __init__(
+        self,
+        state_path: Path,
+        lock_path: Path,
+        cooldown_seconds: float,
+        penalty_seconds: float,
+    ):
         self.state_path = state_path
-        self.lock_path = state_path.with_name(f"{state_path.name}.lock")
+        self.lock_path = lock_path
         self.cooldown_seconds = cooldown_seconds
         self.penalty_seconds = penalty_seconds
         self._lock = FileLock(str(self.lock_path))
@@ -265,8 +278,10 @@ class SearchAggregator:
         self.settings_source_path = self._resolve_settings_path(settings_path)
         self.settings = self._load_settings()
         cache_root = Path(os.environ.get("NEWS_SCRAPER_CACHE_DIR") or tempfile.gettempdir())
+        project_id = Path(__file__).resolve().parents[2].name
         self.dispatcher = BionicDispatcher(
-            state_path=cache_root / ".bionic_state",
+            state_path=cache_root / f".bionic_state_{project_id}",
+            lock_path=cache_root / f".bionic_lock_{project_id}",
             cooldown_seconds=self.BIONIC_COOLDOWN_SECONDS,
             penalty_seconds=self.RATE_LIMIT_PENALTY_SECONDS,
         )
@@ -400,6 +415,28 @@ class ResearcherInput(BaseModel):
             if normalized in ResearcherInput.DetailLevel._value2member_map_:
                 return ResearcherInput.DetailLevel(normalized)
         return ResearcherInput.DetailLevel.NORMAL
+
+    @field_validator("topic", mode="before")
+    @classmethod
+    def validate_topic(cls, value):
+        if value is None:
+            raise ValueError("Topic cannot be empty")
+        if isinstance(value, str):
+            stripped = value.strip()
+            if not stripped:
+                raise ValueError("Topic cannot be empty")
+            return stripped
+        return value
+
+    @field_validator("query", mode="before")
+    @classmethod
+    def normalize_query(cls, value):
+        if value is None:
+            return ""
+        if isinstance(value, str):
+            stripped = value.strip()
+            return stripped if stripped else ""
+        return value
 
 
 class ResearcherStrategy:
