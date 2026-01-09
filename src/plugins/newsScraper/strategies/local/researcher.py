@@ -466,12 +466,14 @@ CACHE_DIR.mkdir(exist_ok=True)
 
 class ResearcherInput(BaseModel):
     class DetailLevel(str, Enum):
+        CONCISE = "concise"
         QUICK = "quick"
         NORMAL = "normal"
         DEEP_DIVE = "deep_dive"
 
     topic: str = Field(..., max_length=200)
     query: str = Field("", max_length=200)
+    keywords: List[str] = Field(default_factory=list)
     detail_level: DetailLevel = DetailLevel.NORMAL  # normal, deep_dive, quick
 
     @field_validator("detail_level", mode="before")
@@ -483,6 +485,8 @@ class ResearcherInput(BaseModel):
             normalized = value.strip().lower()
             if normalized in ResearcherInput.DetailLevel._value2member_map_:
                 return ResearcherInput.DetailLevel(normalized)
+            if normalized == "concise":
+                return ResearcherInput.DetailLevel.CONCISE
         return ResearcherInput.DetailLevel.NORMAL
 
     @field_validator("topic", mode="before")
@@ -506,6 +510,18 @@ class ResearcherInput(BaseModel):
             stripped = value.strip()
             return stripped if stripped else ""
         return value
+
+    @field_validator("keywords", mode="before")
+    @classmethod
+    def normalize_keywords(cls, value):
+        if value is None:
+            return []
+        if isinstance(value, str):
+            stripped = value.strip()
+            return [stripped] if stripped else []
+        if isinstance(value, list):
+            return [item.strip() for item in value if isinstance(item, str) and item.strip()]
+        return []
 
 
 class ResearcherStrategy:
@@ -742,7 +758,10 @@ def main():
             payload = json.loads(sys.argv[1])
             input_model = ResearcherInput.model_validate(payload)
             detail_level = input_model.detail_level.value
-            if detail_level == ResearcherInput.DetailLevel.QUICK.value:
+            if detail_level in (
+                ResearcherInput.DetailLevel.QUICK.value,
+                ResearcherInput.DetailLevel.CONCISE.value,
+            ):
                 num_results = 3
                 max_iterations = 1
             elif detail_level == ResearcherInput.DetailLevel.DEEP_DIVE.value:
@@ -751,7 +770,8 @@ def main():
             else:
                 num_results = 5
                 max_iterations = 2
-            initial_query = input_model.query or input_model.topic
+            keyword_query = " ".join(input_model.keywords) if input_model.keywords else ""
+            initial_query = keyword_query or input_model.query or input_model.topic
 
             async def async_main():
                 researcher = ResearcherStrategy()
