@@ -346,3 +346,7 @@
 - 新增 4xx、5xx、timeout、parse error 的錯誤分類，統一錯誤物件格式供下游辨識
 ### Fix
 - 強化串流解析錯誤與資料超時的錯誤回報，補齊 log/context 追蹤資訊
+
+# [v.1.5.3]
+### New
+- 新增appChatService，提供外部app對話的功能
