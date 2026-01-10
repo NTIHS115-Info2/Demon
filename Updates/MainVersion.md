@@ -346,3 +346,15 @@
 - 新增 4xx、5xx、timeout、parse error 的錯誤分類，統一錯誤物件格式供下游辨識
 ### Fix
 - 強化串流解析錯誤與資料超時的錯誤回報，補齊 log/context 追蹤資訊
+
+# [v.1.5.3]
+### New
+- 新增appChatService，提供外部app對話的功能
+
+# [v.1.5.3.1]
+### Fix
+- 在 TalkToDemonManager 中加入保底 error listener（prependListener），避免無監聽時的致命崩潰，並保留 log/事件以便追蹤。
+
+# [v.1.5.3.2]
+### Delete
+- 刪除appChatService的測試腳本，因為其是屬於local strategy+ngrok的，但是現在的架構已經改為Express+http server了，測試腳本已經不適用了
