@@ -1,8 +1,9 @@
+# 【Demon Scraper: Final Production Matrix】
 use_default_settings: true
 
 server:
-  secret_key: "demon_scraper_fix_403"
-  limiter: false       # 關閉限流器
+  secret_key: "demon_scraper_production_final"
+  limiter: false       # <--- 關鍵：關閉限流，解決 Python 429 錯誤
   image_proxy: false
   bind_address: "0.0.0.0"
   port: 8080
@@ -10,4 +11,84 @@ server:
 search:
   formats:
     - html
-    - json             # 必須顯式開啟 JSON，否則會報 403
+    - json
+  safe_search: 0
+  timeout: 10.0
+
+engines:
+  # --- 主力 ---
+  - name: google
+    engine: google
+    enabled: true
+    shortcut: g
+  - name: bing
+    engine: bing
+    enabled: true
+    shortcut: b
+  - name: duckduckgo
+    engine: duckduckgo
+    enabled: true
+    shortcut: ddg
+
+  # --- 備援 (抗封鎖) ---
+  - name: brave
+    engine: brave
+    enabled: true
+    shortcut: br
+  - name: qwant
+    engine: qwant
+    enabled: true
+    shortcut: qw
+  - name: mojeek
+    engine: mojeek
+    enabled: true
+    shortcut: mj
+  - name: startpage
+    engine: startpage
+    enabled: true
+    shortcut: sp
+  - name: yahoo
+    engine: yahoo
+    enabled: true
+    shortcut: y
+
+  # --- 知識庫 ---
+  - name: wikipedia
+    engine: wikipedia
+    enabled: true
+    shortcut: wp
+  - name: wikidata
+    engine: wikidata
+    enabled: true
+    shortcut: wd
+  - name: arxiv
+    engine: arxiv
+    enabled: true
+    shortcut: ar
+  - name: google scholar
+    engine: google_scholar
+    enabled: true
+    shortcut: gs
+  - name: pubmed
+    engine: pubmed
+    enabled: true
+    shortcut: pm
+
+  # --- 社群與技術 ---
+  - name: reddit
+    engine: reddit
+    enabled: true
+    shortcut: rdt
+  - name: github
+    engine: github
+    enabled: true
+    shortcut: gh
+  - name: pypi
+    engine: pypi
+    enabled: true
+    shortcut: py
+
+  # --- 排除名單 ---
+  - name: currency
+    enabled: false
+  # 注意：這裡絕對沒有 wolframalpha 或 twitter

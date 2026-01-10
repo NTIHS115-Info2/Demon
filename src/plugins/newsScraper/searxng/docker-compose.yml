@@ -1,23 +1,30 @@
+# src/plugins/newsScraper/searxng/docker-compose.yml
 version: "3.9"
 
 services:
   searxng:
-    image: searxng/searxng:latest
+    # 改為本地構建 (Build from local Dockerfile)
+    build: .
+    
+    # 依然給它一個名字，方便識別
+    image: news-scraper/searxng-custom:latest
+    
     ports:
       - "8080:8080"
+    
+    # 【關鍵修改】移除 settings.yml 的掛載
+    # 因為設定檔已經燒錄在 Image 裡了，不需要再掛載
     volumes:
-      # 確保冒號左邊是本地檔案，右邊是容器內路徑
-      - ./settings.yml:/etc/searxng/settings.yml:ro
+      - searxng-data:/etc/searxng:rw
+      
     environment:
       - BASE_URL=http://localhost:8080/
-    cap_drop:
-      - ALL
-    cap_add:
-      - CHOWN
-      - SETGID
-      - SETUID
+      
     logging:
       driver: "json-file"
       options:
         max-size: "1m"
         max-file: "1"
+
+volumes:
+  searxng-data:
