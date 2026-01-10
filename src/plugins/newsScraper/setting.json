@@ -5,12 +5,10 @@
   "search_priority": [
     "tavily",
     "google",
-    "bing",
     "searxng"
   ],
   "google_api_key": "",
   "google_cse_id": "",
   "tavily_api_key": "",
-  "bing_api_key": "",
   "searxng_base_url": ""
 }

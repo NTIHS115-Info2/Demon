@@ -4,7 +4,8 @@
   "input": {
     "topic": "String – 需要進行廣泛搜尋的研究主題，例如 'NVIDIA Blackwell architecture'。",
     "query": "String – 需要從搜尋結果中回答的具體問題，例如 'What are the performance improvements of Blackwell over Hopper?'。",
-    "article_count": "Integer, optional. Default = 3. – 搜尋結果的深度（要分析幾個來源）。"
+    "keywords": "Array[String] – 可選的關鍵字陣列，若提供會優先用於搜尋。",
+    "detail_level": "Enum('concise','normal','deep_dive') – 搜尋與整理深度，預設為 normal。"
   },
   "output": {
     "success": "Boolean – 操作成功時為 true，失敗時為 false。",

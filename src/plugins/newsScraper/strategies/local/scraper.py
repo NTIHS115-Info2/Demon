@@ -5,6 +5,30 @@ import requests
 from bs4 import BeautifulSoup
 import xml.etree.ElementTree as ET
 import asyncio
+from pydantic import BaseModel, ValidationError, field_validator, ConfigDict
+
+
+class ScraperInput(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    url: str
+    article_count: int = 3
+
+    @field_validator("url", mode="before")
+    @classmethod
+    def validate_url(cls, value):
+        if value is None:
+            raise ValueError("URL cannot be empty")
+        if isinstance(value, str):
+            stripped = value.strip()
+            if not stripped:
+                raise ValueError("URL cannot be empty")
+            return stripped
+        return value
+
+    @field_validator("article_count", mode="before")
+    @classmethod
+    def sanitize_article_count(cls, value):
+        return _sanitize_article_limit(value, fallback=3)
 
 class ForagerStrategy:
     """
@@ -82,16 +106,26 @@ def _sanitize_article_limit(raw_limit, fallback=3):
 
 
 async def main():
-    if len(sys.argv) > 1:
-        url = sys.argv[1]
-        article_limit = _sanitize_article_limit(sys.argv[2]) if len(sys.argv) > 2 else 3
-        forager = ForagerStrategy()
-        result = await forager.fetch_news(rss_url=url, article_limit=article_limit)
-        # 強制以 UTF-8 編碼輸出 JSON，確保 Node.js 能正確解析
-        sys.stdout.buffer.write(json.dumps(result, ensure_ascii=False).encode('utf-8'))
+    if len(sys.argv) == 2:
+        try:
+            payload = json.loads(sys.argv[1])
+            input_model = ScraperInput.model_validate(payload)
+            forager = ForagerStrategy()
+            result = await forager.fetch_news(
+                rss_url=input_model.url,
+                article_limit=input_model.article_count,
+            )
+            # 強制以 UTF-8 編碼輸出 JSON，確保 Node.js 能正確解析
+            sys.stdout.buffer.write(json.dumps(result, ensure_ascii=False).encode("utf-8"))
+        except (json.JSONDecodeError, ValidationError) as exc:
+            error_result = {"success": False, "error": f"Invalid input: {exc}"}
+            sys.stdout.buffer.write(json.dumps(error_result, ensure_ascii=False).encode("utf-8"))
+        except Exception as exc:
+            error_result = {"success": False, "error": f"ForagerStrategy failed: {exc}"}
+            sys.stdout.buffer.write(json.dumps(error_result, ensure_ascii=False).encode("utf-8"))
     else:
-        error_result = {"success": False, "error": "No URL provided to scraper.py"}
-        sys.stdout.buffer.write(json.dumps(error_result, ensure_ascii=False).encode('utf-8'))
+        error_result = {"success": False, "error": "No JSON payload provided to scraper.py"}
+        sys.stdout.buffer.write(json.dumps(error_result, ensure_ascii=False).encode("utf-8"))
 
 if __name__ == '__main__':
     asyncio.run(main())
