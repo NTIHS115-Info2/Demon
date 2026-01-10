@@ -165,6 +165,15 @@ class TalkToDemonManager extends EventEmitter {
     
     // ★ 已移除 _currentResponseId、_conversationMode、_pendingToolResults
     // （改回 chat/completions，使用 history replay）
+
+    
+    // 保底 error handler，避免無 listener 時炸掉 process
+    this.prependListener('error', (err) => {
+      if (this.listenerCount('error') === 1) {
+        this.logger.error('[Unhandled Talker Error]', err);
+        this.emit('unhandled_error', err);
+      }
+    });
   }
 
   /*─── 工具函式 ──────────────────────────────────────────*/

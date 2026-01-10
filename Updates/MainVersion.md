@@ -350,3 +350,7 @@
 # [v.1.5.3]
 ### New
 - 新增appChatService，提供外部app對話的功能
+
+# [v.1.5.3.1]
+### Fix
+- 在 TalkToDemonManager 中加入保底 error listener（prependListener），避免無監聽時的致命崩潰，並保留 log/事件以便追蹤。
