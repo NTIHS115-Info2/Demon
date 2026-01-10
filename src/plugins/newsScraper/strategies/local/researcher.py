@@ -89,48 +89,6 @@ class GoogleSearchProvider(SearchProvider):
             raise requests.HTTPError(f"Google Search API 錯誤: {exc} | 內容: {content}")
 
 
-class BingSearchProvider(SearchProvider):
-    api_url = "https://api.bing.microsoft.com/v7.0/search"
-
-    def search(self, query: str, num_results: int) -> List[SearchItem]:
-        api_key = self.settings.get("bing_api_key", "")
-        if not api_key:
-            raise ValueError("Bing API 金鑰未設定。")
-
-        headers = {
-            "Ocp-Apim-Subscription-Key": api_key,
-            "User-Agent": self.user_agent.random,
-        }
-        params = {"q": f"{query} news", "count": max(1, min(num_results, 50))}
-        response = requests.get(self.api_url, headers=headers, params=params, timeout=15)
-        self._raise_for_status(response)
-        data = response.json()
-        web_pages = data.get("webPages", {}).get("value", [])
-        if not web_pages:
-            logger.warning("Bing Search 沒有返回任何結果。")
-        results: List[SearchItem] = []
-        for item in web_pages[:num_results]:
-            url = item.get("url")
-            if not url:
-                continue
-            title = item.get("name", "")
-            snippet = item.get("snippet") or item.get("description") or ""
-            try:
-                results.append(SearchItem(url=url, title=title, snippet=snippet))
-            except ValueError as exc:
-                logger.debug("跳過無效 URL: {}", exc)
-        return results
-
-    def _raise_for_status(self, response: requests.Response) -> None:
-        try:
-            response.raise_for_status()
-        except requests.HTTPError as exc:  # pragma: no cover - 直接拋出詳細錯誤
-            if response.status_code in (403, 429):
-                self.dispatcher.apply_penalty(self.RATE_LIMIT_PENALTY_SECONDS)
-            content = exc.response.text if exc.response else ""
-            raise requests.HTTPError(f"Bing Search API 錯誤: {exc} | 內容: {content}")
-
-
 class TavilySearchProvider(SearchProvider):
     def search(self, query: str, num_results: int) -> List[SearchItem]:
         api_key = self.settings.get("tavily_api_key", "")
@@ -313,7 +271,7 @@ class BionicDispatcher:
 class SearchAggregator:
     """根據設定檔依序嘗試多個搜尋來源。"""
 
-    DEFAULT_SEARCH_PRIORITY = ["tavily", "google", "bing", "searxng"]
+    DEFAULT_SEARCH_PRIORITY = ["tavily", "google", "searxng"]
     REQUEST_JITTER_MIN_SECONDS = 1.0
     REQUEST_JITTER_MAX_SECONDS = 3.0
     FAILURE_COOLDOWN_SECONDS = 2.0
@@ -339,7 +297,6 @@ class SearchAggregator:
         self.providers = {
             "tavily": TavilySearchProvider,
             "google": GoogleSearchProvider,
-            "bing": BingSearchProvider,
             "searxng": SearXNGSearchProvider,
         }
 
@@ -358,7 +315,6 @@ class SearchAggregator:
             settings = json.load(file)
         defaults = {
             "tavily_api_key": "",
-            "bing_api_key": "",
             "searxng_base_url": "http://localhost:8080",
             "searxng_cooldown_seconds": self.SEARXNG_COOLDOWN_SECONDS,
             "search_priority": list(self.DEFAULT_SEARCH_PRIORITY),
@@ -412,8 +368,6 @@ class SearchAggregator:
             return bool(self.settings.get("google_api_key")) and bool(
                 self.settings.get("google_cse_id")
             )
-        if source == "bing":
-            return bool(self.settings.get("bing_api_key"))
         if source == "tavily":
             return bool(self.settings.get("tavily_api_key"))
         if source == "searxng":

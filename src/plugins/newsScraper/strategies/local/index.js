@@ -131,10 +131,7 @@ module.exports = {
             mapping.topK
         );
         const device = typeof payload.device === 'string' && payload.device.trim() ? payload.device.trim() : 'cpu';
-        const keywordQuery = keywordList.join(' ');
-        const effectiveQuery = keywordQuery || rawQuery;
-
-        if (!rawUrl || !effectiveQuery) {
+        if (!rawUrl || !rawQuery) {
             return { success: false, error: "Missing 'url' or 'query' in payload." };
         }
 
@@ -155,7 +152,7 @@ module.exports = {
 
             return await _runPythonScript('librarian.py', {
                 text_content: articleText,
-                query: effectiveQuery,
+                query: rawQuery,
                 top_k: topK,
                 device,
                 detail_level: normalizedDetailLevel,
