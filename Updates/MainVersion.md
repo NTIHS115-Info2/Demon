@@ -358,3 +358,8 @@
 # [v.1.5.3.2]
 ### Delete
 - 刪除appChatService的測試腳本，因為其是屬於local strategy+ngrok的，但是現在的架構已經改為Express+http server了，測試腳本已經不適用了
+# [v.1.5.3.3]
+### Change
+- 將 tts 插件更名為 ttsEngine，並同步更新 plugins 目錄與 setting.json 註冊名稱
+- ttsEngine 職責調整為僅語音合成與音訊輸出，移除播放與存檔行為
+- 同步更新 ttsEngine 相關引用點與策略日誌、子網域設定
