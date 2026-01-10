@@ -161,6 +161,8 @@ class SearXNGSearchProvider(SearchProvider):
             logger.warning("SearXNG 回應包含限流或封鎖訊號，已觸發冷卻。")
         results = data.get("results", [])
         if results:
+            if response.status_code >= 400:
+                self._apply_rate_limit_penalty(response)
             items: List[SearchItem] = []
             for result in results[:num_results]:
                 url = result.get("url")
@@ -183,12 +185,15 @@ class SearXNGSearchProvider(SearchProvider):
         try:
             response.raise_for_status()
         except requests.HTTPError as exc:  # pragma: no cover - 直接拋出詳細錯誤
-            if response.status_code in (403, 429):
-                retry_after = self._parse_retry_after(response)
-                penalty = max(self.RATE_LIMIT_PENALTY_SECONDS, retry_after or 0.0)
-                self.dispatcher.apply_penalty(penalty)
+            self._apply_rate_limit_penalty(response)
             content = exc.response.text if exc.response else ""
             raise requests.HTTPError(f"SearXNG Search 錯誤: {exc} | 內容: {content}")
+
+    def _apply_rate_limit_penalty(self, response: requests.Response) -> None:
+        if response.status_code in (403, 429):
+            retry_after = self._parse_retry_after(response)
+            penalty = max(self.RATE_LIMIT_PENALTY_SECONDS, retry_after or 0.0)
+            self.dispatcher.apply_penalty(penalty)
 
     def _parse_retry_after(self, response: requests.Response) -> Optional[float]:
         retry_after = response.headers.get("Retry-After")
