@@ -145,41 +145,55 @@ class SearXNGSearchProvider(SearchProvider):
         try:
             headers = {"User-Agent": self.user_agent.random}
             response = requests.get(search_url, params=params, headers=headers, timeout=15)
-            self._raise_for_status(response)
         except requests.ConnectionError as exc:
             logger.warning("SearXNG 連線失敗，請確認 Docker 是否啟動: {}", exc)
             return []
-        data = response.json()
-        if self._has_rate_limit_signal(data):
+        try:
+            data = response.json()
+        except ValueError as exc:
+            logger.warning("SearXNG 回應非 JSON 格式，無法解析: {}", exc)
+            if response.status_code >= 400:
+                self._raise_for_status(response)
+            return []
+        has_rate_limit_signal = self._has_rate_limit_signal(data)
+        if has_rate_limit_signal:
             self.dispatcher.apply_penalty(self.RATE_LIMIT_PENALTY_SECONDS)
             logger.warning("SearXNG 回應包含限流或封鎖訊號，已觸發冷卻。")
-            return []
         results = data.get("results", [])
+        if results:
+            if response.status_code >= 400:
+                self._apply_rate_limit_penalty(response)
+            items: List[SearchItem] = []
+            for result in results[:num_results]:
+                url = result.get("url")
+                if not url:
+                    continue
+                title = result.get("title", "")
+                snippet = result.get("content") or result.get("snippet") or ""
+                try:
+                    items.append(SearchItem(url=url, title=title, snippet=snippet))
+                except ValueError as exc:
+                    logger.debug("跳過無效 URL: {}", exc)
+            return items
+        if response.status_code >= 400:
+            self._raise_for_status(response)
         if not results:
             logger.warning("SearXNG Search 沒有返回任何結果。")
-        items: List[SearchItem] = []
-        for result in results[:num_results]:
-            url = result.get("url")
-            if not url:
-                continue
-            title = result.get("title", "")
-            snippet = result.get("content") or result.get("snippet") or ""
-            try:
-                items.append(SearchItem(url=url, title=title, snippet=snippet))
-            except ValueError as exc:
-                logger.debug("跳過無效 URL: {}", exc)
-        return items
+        return []
 
     def _raise_for_status(self, response: requests.Response) -> None:
         try:
             response.raise_for_status()
         except requests.HTTPError as exc:  # pragma: no cover - 直接拋出詳細錯誤
-            if response.status_code in (403, 429):
-                retry_after = self._parse_retry_after(response)
-                penalty = max(self.RATE_LIMIT_PENALTY_SECONDS, retry_after or 0.0)
-                self.dispatcher.apply_penalty(penalty)
+            self._apply_rate_limit_penalty(response)
             content = exc.response.text if exc.response else ""
             raise requests.HTTPError(f"SearXNG Search 錯誤: {exc} | 內容: {content}")
+
+    def _apply_rate_limit_penalty(self, response: requests.Response) -> None:
+        if response.status_code in (403, 429):
+            retry_after = self._parse_retry_after(response)
+            penalty = max(self.RATE_LIMIT_PENALTY_SECONDS, retry_after or 0.0)
+            self.dispatcher.apply_penalty(penalty)
 
     def _parse_retry_after(self, response: requests.Response) -> Optional[float]:
         retry_after = response.headers.get("Retry-After")
