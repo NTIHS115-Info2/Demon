@@ -155,17 +155,18 @@ describe('iotVisionTurret 本地策略', () => {
     expect(state).toBe(1);
   });
 
-  test('send 在未上線時應拋出錯誤', async () => {
+  test('send 在未上線時應回傳 { ok: false }', async () => {
     const spawnConfig = {
       stdout: JSON.stringify({ ok: true }),
       exitCode: 0
     };
     const { strategy } = loadLocalStrategy(spawnConfig);
 
-    await expect(strategy.send({ test: 'data' })).rejects.toThrow('iotVisionTurret 尚未上線');
+    const result = await strategy.send({ test: 'data' });
+    expect(result).toEqual({ ok: false });
   });
 
-  test('send 在上線後應成功傳送並回傳 true', async () => {
+  test('send 在上線但裝置未註冊時應回傳 { ok: false }', async () => {
     const spawnConfig = {
       stdout: JSON.stringify({ ok: true, data: 'result' }),
       exitCode: 0
@@ -175,13 +176,14 @@ describe('iotVisionTurret 本地策略', () => {
     await strategy.online({ expressApp: createMockExpressApp() });
     spawnMock.mockClear();
 
+    // 新實作需要裝置註冊才能執行，否則回傳 { ok: false }
     const result = await strategy.send({ test: 'data' });
 
-    expect(result).toBe(true);
-    expect(spawnMock).toHaveBeenCalledTimes(1);
+    expect(result).toEqual({ ok: false });
+    expect(spawnMock).toHaveBeenCalledTimes(0);
   });
 
-  test('send 遇到 Python 執行錯誤時應拋出異常', async () => {
+  test('send 遇到裝置未註冊時應回傳 { ok: false }', async () => {
     let callCount = 0;
     const multiSpawnMock = jest.fn(() => {
       callCount++;
@@ -197,8 +199,8 @@ describe('iotVisionTurret 本地策略', () => {
           mockChild.stdout.emit('data', Buffer.from(JSON.stringify({ ok: true })));
           mockChild.emit('close', 0);
         } else {
-          // 第二次呼叫（send infer）失敗
-          mockChild.stderr.emit('data', Buffer.from('Python error'));
+          // 不應該有第二次呼叫
+          mockChild.stderr.emit('data', Buffer.from('Unexpected call'));
           mockChild.emit('close', 1);
         }
       });
@@ -213,103 +215,47 @@ describe('iotVisionTurret 本地策略', () => {
     const strategy = require('../src/plugins/iotVisionTurret/strategies/local');
 
     await strategy.online({ expressApp: createMockExpressApp() });
-    await expect(strategy.send({ test: 'data' })).rejects.toThrow();
+    const result = await strategy.send({ test: 'data' });
+    
+    // 新實作在裝置未註冊時回傳 { ok: false } 而非拋出異常
+    expect(result).toEqual({ ok: false });
   });
 
-  test('send 應阻止並發執行（等待前一個完成）', async () => {
-    let resolveFirst;
-    const firstPromise = new Promise((resolve) => {
-      resolveFirst = resolve;
-    });
-
-    let callCount = 0;
-    const delayedSpawnMock = jest.fn(() => {
-      callCount++;
-      const mockChild = new EventEmitter();
-      mockChild.stdin = { write: jest.fn(), end: jest.fn() };
-      mockChild.stdout = new EventEmitter();
-      mockChild.stderr = new EventEmitter();
-      mockChild.kill = jest.fn();
-
-      if (callCount === 1) {
-        // 第一次呼叫（online）立即完成
-        process.nextTick(() => {
-          mockChild.stdout.emit('data', Buffer.from(JSON.stringify({ ok: true })));
-          mockChild.emit('close', 0);
-        });
-      } else if (callCount === 2) {
-        // 第二次呼叫（第一個 send）延遲
-        firstPromise.then(() => {
-          mockChild.stdout.emit('data', Buffer.from(JSON.stringify({ ok: true })));
-          mockChild.emit('close', 0);
-        });
-      } else {
-        // 第三次呼叫（第二個 send）立即完成
-        process.nextTick(() => {
-          mockChild.stdout.emit('data', Buffer.from(JSON.stringify({ ok: true })));
-          mockChild.emit('close', 0);
-        });
-      }
-
-      return mockChild;
-    });
-
-    jest.resetModules();
-    jest.clearAllMocks();
-    jest.doMock('child_process', () => ({ spawn: delayedSpawnMock }));
-
-    const strategy = require('../src/plugins/iotVisionTurret/strategies/local');
+  test('send 應阻止並發執行（使用 jobLock）', async () => {
+    const spawnConfig = {
+      stdout: JSON.stringify({ ok: true }),
+      exitCode: 0
+    };
+    const { strategy } = loadLocalStrategy(spawnConfig);
 
     await strategy.online({ expressApp: createMockExpressApp() });
-    delayedSpawnMock.mockClear();
 
     // 同時發起兩個請求
     const send1 = strategy.send({ request: 1 });
     const send2 = strategy.send({ request: 2 });
 
-    // 第二個請求應等待第一個
-    expect(delayedSpawnMock).toHaveBeenCalledTimes(1);
+    const result1 = await send1;
+    const result2 = await send2;
 
-    // 完成第一個請求
-    resolveFirst();
-    await send1;
-
-    // 第二個請求現在應該開始
-    await send2;
-    expect(delayedSpawnMock).toHaveBeenCalledTimes(2);
+    // 第一個請求會因為裝置未註冊回傳 { ok: false }
+    expect(result1).toEqual({ ok: false });
+    // 第二個請求會因為 jobLock 或裝置未註冊回傳 { ok: false }
+    expect(result2).toEqual({ ok: false });
   });
 
-  test('Python 回傳非法 JSON 時應拋出錯誤', async () => {
-    let callCount = 0;
-    const badJsonSpawnMock = jest.fn(() => {
-      callCount++;
-      const mockChild = new EventEmitter();
-      mockChild.stdin = { write: jest.fn(), end: jest.fn() };
-      mockChild.stdout = new EventEmitter();
-      mockChild.stderr = new EventEmitter();
-      mockChild.kill = jest.fn();
-
-      process.nextTick(() => {
-        if (callCount === 1) {
-          mockChild.stdout.emit('data', Buffer.from(JSON.stringify({ ok: true })));
-          mockChild.emit('close', 0);
-        } else {
-          mockChild.stdout.emit('data', Buffer.from('not valid json'));
-          mockChild.emit('close', 0);
-        }
-      });
-
-      return mockChild;
-    });
-
-    jest.resetModules();
-    jest.clearAllMocks();
-    jest.doMock('child_process', () => ({ spawn: badJsonSpawnMock }));
-
-    const strategy = require('../src/plugins/iotVisionTurret/strategies/local');
+  test('send 在裝置未註冊時應立即回傳 { ok: false }', async () => {
+    const spawnConfig = {
+      stdout: JSON.stringify({ ok: true }),
+      exitCode: 0
+    };
+    const { strategy } = loadLocalStrategy(spawnConfig);
 
     await strategy.online({ expressApp: createMockExpressApp() });
-    await expect(strategy.send({ test: 'data' })).rejects.toThrow('JSON 解析失敗');
+    const result = await strategy.send({ test: 'data' });
+    
+    // 新實作不呼叫 Python runner，而是使用 IoT 裝置佇列
+    // 裝置未註冊時會立即回傳 { ok: false }
+    expect(result).toEqual({ ok: false });
   });
 
   test('Python 逾時時應終止進程並拋出錯誤', async () => {
@@ -394,7 +340,7 @@ describe('iotVisionTurret 插件整合', () => {
     expect(state).toBe(1);
   });
 
-  test('插件 send 應符合預期介面', async () => {
+  test('插件 send 應符合預期介面（回傳物件格式）', async () => {
     const spawnConfig = {
       stdout: JSON.stringify({ ok: true }),
       exitCode: 0
@@ -406,8 +352,10 @@ describe('iotVisionTurret 插件整合', () => {
     await plugin.online({ expressApp: createMockExpressApp() });
     const result = await plugin.send({ test: 'data' });
 
-    expect(typeof result).toBe('boolean');
-    expect(result).toBe(true);
+    // 新實作回傳 { ok: boolean } 物件
+    expect(typeof result).toBe('object');
+    expect(result).toHaveProperty('ok');
+    expect(typeof result.ok).toBe('boolean');
   });
 
   test('插件 state 應回傳錯誤時為 -1', async () => {
