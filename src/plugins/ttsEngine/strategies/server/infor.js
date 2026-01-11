@@ -1,5 +1,5 @@
 module.exports = {
-  subdomain: 'tts',
+  subdomain: 'ttsEngine',
   routes: {
     send: 'send',
     state: 'state'
