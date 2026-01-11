@@ -12,6 +12,26 @@ const logger = new Logger('iotVisionTurret');
 // 併發控制：保存正在執行的 Promise 與佇列
 let activeRequest = null;
 
+// 狀態資料結構區塊：保存服務狀態、設定與最近執行結果
+const state = {
+  online: false,
+  lastError: null,
+  lastResult: null,
+  config: {
+    pythonPath: 'python3',
+    runnerPath: path.join(__dirname, 'index.py'),
+    timeoutMs: 15000,
+    yoloWeightsPath: process.env.YOLO_WEIGHTS_PATH || '',
+    yoloTarget: process.env.YOLO_TARGET || '',
+    yoloConf: Number.isFinite(Number(process.env.YOLO_CONF)) ? Number(process.env.YOLO_CONF) : 0.25,
+    yoloInferTimeoutMs: 12000 // Default YOLO inference timeout, can be overridden by buildConfig
+  },
+  metrics: {
+    lastRunAt: null,
+    totalRuns: 0
+  }
+};
+
 // ───────────────────────────────────────────────
 // IoT 裝置通訊狀態（模組層級，禁止放在 request scope）
 // ───────────────────────────────────────────────
@@ -74,26 +94,6 @@ const PITCH_MAX_STEP = 25;
 const LOCKED_CONVERGENCE_THRESHOLD = 20;
 // YOLO 推理逾時（ms），避免單次推理卡死影響整體流程
 const YOLO_INFER_TIMEOUT_MS = 12000;
-
-// 狀態資料結構區塊：保存服務狀態、設定與最近執行結果
-const state = {
-  online: false,
-  lastError: null,
-  lastResult: null,
-  config: {
-    pythonPath: 'python3',
-    runnerPath: path.join(__dirname, 'index.py'),
-    timeoutMs: 15000,
-    yoloWeightsPath: process.env.YOLO_WEIGHTS_PATH || '',
-    yoloTarget: process.env.YOLO_TARGET || '',
-    yoloConf: Number.isFinite(Number(process.env.YOLO_CONF)) ? Number(process.env.YOLO_CONF) : 0.25,
-    yoloInferTimeoutMs: YOLO_INFER_TIMEOUT_MS
-  },
-  metrics: {
-    lastRunAt: null,
-    totalRuns: 0
-  }
-};
 
 // ───────────────────────────────────────────────
 // iotVisionTurret 掃描/追蹤共用工具函式
@@ -187,11 +187,11 @@ async function executeRequest(data) {
  */
 function buildConfig(options = {}) {
   return {
-    pythonPath: options.pythonPath || state.config.pythonPath,
-    runnerPath: options.runnerPath || state.config.runnerPath,
+    pythonPath: options.pythonPath !== undefined ? options.pythonPath : state.config.pythonPath,
+    runnerPath: options.runnerPath !== undefined ? options.runnerPath : state.config.runnerPath,
     timeoutMs: Number.isFinite(options.timeoutMs) ? options.timeoutMs : state.config.timeoutMs,
-    yoloWeightsPath: options.yoloWeightsPath || state.config.yoloWeightsPath,
-    yoloTarget: options.yoloTarget || state.config.yoloTarget,
+    yoloWeightsPath: options.yoloWeightsPath !== undefined ? options.yoloWeightsPath : state.config.yoloWeightsPath,
+    yoloTarget: options.yoloTarget !== undefined ? options.yoloTarget : state.config.yoloTarget,
     yoloConf: Number.isFinite(options.yoloConf) ? options.yoloConf : state.config.yoloConf,
     yoloInferTimeoutMs: Number.isFinite(options.yoloInferTimeoutMs)
       ? options.yoloInferTimeoutMs
@@ -608,18 +608,42 @@ function runPython(payload, config) {
 /**
  * 以子進程呼叫 YOLO 推理並回傳結果
  * @param {string} imagePath - 影像路徑
+ * @param {number} maxTimeoutMs - 最大超時時間（毫秒），用於遵守全域任務期限
  * @returns {Promise<Object>} 成功回傳 { ok:true, payload }，失敗回傳 { ok:false }
  */
-async function runYoloInfer(imagePath) {
+async function runYoloInfer(imagePath, maxTimeoutMs) {
   // ───────────────────────────────────────────────
   // 段落用途：組裝推理所需設定與輸入摘要（避免重複寫死在多處）
   // ───────────────────────────────────────────────
   const weightsPath = state.config.yoloWeightsPath;
   const target = state.config.yoloTarget;
   const conf = state.config.yoloConf;
-  const timeoutMs = Number.isFinite(state.config.yoloInferTimeoutMs)
+  const configuredTimeoutMs = Number.isFinite(state.config.yoloInferTimeoutMs)
     ? state.config.yoloInferTimeoutMs
     : YOLO_INFER_TIMEOUT_MS;
+  const timeoutMs = Number.isFinite(maxTimeoutMs)
+    ? Math.max(0, Math.min(configuredTimeoutMs, maxTimeoutMs))
+    : configuredTimeoutMs;
+
+  // 基本設定檢查：避免將空的權重路徑或目標傳給 Python runner，造成不明錯誤
+  if (!weightsPath || !target) {
+    const errorMessage = 'YOLO 推理設定缺失：yoloWeightsPath 或 yoloTarget 未設定或為空字串';
+    logger.error(errorMessage, {
+      imagePath,
+      yoloWeightsPath: weightsPath,
+      yoloTarget: target
+    });
+    return {
+      ok: false,
+      error: errorMessage,
+      detail: {
+        imagePath,
+        yoloWeightsPath: weightsPath,
+        yoloTarget: target
+      }
+    };
+  }
+
   const inputSummary = {
     imagePath,
     weightsPath,
@@ -704,7 +728,9 @@ async function runYoloInfer(imagePath) {
         const trimmed = stdout.trim();
         const parsed = trimmed ? JSON.parse(trimmed) : {};
         const errorCode = parsed?.error_code;
-        const isExplicitFailure = parsed?.ok === false || (errorCode !== undefined && errorCode !== null && errorCode !== '');
+        const isExplicitFailure =
+          parsed?.ok === false ||
+          (typeof errorCode === 'string' && errorCode.length > 0);
         if (isExplicitFailure) {
           // ───────────────────────────────────────────────
           // 段落用途：Python 明確回傳失敗，統一映射為 { ok:false }
@@ -739,11 +765,13 @@ async function runYoloInfer(imagePath) {
     // ───────────────────────────────────────────────
     try {
       const payload = {
-        op: 'infer',
-        image_path: imagePath,
-        weights_path: weightsPath,
-        target,
-        conf
+        action: 'infer',
+        payload: {
+          image_path: imagePath,
+          weights_path: weightsPath,
+          target,
+          conf
+        }
       };
       child.stdin.write(JSON.stringify(payload));
       child.stdin.end();
@@ -936,7 +964,7 @@ module.exports = {
           // ───────────────────────────────────────────────
           // 段落用途：呼叫 runYoloInfer（由內部處理逾時與錯誤）
           // ───────────────────────────────────────────────
-          const inferResult = await runYoloInfer(imagePath);
+          const inferResult = await runYoloInfer(imagePath, remainingForInfer);
           if (!inferResult || inferResult.ok !== true) {
             logger.error('[iotVisionTurret] YOLO 推理失敗（掃描）：runYoloInfer 回傳 ok=false');
             return { ok: false };
@@ -1084,7 +1112,7 @@ module.exports = {
         // ───────────────────────────────────────────────
         // 段落用途：呼叫 runYoloInfer（追蹤階段）
         // ───────────────────────────────────────────────
-        const trackInferResult = await runYoloInfer(trackImagePath);
+        const trackInferResult = await runYoloInfer(trackImagePath, remainingForTrackInfer);
         if (!trackInferResult || trackInferResult.ok !== true) {
           logger.error('[iotVisionTurret] YOLO 推理失敗（追蹤）：runYoloInfer 回傳 ok=false');
           return { ok: false };
