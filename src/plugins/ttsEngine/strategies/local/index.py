@@ -68,7 +68,7 @@ vocoder = load_vocoder(vocoder_name=vocoder_name, is_local=load_vocoder_from_loc
 
 # 讀取模型設定並載入 TTS 模型
 model_cfg = OmegaConf.load(config.get('model_cfg', os.path.join(os.path.dirname(__file__), 'f5_tts', 'configs', 'F5TTS_v1_Base.yaml'))).model
-from f5_tts.model import DiT, UNetT
+from f5_tts.model import DiT, UNetT  # noqa: F401 - Used dynamically via globals()
 model_cls = globals()[model_cfg.backbone]
 ema_model = load_model(model_cls, model_cfg.arch, ckpt_file, mel_spec_type=vocoder_name, vocab_file=vocab_file)
 
@@ -215,16 +215,21 @@ def stdin_listener():
         text = line.strip()
         if not text:
             continue
+        request_id = None
         try:
             payload = json.loads(text)
             request_id = payload.get("id")
             input_text = payload.get("text")
             if not request_id or not input_text:
                 logger.error("輸入 JSON 缺少 id 或 text")
+                if request_id:
+                    output_queue.put({"id": request_id, "error": "Missing required field: text"})
                 continue
             input_queue.put({"id": request_id, "text": input_text})
         except Exception as exc:
             logger.exception(f"解析 stdin 失敗: {exc}")
+            if request_id:
+                output_queue.put({"id": request_id, "error": f"JSON parsing error: {str(exc)}"})
 
 
 # 啟動處理執行緒
@@ -247,6 +252,8 @@ logger.info('ttsEngine ready. Waiting for input...')
 try:
     while True:
         time.sleep(1)
+except KeyboardInterrupt:
+    logger.info('ttsEngine 收到中斷訊號，準備關閉')
 except Exception as exc:
     logger.exception(f"主迴圈發生錯誤: {exc}")
 finally:
