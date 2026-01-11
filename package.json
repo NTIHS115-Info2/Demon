@@ -19,8 +19,7 @@
     "node-ical": "^0.22.1",
     "python-shell": "^5.0.0",
     "systeminformation": "^5.27.14",
-    "tar": "^7.4.3"
-    ,
+    "tar": "^7.4.3",
     "ulid": "^2.3.0"
   },
   "optionalDependencies": {
