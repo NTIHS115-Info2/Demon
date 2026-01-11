@@ -66,8 +66,10 @@ const TASK_TIMEOUT_MS = 45000;
 // 單張影像上傳等待逾時（ms）
 const UPLOAD_TIMEOUT_MS = 5000;
 // 掃描 pitch 序列（外圈）
+// 注意：pitch 在本裝置上僅安全支援到約 120 度，因機械結構限制
+// 若未來機構/伺服馬達可支援完整 0–180 度，請一併調整此列表與相關參數
 const SCAN_PITCH_LIST = [0, 30, 60, 90, 120];
-// 掃描 yaw 序列（內圈）
+// 掃描 yaw 序列（內圈，允許完整 0–180 度掃描）
 const SCAN_YAW_LIST = [0, 45, 90, 135, 180];
 // 追蹤最大迭代次數
 const TRACK_MAX_ITERATIONS = 12;
@@ -78,6 +80,8 @@ const YAW_GAIN_DEG = 60;
 const PITCH_GAIN_DEG = 60;
 const YAW_MAX_STEP = 25;
 const PITCH_MAX_STEP = 25;
+// LOCKED 收斂判定閾值（像素）
+const LOCKED_CONVERGENCE_THRESHOLD = 20;
 
 // ───────────────────────────────────────────────
 // iotVisionTurret 掃描/追蹤共用工具函式
@@ -668,6 +672,12 @@ module.exports = {
       }
 
       // ───────────────────────────────────────────────
+      // 段落用途：取得 jobLock，確保單一時刻僅一個任務執行
+      // ───────────────────────────────────────────────
+      jobLock = true;
+      logger.info('[iotVisionTurret] jobLock 已取得，開始執行掃描/追蹤流程');
+
+      // ───────────────────────────────────────────────
       // 段落用途：初始化全域逾時與追蹤變數
       // ───────────────────────────────────────────────
       const deadline = Date.now() + TASK_TIMEOUT_MS;
@@ -723,7 +733,16 @@ module.exports = {
           try {
             imagePath = await waitForImage(imageId, uploadTimeoutMs);
           } catch (err) {
-            logger.warn(`[iotVisionTurret] UPLOAD_TIMEOUT：影像 ${imageId} 等待失敗 (${err.message})`);
+            const isTimeoutError =
+              err &&
+              (err.code === 'ETIMEDOUT' ||
+                err.name === 'TimeoutError' ||
+                err.message?.toLowerCase().includes('timeout'));
+            if (isTimeoutError) {
+              logger.warn(`[iotVisionTurret] UPLOAD_TIMEOUT：影像 ${imageId} 等待逾時 (${err.message})`);
+            } else {
+              logger.warn(`[iotVisionTurret] UPLOAD_FAILED：影像 ${imageId} 等待失敗 (${err && err.message})`);
+            }
             return { ok: false };
           }
 
@@ -778,7 +797,7 @@ module.exports = {
       // 段落用途：粗追蹤流程（最多 12 次）
       // ───────────────────────────────────────────────
       let lockStreak = 0;
-      for (let iteration = 0; iteration < TRACK_MAX_ITERATIONS; iteration += 1) {
+      for (let iteration = 0; iteration < TRACK_MAX_ITERATIONS; iteration++) {
         // ───────────────────────────────────────────────
         // 段落用途：檢查全域逾時（追蹤階段）
         // ───────────────────────────────────────────────
@@ -847,7 +866,16 @@ module.exports = {
         try {
           trackImagePath = await waitForImage(trackImageId, trackUploadTimeout);
         } catch (err) {
-          logger.warn(`[iotVisionTurret] UPLOAD_TIMEOUT：追蹤影像 ${trackImageId} 等待失敗 (${err.message})`);
+          const isTimeoutError =
+            err &&
+            (err.code === 'ETIMEDOUT' ||
+              err.name === 'TimeoutError' ||
+              err.message?.toLowerCase().includes('timeout'));
+          if (isTimeoutError) {
+            logger.warn(`[iotVisionTurret] UPLOAD_TIMEOUT：追蹤影像 ${trackImageId} 等待逾時 (${err.message})`);
+          } else {
+            logger.warn(`[iotVisionTurret] UPLOAD_FAILED：追蹤影像 ${trackImageId} 等待失敗 (${err && err.message})`);
+          }
           return { ok: false };
         }
 
@@ -903,7 +931,7 @@ module.exports = {
         const lockEx = lockCx - lockWidth / 2;
         const lockEy = lockCy - lockHeight / 2;
 
-        if (Math.abs(lockEx) < 20 && Math.abs(lockEy) < 20) {
+        if (Math.abs(lockEx) < LOCKED_CONVERGENCE_THRESHOLD && Math.abs(lockEy) < LOCKED_CONVERGENCE_THRESHOLD) {
           lockStreak += 1;
           logger.info(`[iotVisionTurret] LOCKED 判定命中：streak=${lockStreak}`);
         } else {
@@ -913,13 +941,14 @@ module.exports = {
 
         if (lockStreak >= LOCK_STREAK) {
           // ───────────────────────────────────────────────
-          // 段落用途：LOCKED 後送出 IR 指令並立即成功返回
+          // 段落用途：LOCKED 後只負責將 IR 指令排入佇列，並立即返回
+          // 注意：此處回傳 ok=true 代表指令已成功佇列，並不保證實際已在裝置上執行完成
           // ───────────────────────────────────────────────
           enqueueCommand({
             type: 'ir_send',
             profile: 'LIGHT_ON'
           });
-          logger.info('[iotVisionTurret] LOCKED 成功，已送出 IR 指令');
+          logger.info('[iotVisionTurret] LOCKED 成功，IR 指令已排入佇列（不保證已於裝置端執行完成）');
           return { ok: true };
         }
       }
@@ -935,6 +964,14 @@ module.exports = {
       // ───────────────────────────────────────────────
       logger.error(`[iotVisionTurret] send 發生未預期錯誤：${err.message}`);
       return { ok: false };
+    } finally {
+      // ───────────────────────────────────────────────
+      // 段落用途：無論成功或失敗，確保 jobLock 被釋放
+      // ───────────────────────────────────────────────
+      if (jobLock) {
+        jobLock = false;
+        logger.info('[iotVisionTurret] jobLock 已釋放');
+      }
     }
   },
 

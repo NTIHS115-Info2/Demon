@@ -103,7 +103,7 @@ module.exports = {
   /**
    * 傳送資料給插件並取得結果
    * @param {Object} data - 影像或控制指令參數
-   * @returns {Promise<boolean>} 是否成功傳送
+   * @returns {Promise<Object>} 回傳 { ok: true } 或 { ok: false }
    */
   async send(data = {}) {
     if (!strategy) {
