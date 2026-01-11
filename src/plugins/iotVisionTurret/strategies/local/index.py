@@ -3,6 +3,7 @@
 
 import json
 import sys
+import platform
 from typing import Any, Dict
 
 # 狀態資料結構區塊：保存 runner 基本資訊與執行結果
@@ -12,9 +13,26 @@ STATE: Dict[str, Any] = {
 }
 
 
-def read_stdin_json() -> Dict[str, Any]:
-    """讀取 stdin 的 JSON 請求內容。"""
+def read_stdin_json(timeout_seconds: float = 5.0) -> Dict[str, Any]:
+    """讀取 stdin 的 JSON 請求內容，帶有超時保護。"""
     try:
+        # 使用 select 進行超時控制（僅 Unix/Linux 系統支援）
+        # Windows 系統不支援 select 用於 stdin，故直接讀取
+        if platform.system() != 'Windows':
+            try:
+                import select
+                ready, _, _ = select.select([sys.stdin], [], [], timeout_seconds)
+                if not ready:
+                    return {
+                        "_error": {
+                            "message": "stdin 讀取逾時",
+                            "code": "STDIN_TIMEOUT",
+                        }
+                    }
+            except (ImportError, OSError):
+                # select 不可用，直接讀取
+                pass
+        
         raw = sys.stdin.read()
         if not raw:
             return {}
@@ -55,9 +73,10 @@ def main() -> None:
             "error": {
                 "message": f"runner 執行失敗: {exc}",
                 "code": "RUNNER_ERROR",
+                "type": exc.__class__.__name__,
             },
         }
-        sys.stdout.write(json.dumps(error_response, ensure_ascii=False))
+        sys.stderr.write(json.dumps(error_response, ensure_ascii=False))
         sys.exit(1)
 
 
