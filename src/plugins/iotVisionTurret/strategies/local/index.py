@@ -1,83 +1,184 @@
 #!/usr/bin/env python3
-# 檔案用途：提供 iotVisionTurret 本地策略的 Python runner 入口（stub）
+# 檔案用途：提供 iotVisionTurret 本地策略的 Python runner 入口（stdin/stdout JSON 協議）
 
+# ───────────────────────────────────────────────
+# 匯入區塊：集中管理標準函式庫與推論模組
+# ───────────────────────────────────────────────
 import json
+import os
 import sys
-import platform
-from typing import Any, Dict
+import traceback
+from typing import Any, Dict, Tuple
 
-# 狀態資料結構區塊：保存 runner 基本資訊與執行結果
-STATE: Dict[str, Any] = {
-    "mode": "stub",
-    "version": "0.1",
-}
+from YOLOv11.infer import infer
 
-
-def read_stdin_json(timeout_seconds: float = 5.0) -> Dict[str, Any]:
-    """讀取 stdin 的 JSON 請求內容，帶有超時保護。"""
-    try:
-        # 使用 select 進行超時控制（僅 Unix/Linux 系統支援）
-        # Windows 系統不支援 select 用於 stdin，故直接讀取
-        if platform.system() != 'Windows':
-            try:
-                import select
-                ready, _, _ = select.select([sys.stdin], [], [], timeout_seconds)
-                if not ready:
-                    return {
-                        "_error": {
-                            "message": "stdin 讀取逾時",
-                            "code": "STDIN_TIMEOUT",
-                        }
-                    }
-            except (ImportError, OSError):
-                # select 不可用，直接讀取
-                pass
-        
-        raw = sys.stdin.read()
-        if not raw:
-            return {}
-        return json.loads(raw)
-    except Exception as exc:
-        return {
-            "_error": {
-                "message": f"stdin JSON 解析失敗: {exc}",
-                "code": "STDIN_PARSE_ERROR",
-            }
-        }
+# ───────────────────────────────────────────────
+# 常數區塊：定義錯誤代碼與必要欄位清單
+# ───────────────────────────────────────────────
+REQUIRED_FIELDS = ("image_path", "weights_path", "target", "conf")
 
 
-def build_response(payload: Dict[str, Any]) -> Dict[str, Any]:
-    """組裝 stub 回應內容。"""
-    if "_error" in payload:
-        return {"ok": False, "error": payload["_error"]}
+# ───────────────────────────────────────────────
+# 自訂錯誤類別區塊：統一錯誤格式與代碼
+# ───────────────────────────────────────────────
+class RunnerError(Exception):
+    """Runner 專用錯誤，包含代碼與可讀訊息。"""
 
-    action = payload.get("action", "unknown")
+    def __init__(self, code: str, detail: str) -> None:
+        super().__init__(detail)
+        self.code = code
+        self.detail = detail
+
+
+# ───────────────────────────────────────────────
+# 輔助函式區塊：輸出 stdout JSON（單行且以換行結束）
+# ───────────────────────────────────────────────
+def emit_stdout(payload: Dict[str, Any]) -> None:
+    """輸出單行 JSON 到 stdout。"""
+    sys.stdout.write(f"{json.dumps(payload, ensure_ascii=False)}\n")
+    sys.stdout.flush()
+
+
+# ───────────────────────────────────────────────
+# 輔助函式區塊：輸出 stderr 訊息（允許 debug/traceback）
+# ───────────────────────────────────────────────
+def emit_stderr(message: str) -> None:
+    """輸出訊息到 stderr。"""
+    sys.stderr.write(message)
+    if not message.endswith("\n"):
+        sys.stderr.write("\n")
+    sys.stderr.flush()
+
+
+# ───────────────────────────────────────────────
+# 輔助函式區塊：建立錯誤 JSON 回應
+# ───────────────────────────────────────────────
+def build_error_response(code: str, detail: str) -> Dict[str, Any]:
+    """建立錯誤格式的 JSON 回應。"""
     return {
-        "ok": True,
-        "mode": STATE["mode"],
-        "message": "iotVisionTurret local python runner ready",
-        "action": action,
-        "payload": payload.get("payload"),
+        "ok": False,
+        "error": code,
+        "detail": detail,
     }
 
 
-def main() -> None:
-    """主程式入口，讀取 stdin 並輸出 JSON 回應。"""
+# ───────────────────────────────────────────────
+# 輔助函式區塊：讀取 stdin 並解析 JSON
+# ───────────────────────────────────────────────
+def read_stdin_payload() -> Dict[str, Any]:
+    """讀取 stdin 內容並解析為 JSON 物件。"""
+    raw = sys.stdin.read()
+    if not raw or not raw.strip():
+        raise RunnerError("INVALID_INPUT", "stdin 為空或未提供任何 JSON")
     try:
-        payload = read_stdin_json()
-        response = build_response(payload)
-        sys.stdout.write(json.dumps(response, ensure_ascii=False))
+        payload = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise RunnerError("INVALID_INPUT", f"stdin JSON 解析失敗: {exc}") from exc
+    if not isinstance(payload, dict):
+        raise RunnerError("INVALID_INPUT", "stdin JSON 必須為物件")
+    return payload
+
+
+# ───────────────────────────────────────────────
+# 輔助函式區塊：正規化 stdin 請求格式（支援 op/action 與 payload）
+# ───────────────────────────────────────────────
+def normalize_request(payload: Dict[str, Any]) -> Tuple[str, Dict[str, Any]]:
+    """正規化 op 與參數來源，統一回傳推論必要欄位。"""
+    op = payload.get("op") or payload.get("action")
+    if not op:
+        raise RunnerError("INVALID_INPUT", "缺少 op/action 欄位")
+
+    parameters = payload
+    if isinstance(payload.get("payload"), dict):
+        parameters = payload["payload"]
+
+    if not isinstance(parameters, dict):
+        raise RunnerError("INVALID_INPUT", "payload 欄位必須為 JSON 物件")
+
+    return str(op), parameters
+
+
+# ───────────────────────────────────────────────
+# 輔助函式區塊：驗證推論請求內容
+# ───────────────────────────────────────────────
+def validate_infer_request(parameters: Dict[str, Any]) -> Dict[str, Any]:
+    """驗證推論參數並回傳正規化結果。"""
+    missing = [field for field in REQUIRED_FIELDS if field not in parameters]
+    if missing:
+        raise RunnerError("MISSING_FIELD", f"缺少必填欄位: {', '.join(missing)}")
+
+    image_path = str(parameters.get("image_path", "")).strip()
+    weights_path = str(parameters.get("weights_path", "")).strip()
+    target = str(parameters.get("target", "")).strip()
+    conf_raw = parameters.get("conf")
+
+    if not image_path or not weights_path or not target:
+        raise RunnerError("INVALID_INPUT", "image_path/weights_path/target 不可為空字串")
+
+    try:
+        conf_value = float(conf_raw)
+    except (TypeError, ValueError) as exc:
+        raise RunnerError("INVALID_INPUT", f"conf 不是有效數值: {exc}") from exc
+
+    if conf_value < 0.0 or conf_value > 1.0:
+        raise RunnerError("INVALID_INPUT", "conf 必須介於 0 到 1 之間")
+
+    if not os.path.isfile(image_path):
+        raise RunnerError("FILE_NOT_FOUND", f"找不到影像檔案: {image_path}")
+
+    if not os.path.isfile(weights_path):
+        raise RunnerError("FILE_NOT_FOUND", f"找不到權重檔案: {weights_path}")
+
+    return {
+        "image_path": image_path,
+        "weights_path": weights_path,
+        "target": target,
+        "conf": conf_value,
+    }
+
+
+# ───────────────────────────────────────────────
+# 主流程區塊：解析 stdin、驗證輸入、呼叫推論並輸出結果
+# ───────────────────────────────────────────────
+def main() -> None:
+    """主程式入口。"""
+    response: Dict[str, Any]
+    exit_code = 0
+
+    try:
+        payload = read_stdin_payload()
+        op, parameters = normalize_request(payload)
+        if op != "infer":
+            raise RunnerError("UNSUPPORTED_OP", f"不支援的操作: {op}")
+
+        normalized = validate_infer_request(parameters)
+
+        try:
+            infer_result = infer(
+                image_path=normalized["image_path"],
+                weights_path=normalized["weights_path"],
+                target=normalized["target"],
+                conf=normalized["conf"],
+            )
+        except Exception as exc:
+            raise RunnerError("INFER_FAILED", f"推論執行失敗: {exc}") from exc
+
+        if not isinstance(infer_result, dict) or not infer_result.get("ok"):
+            raise RunnerError("INFER_FAILED", "推論回傳格式異常或未標示 ok=true")
+
+        response = infer_result
+    except RunnerError as exc:
+        response = build_error_response(exc.code, exc.detail)
+        emit_stderr(f"[iotVisionTurret] {exc.code}: {exc.detail}")
+        exit_code = 1
     except Exception as exc:
-        error_response = {
-            "ok": False,
-            "error": {
-                "message": f"runner 執行失敗: {exc}",
-                "code": "RUNNER_ERROR",
-                "type": exc.__class__.__name__,
-            },
-        }
-        sys.stderr.write(json.dumps(error_response, ensure_ascii=False))
-        sys.exit(1)
+        response = build_error_response("UNEXPECTED_ERROR", f"未預期錯誤: {exc}")
+        emit_stderr("[iotVisionTurret] 未預期例外發生，以下為 traceback:")
+        emit_stderr(traceback.format_exc())
+        exit_code = 1
+
+    emit_stdout(response)
+    sys.exit(exit_code)
 
 
 if __name__ == "__main__":
