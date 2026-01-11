@@ -19,9 +19,8 @@ module.exports = {
   async updateStrategy(newMode = 'local', options = {}) {
     logger.info('iotVisionTurret 插件更新策略中...');
     if (newMode !== 'local') {
-      const message = `不支援的模式 ${newMode}，僅允許 local`;
-      logger.error(message);
-      throw new Error(message);
+      logger.warn(`不支援的模式 ${newMode}，已自動切換為 local`);
+      newMode = 'local';
     }
     if (!strategies.local) {
       const message = '找不到 local 策略實作';

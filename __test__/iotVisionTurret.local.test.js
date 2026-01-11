@@ -344,7 +344,7 @@ describe('iotVisionTurret 插件整合', () => {
     expect(plugin.priority).toBeDefined();
   });
 
-  test('插件 updateStrategy 不支援非 local 模式應拋出錯誤', async () => {
+  test('插件 updateStrategy 不支援非 local 模式應自動切換到 local', async () => {
     const spawnConfig = {
       stdout: JSON.stringify({ ok: true }),
       exitCode: 0
@@ -353,7 +353,9 @@ describe('iotVisionTurret 插件整合', () => {
 
     const plugin = require('../src/plugins/iotVisionTurret');
 
-    await expect(plugin.updateStrategy('remote')).rejects.toThrow('不支援的模式 remote');
+    // 不應拋出錯誤，而是自動切換到 local
+    await plugin.updateStrategy('remote');
+    expect(plugin.priority).toBeDefined();
   });
 
   test('插件 online/offline/restart 流程應正常運作', async () => {
