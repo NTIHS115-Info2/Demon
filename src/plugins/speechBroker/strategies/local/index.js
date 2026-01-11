@@ -67,6 +67,17 @@ function sanitizeChunk(chunk) {
 }
 
 /**
+ * 消費 ttsEngine 回傳的串流，確保音訊資料被實際讀取
+ * @param {Object|false} engineResult - sendToTtsEngine 的回傳值
+ */
+function consumeEngineStream(engineResult) {
+  // 若 TTS 引擎回傳可讀串流，至少將其設為 flowing 狀態以實際消費音訊資料
+  if (engineResult && engineResult.stream && typeof engineResult.stream.resume === 'function') {
+    engineResult.stream.resume();
+  }
+}
+
+/**
  * 解析使用模式並提供預設值，保持對外接口相容
  * @param {Object} options
  * @returns {string} mode
@@ -125,10 +136,14 @@ function isValidArtifactResult(result) {
   const { artifact_id, url, format, duration_ms } = result;
   return (
     typeof artifact_id === 'string' &&
+    artifact_id.trim().length > 0 &&
     typeof url === 'string' &&
+    url.trim().length > 0 &&
     typeof format === 'string' &&
+    format.trim().length > 0 &&
     typeof duration_ms === 'number' &&
-    !Number.isNaN(duration_ms)
+    !Number.isNaN(duration_ms) &&
+    duration_ms >= 0
   );
 }
 
@@ -136,6 +151,7 @@ function isValidArtifactResult(result) {
  * 將文字傳送至 ttsArtifact 插件，並驗證回傳格式
  * @param {string} sentence
  * @param {{ traceId: string, requestedAt: string }} traceInfo
+ * @returns {Promise<Object|false>} 成功時回傳包含 artifact_id、url、format、duration_ms 的物件，失敗時回傳 false
  */
 async function sendToTtsArtifact(sentence, traceInfo) {
   // 檢查 ttsArtifact 插件狀態，避免未註冊或未上線時送出請求
@@ -198,11 +214,18 @@ async function sendToTtsArtifact(sentence, traceInfo) {
  * 將文字傳送至 ttsEngine 插件（低階串流模式）
  * @param {string} sentence
  * @param {{ traceId: string, requestedAt: string }} traceInfo
+ * @returns {Promise<Object|false>} 成功時回傳包含 stream 與 metadata 的物件，失敗時回傳 false
  */
 async function sendToTtsEngine(sentence, traceInfo) {
   try {
     // 透過 pluginsManager 確認 ttsEngine 狀態，避免離線時送出請求
     const ttsState = await PM.getPluginState('ttsEngine');
+    if (ttsState === -2) {
+      logger.error(
+        `[SpeechBroker] ttsEngine 插件未註冊或找不到 (trace_id=${traceInfo.traceId})`
+      );
+      return false;
+    }
     if (ttsState !== 1) {
       logger.warn(
         `[SpeechBroker] ttsEngine 插件未上線，跳過語音輸出 ` +
@@ -233,8 +256,11 @@ async function sendToTtsEngine(sentence, traceInfo) {
       if (
         !metadata ||
         typeof metadata.format !== 'string' ||
+        metadata.format.trim().length === 0 ||
         typeof metadata.sample_rate !== 'number' ||
-        typeof metadata.channels !== 'number'
+        metadata.sample_rate <= 0 ||
+        typeof metadata.channels !== 'number' ||
+        metadata.channels <= 0
       ) {
         logger.error(
           `[SpeechBroker] ttsEngine metadata 格式錯誤 (trace_id=${traceInfo.traceId}) ` +
@@ -253,11 +279,28 @@ async function sendToTtsEngine(sentence, traceInfo) {
       return false;
     }
 
-    // 監控串流結束，若超時仍未結束則記錄錯誤
+    // 監控串流結束，若超時仍未結束則記錄錯誤並嘗試中止串流以釋放資源
     const doneTimer = setTimeout(() => {
       logger.error(
         `[SpeechBroker] ttsEngine 串流未收到 done (trace_id=${traceInfo.traceId})`
       );
+      try {
+        if (session && session.stream) {
+          if (typeof session.stream.destroy === 'function') {
+            session.stream.destroy(
+              new Error('ttsEngine stream timeout: did not receive end within expected time')
+            );
+          } else if (typeof session.stream.end === 'function') {
+            // 後備方案：若沒有 destroy 方法，呼叫 end 嘗試結束串流
+            session.stream.end();
+          }
+        }
+      } catch (destroyErr) {
+        logger.error(
+          `[SpeechBroker] ttsEngine 串流逾時計劃性中止失敗 (trace_id=${traceInfo.traceId}): ` +
+          `${destroyErr.message || destroyErr}`
+        );
+      }
     }, ENGINE_STREAM_TIMEOUT_MS);
     session.stream.once('end', () => {
       clearTimeout(doneTimer);
@@ -307,7 +350,8 @@ module.exports = {
             );
             // 根據模式選擇 ttsArtifact 或 ttsEngine，避免隱式 fallback
             if (activeMode === TTS_MODES.ENGINE) {
-              await sendToTtsEngine(sanitized, traceInfo);
+              const engineResult = await sendToTtsEngine(sanitized, traceInfo);
+              consumeEngineStream(engineResult);
             } else {
               await sendToTtsArtifact(sanitized, traceInfo);
             }
@@ -333,7 +377,8 @@ module.exports = {
             `"${buffer.trim()}" → "${remainingSentence}"`
           );
           if (activeMode === TTS_MODES.ENGINE) {
-            await sendToTtsEngine(remainingSentence, traceInfo);
+            const engineResult = await sendToTtsEngine(remainingSentence, traceInfo);
+            consumeEngineStream(engineResult);
           } else {
             await sendToTtsArtifact(remainingSentence, traceInfo);
           }
@@ -356,7 +401,8 @@ module.exports = {
             `"${buffer.trim()}" → "${remainingSentence}"`
           );
           if (activeMode === TTS_MODES.ENGINE) {
-            await sendToTtsEngine(remainingSentence, traceInfo);
+            const engineResult = await sendToTtsEngine(remainingSentence, traceInfo);
+            consumeEngineStream(engineResult);
           } else {
             await sendToTtsArtifact(remainingSentence, traceInfo);
           }
