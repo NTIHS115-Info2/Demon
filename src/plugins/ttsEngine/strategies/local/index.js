@@ -18,6 +18,7 @@ const REQUEST_TIMEOUT_MS = 30000;
 const priority = 70;
 
 // 建立 requestId，確保多筆請求可正確對應
+// Note: JavaScript is single-threaded, so requestCounter increment is atomic
 function buildRequestId() {
   requestCounter += 1;
   return `ttsEngine-${Date.now()}-${requestCounter}`;
@@ -46,8 +47,9 @@ module.exports = {
     // Python 腳本位於兩層上層
     const scriptPath = path.resolve(__dirname, "index.py");
     try {
+      const pythonPath = options.pythonPath || process.env.TTSENGINE_PYTHON_PATH;
       processRef = new PythonShell(scriptPath, {
-        pythonPath: options.pythonPath || "E:\\system\\f5ttsenv\\Scripts\\python.exe",
+        ...(pythonPath ? { pythonPath } : {}),
         args: [
           "--log-path", options.logPath || `${Logger.getLogPath()}/ttsEngine.log`
         ],
