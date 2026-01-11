@@ -101,6 +101,8 @@ artifacts/iotVisionTurret/<image_id>.jpg
 - 影像等待逾時預設為 30 秒（可透過 `send()` 的 `waitTimeoutMs` 參數調整）
 - 長輪詢逾時固定為 25 秒
 - 同一時間僅允許一個上傳作業，避免檔案寫入衝突
+- **建議**: 在生產環境中應加入速率限制（rate limiting）中介軟體以防止 DoS 攻擊
+- **建議**: 考慮加入裝置認證機制（API key 或 token）以防止未授權存取
 
 ## 注意事項
 
