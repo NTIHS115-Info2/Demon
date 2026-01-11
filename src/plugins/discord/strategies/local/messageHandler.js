@@ -43,9 +43,12 @@ async function replyBySentence(msg, text, speakerName) {
     const onData = chunk => {
       buffer += chunk;
     };
-    const onEnd = () => {
+    // ★ 修正：使用 end 事件傳遞的 toolTriggered 參數來判斷是否繼續等待
+    const onEnd = (info = {}) => {
       send(buffer);
-      if(!waitingTool) {
+      // 優先使用 end 事件傳遞的 toolTriggered，其次使用 status 事件設定的 waitingTool
+      const shouldWait = info.toolTriggered ?? waitingTool;
+      if (!shouldWait) {
         cleanup();
         resolve();
       }

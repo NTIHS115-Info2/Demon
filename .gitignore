@@ -5,10 +5,15 @@ src/core/soulPresets
 Server/llama/llama_cpp_bin
 Server/llama/model
 
-src/plugins/tts/strategies/local/f5_tts
+src/plugins/ttsEngine/strategies/local/f5_tts
 
 logs
 /index.js
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
 
 src/plugins/discord/config.js
 
@@ -17,6 +22,7 @@ __test__/Archive
 
 # Additional configuration and temporary files
 *.log
+/data
 .env
 history/*.json
 !history/.gitkeep

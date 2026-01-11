@@ -48,6 +48,7 @@
     "apiName": "String. The API to call, e.g., GetWeather36h.",
     "params": "Optional object. Key-value pairs of query parameters for the chosen API."
   },
+  "required": ["apiName"],
   "output": {
     "result": "Object. The JSON data returned by the API.",
     "resultType": "String. Always 'json'.",

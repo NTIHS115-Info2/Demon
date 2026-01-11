@@ -1,16 +1,23 @@
 // TalkToDemonManager.js
 // ──────────────────────────────────────────────────────────────
-// 封裝對 llamaServer 的對話管理、串流控制、中斷與優先佇列
+// ★ 對話管理器：管理 /v1/chat/completions API 的完整生命週期
+// 工具呼叫使用「偽協議」：由 ToolStreamRouter 偵測文字輸出中的 JSON
 const { EventEmitter }          = require('events');
 const { composeMessages }       = require('./PromptComposer.js');
 const PM                        = require('./pluginsManager.js');
 const Logger                    = require('../utils/logger.js');
 const historyManager            = require('./historyManager');
 const toolOutputRouter          = require('./toolOutputRouter');
+// ★ 已移除 getToolsSchema import（不使用原生 tool_calls）
 
 // 參數
 const MAX_HISTORY     = 50;
 const EXPIRY_TIME_MS  = 10 * 60 * 1000; // 10 分鐘
+
+// ★ 工具執行上限
+const MAX_TOOL_ROUNDS = 5;
+
+// ★ 已移除 CONVERSATION_MODE（改回 chat/completions，使用 history replay）
 
 // ────────────────── 1. 串流處理器 ────────────────────────────
 class LlamaStreamHandler extends EventEmitter {
@@ -19,14 +26,19 @@ class LlamaStreamHandler extends EventEmitter {
     this.llamaEmitter = null;   // PM.send 回傳的 EventEmitter
     this.stopped      = false;
     this.logger       = new Logger('LlamaStream.log');
+    this.reasoningBuffer = '';
+    this.responseId   = null;   // ★ 儲存 response ID（用於 multi-turn）
   }
 
   /**
    * 啟動串流
    * @param {Array<{role:string,content:string}>} messages
+   * @param {Object} options - 額外選項（如 tools, tool_choice, previous_response_id）
    */
-  async start(messages) {
+  async start(messages, options = {}) {
     this.stopped = false;
+    this.reasoningBuffer = '';
+    this.responseId = null;
 
     try {
 
@@ -34,7 +46,21 @@ class LlamaStreamHandler extends EventEmitter {
       this.logger.info(`請求內容：`);
       this.logger.info(messages);
 
-      const emitter = await PM.send('llamaServer', messages);          // ★向插件請求串流資料
+      // 組合請求參數，支援 tools、tool_choice 與 previous_response_id
+      const requestPayload = {
+        messages,
+        stream: true,
+        ...options
+      };
+
+      if (options.tools && options.tools.length > 0) {
+        this.logger.info(`[串流] 使用 ${options.tools.length} 個工具定義`);
+      }
+      if (options.previous_response_id) {
+        this.logger.info(`[串流] 繼續前一個 response: ${options.previous_response_id}`);
+      }
+
+      const emitter = await PM.send('llamaServer', requestPayload);          // ★向插件請求串流資料
 
       this.logger.Original(emitter);
 
@@ -44,12 +70,30 @@ class LlamaStreamHandler extends EventEmitter {
 
       this.llamaEmitter = emitter;
 
-      emitter.on('data', chunk => {
+      emitter.on('data', (chunk, raw, reasoning) => {
         if (this.stopped) return;
-        const text = typeof chunk === 'string' ? chunk : String(chunk);
-        this.emit('data', text);
-        this.logger.info(`[Llama] 回應: ${text}`);
+        const text = chunk == null ? '' : String(chunk);
+        const reasoningText = reasoning
+          || raw?.choices?.[0]?.delta?.reasoning_content
+          || raw?.choices?.[0]?.reasoning_content
+          || raw?.reasoning_content
+          || '';
+
+        if (reasoningText) {
+          this.reasoningBuffer += reasoningText;
+          this.logger.info(`[Llama][reasoning] ${reasoningText}`);
+        }
+
+        this.emit('data', text, raw, reasoningText);
+        if (text) {
+          this.logger.info(`[Llama] 回應: ${text}`);
+        }
       });
+
+      // ★ 已移除 tool_calls 事件監聽（不使用原生 tool_calls）
+      // 工具呼叫改用「偽協議」：由 ToolStreamRouter 偵測文字輸出
+
+      // ★ 已移除 response_done 事件監聽（改回 chat/completions，無此事件）
 
       emitter.on('end', () => {
         if (!this.stopped) {
@@ -95,7 +139,7 @@ class LlamaStreamHandler extends EventEmitter {
 }
 
 
-// ────────────────── 2. 對話管理器 ───────────────────────────
+// ────────────────── 2. 對話管理器（Response Orchestrator）───────────────────────────
 class TalkToDemonManager extends EventEmitter {
   constructor(model = 'Demon') {
     super();
@@ -115,6 +159,21 @@ class TalkToDemonManager extends EventEmitter {
     this._waitingHold  = false; // 鎖住 waiting=true 直到該輪 end
     this._toolBusy     = false; // 工具執行中（由 Router waiting 事件驅動）
     this._endDeferred  = false; // end-latch：忙碌時先到的 end 會延後處理
+    
+    // ★ 工具執行狀態
+    this._toolRoundCount = 0;        // 當前任務的工具執行輪數
+    
+    // ★ 已移除 _currentResponseId、_conversationMode、_pendingToolResults
+    // （改回 chat/completions，使用 history replay）
+
+    
+    // 保底 error handler，避免無 listener 時炸掉 process
+    this.prependListener('error', (err) => {
+      if (this.listenerCount('error') === 1) {
+        this.logger.error('[Unhandled Talker Error]', err);
+        this.emit('unhandled_error', err);
+      }
+    });
   }
 
   /*─── 工具函式 ──────────────────────────────────────────*/
@@ -169,7 +228,10 @@ class TalkToDemonManager extends EventEmitter {
   async _processNext(task) {
     this.processing   = true;
     // phase 控制：使用者新請求 phase+1；工具回合沿用同一 phase
-    if (!task._keepPhase) this.phaseId++;
+    if (!task._keepPhase) {
+      this.phaseId++;
+      this._toolRoundCount = 0;  // ★ 新任務重置工具輪數
+    }
     this.currentTask  = task;
 
     // 讀取持久化歷史，失敗時以空陣列處理
@@ -184,6 +246,9 @@ class TalkToDemonManager extends EventEmitter {
     this.history = [...persistHistory, task.message];
     this._pruneHistory();
 
+    // ★ 已移除 toolsSchema 載入（不使用原生 tool_calls）
+    // 工具呼叫改用「偽協議」：由 ToolStreamRouter 偵測文字輸出
+
     // composeMessages 可能因參數錯誤拋出例外，須捕捉以免整個流程中斷
     let messages;
     try {
@@ -197,9 +262,15 @@ class TalkToDemonManager extends EventEmitter {
 
     const handler = new LlamaStreamHandler(this.model);
     this.currentHandler = handler;
-    const router = new toolOutputRouter.ToolStreamRouter();
-    // waiting:true/false 由 Router 發出，對應 工具開始/結束
-    router.on('waiting', s => {
+    const router = new toolOutputRouter.ToolStreamRouter({ source: 'content' });
+    // reasoning 只用來偵測工具與記錄，不輸出給使用者
+    const reasoningRouter = new toolOutputRouter.ToolStreamRouter({ source: 'reasoning' });
+    let assistantBuf = '';
+    let reasoningBuf = '';
+    let toolTriggered = false;
+    let postToolAbort = false;
+
+    const handleWaiting = s => {
       this._toolBusy = !!s;
       if (s) {
         this._setWaiting(true, { reason: 'tool_busy' });
@@ -208,23 +279,22 @@ class TalkToDemonManager extends EventEmitter {
         this._setWaiting(false, { reason: 'tool_idle' });
         this.openGate();  // 第二輪再正常輸出
       }
-    });
-    let assistantBuf = '';
-    let toolTriggered = false;
-    let postToolAbort = false;
+    };
 
-    // 收到一般串流資料時直接輸出，同時累積至回應緩衝
-    router.on('data', chunk => {
-      assistantBuf += chunk;
-      this._pushChunk(chunk);
-    });
-
-    // 工具已完成：msg 即工具回傳資料（Router 已保證）
-    router.on('tool', msg => {
+    const handleTool = (msg, meta = {}) => {
+      if (toolTriggered) return; // 避免重複觸發相同工具
       toolTriggered = true;
       this._waitingHold = false;     // 不再強制 waiting
       this.toolResultBuffer.push(msg);
       this._needCleanup = true;
+      
+      // ★ 記錄工具觸發來源與詳細資訊
+      const source = meta.source || 'unknown';
+      const detection = meta.detection || {};
+      this.logger.info(`[tool-triggered] 來源=${source}, 工具=${detection.toolName || 'unknown'}`);
+      if (source === 'reasoning') {
+        this.logger.info(`[tool-from-reasoning] 工具呼叫來自 reasoning_content，非使用者可見輸出`);
+      }
 
       // 若 end 早一步來過 → 延後鎖已被設起，這裡直接開同一 phase 的第二輪
       if (this._endDeferred) {
@@ -235,14 +305,45 @@ class TalkToDemonManager extends EventEmitter {
       // 否則主動結束本輪串流，加速進入 end → 由 end 啟第二輪
       postToolAbort = true;
       try { this.currentHandler?.stop(); } catch {}
+    };
+
+    const bindRouter = (r, { silentData = false } = {}) => {
+      r.on('waiting', handleWaiting);
+      r.on('data', chunk => {
+        if (!chunk) return;
+        if (silentData) {
+          reasoningBuf += chunk;
+          this.logger.info(`[reasoning-buffer] ${chunk}`);
+          return; // 不輸出給 UI
+        }
+        // ★ 新增：追蹤 content 累積
+        this.logger.info(`[content-chunk] 長度=${chunk.length}`);
+        assistantBuf += chunk;
+        this._pushChunk(chunk);
+      });
+      // ★ 恢復文字偵測工具呼叫（偽協議），傳遞來源資訊
+      r.on('tool', (msg, meta) => handleTool(msg, meta));
+    };
+
+    bindRouter(router, { silentData: false });
+    bindRouter(reasoningRouter, { silentData: true });
+
+    handler.on('data', (chunk, raw, reasoning) => {
+      if (chunk) router.feed(chunk);
+      if (reasoning) reasoningRouter.feed(reasoning);
     });
 
-    handler.on('data', chunk => {
-      router.feed(chunk);
-    });
+    // ★ 已移除 handler.on('tool_calls', ...) 整段
+    // 工具呼叫改用「偽協議」：由 ToolStreamRouter 偵測文字輸出中的 JSON
+    // 偵測到 {toolName, input} 後，handleTool 會執行工具並啟動第二輪
+
+    // ★ 已移除 response_done 事件監聽（改回 chat/completions，無此事件）
 
     handler.on('end', async () => {
-      router.flush();
+      await Promise.all([
+        router.flush(),
+        reasoningRouter.flush({ force: true })
+      ]);
       // end-latch：若工具仍在忙（或結果尚未回來），延後收尾
       if (this._toolBusy) {
         this._endDeferred = true;
@@ -250,12 +351,16 @@ class TalkToDemonManager extends EventEmitter {
         return;
       }
 
-      this.emit('end');
+      // ★ 傳遞 toolTriggered 讓監聽者知道是否還有後續回合
+      this.emit('end', { toolTriggered });
       this.processing = false;
       this.logger.info('[完成] 對話回應完成');
 
       const text = assistantBuf.trim();
+      // ★ 新增：記錄 assistantBuf 和 reasoningBuf 的狀態
+      this.logger.info(`[完成-buffer] assistantBuf 長度=${assistantBuf.length}, reasoningBuf 長度=${reasoningBuf.length}, toolTriggered=${toolTriggered}`);
       if (text) {
+        this.logger.info(`[完成-output] 準備輸出回應，長度=${text.length}`);
         // 回應成功時記錄至記憶與檔案
         const msg = { role:'assistant', content: text, talker:task.message.talker, timestamp:Date.now() };
         this.history.push(msg);
@@ -264,6 +369,8 @@ class TalkToDemonManager extends EventEmitter {
           this.logger.warn('[history] 紀錄回應失敗: ' + e.message);
         });
         this.emit('data', text);
+      } else {
+        this.logger.warn('[完成-warning] assistantBuf 為空，無內容可輸出');
       }
       if (!toolTriggered) this._cleanupToolBuffer();
       // 工具已完成且本輪自然 end（或被 stop 觸發 end）→ 啟動同一 phase 的第二輪
@@ -303,7 +410,12 @@ class TalkToDemonManager extends EventEmitter {
       }
       // 讓 log 可讀：避免 [object Object]
       try { this.logger.info('composeMessages=' + JSON.stringify(messages)); } catch (err) { this.logger.error('[錯誤] composeMessages 序列化失敗: ' + err.message); }
-      handler.start(messages);  // 啟動串流
+      
+      // ★ 組合請求選項（不送 tools/tool_choice，使用偽協議）
+      // ★ 已移除 previous_response_id（改回 chat/completions）
+      const startOptions = {};
+      
+      handler.start(messages, startOptions);  // 啟動串流
     }).catch(err => {
       this.logger.error('[錯誤] 讀取服務狀態失敗: ' + err.message);
       handler.emit('error', err);

@@ -198,8 +198,21 @@
 - 調整 toolOutputRouter.findToolJSON 僅辨識包含 toolName 與 input 的 JSON，避免誤判
 - 當工具呼叫缺少 input 欄位時回傳失敗並記錄警告
 ### Test
+
+# [v.1.1.2]
+### Update
+- 對齊 LlamaServer 遠端策略串流事件契約，補上解析失敗與非預期結構的錯誤處理
+- 遠端策略支援非串流回應，並維持 data/end 事件形狀一致
+### Change
+- LlamaServer 預設策略改為 Remote，並支援 auto 走遠端
+- LlamaServer 遠端設定改為支援 options/env/config 來源，並定義優先序
+- 遠端策略新增 model、timeout、req_id 等參數傳遞與錯誤處理
 - 更新 toolOutputRouter 相關測試以符合新的 JSON 格式
 - 新增測試：當 JSON 包含額外欄位時不應被識別為工具呼叫
+- LlamaServer 遠端策略改用 OpenAI 相容 /v1/models 與 /v1/chat/completions 端點，並加入健康檢查與錯誤分類
+- 補上 chat/completions 串流與非串流回應正規化，確保事件序列與 local 策略一致
+### Fix
+- 強化遠端策略錯誤處理與中止流程，避免異常狀態遺留
 
 # [v.1.2]
 ### New
@@ -325,3 +338,44 @@
 - 修改toolReference的setting，將其從tool改為LLMtool
 ### Change
 - 將toolReference原本會傳出的generatedAt移除，因為會影響到LLM使用工具
+
+<!-- 段落說明：紀錄 v1.5.2.4 版本的更新摘要 -->
+# [v.1.5.2.4]
+### Change
+- 遠端 llamaServer 支援從 options/config/env 注入 timeout 與 req_id，並統一加入請求追蹤 header
+- 新增 4xx、5xx、timeout、parse error 的錯誤分類，統一錯誤物件格式供下游辨識
+### Fix
+- 強化串流解析錯誤與資料超時的錯誤回報，補齊 log/context 追蹤資訊
+
+# [v.1.5.3]
+### New
+- 新增appChatService，提供外部app對話的功能
+
+# [v.1.5.3.1]
+### Fix
+- 在 TalkToDemonManager 中加入保底 error listener（prependListener），避免無監聽時的致命崩潰，並保留 log/事件以便追蹤。
+
+# [v.1.5.3.2]
+### Delete
+- 刪除appChatService的測試腳本，因為其是屬於local strategy+ngrok的，但是現在的架構已經改為Express+http server了，測試腳本已經不適用了
+# [v.1.5.3.3]
+### Change
+- 將 tts 插件更名為 ttsEngine，並同步更新 plugins 目錄與 setting.json 註冊名稱
+- ttsEngine 職責調整為僅語音合成與音訊輸出，移除播放與存檔行為
+- 同步更新 ttsEngine 相關引用點與策略日誌、子網域設定
+
+# [v.1.5.3.4]
+### Change
+- 新增 stdin JSON Lines 增量輸入協議，支援同一 session 連續傳入 text 並由 end 結束
+- 新增 stdout 長度前綴 frame protocol（JSON header + PCM payload），維持輸出為裸 PCM s16le
+- ttsEngine 現在可持續產出 audio chunks（不落檔、不播放）
+
+# [v.1.5.3.5]
+### Change
+- speechBroker 的主要 TTS 入口改為 ttsArtifact，預設輸出 artifact 與 URL
+- 新增可選低階 ttsEngine 模式（mode="engine"），僅輸出音訊串流，不落檔不產生 URL
+- mode 預設為 "artifact" 以保持相容，明確指定 mode="engine" 才會走 ttsEngine
+
+# [v.1.5.3.6]
+### Fix
+- 修復speechBroker無法正確處理音訊串流的問題
