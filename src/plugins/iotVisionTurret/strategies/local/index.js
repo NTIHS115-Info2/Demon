@@ -9,6 +9,9 @@ const Logger = require('../../../../utils/logger');
 // 建立記錄器（對外顯示名稱統一為 iotVisionTurret）
 const logger = new Logger('iotVisionTurret');
 
+// 併發控制：保存正在執行的 Promise 與佇列
+let activeRequest = null;
+
 // 狀態資料結構區塊：保存服務狀態、設定與最近執行結果
 const state = {
   online: false,
@@ -17,16 +20,17 @@ const state = {
   config: {
     pythonPath: 'python3',
     runnerPath: path.join(__dirname, 'index.py'),
-    timeoutMs: 15000
+    timeoutMs: 15000,
+    yoloWeightsPath: process.env.YOLO_WEIGHTS_PATH || '',
+    yoloTarget: process.env.YOLO_TARGET || '',
+    yoloConf: Number.isFinite(Number(process.env.YOLO_CONF)) ? Number(process.env.YOLO_CONF) : 0.25,
+    yoloInferTimeoutMs: 12000 // Default YOLO inference timeout, can be overridden by buildConfig
   },
   metrics: {
     lastRunAt: null,
     totalRuns: 0
   }
 };
-
-// 併發控制：保存正在執行的 Promise 與佇列
-let activeRequest = null;
 
 // ───────────────────────────────────────────────
 // IoT 裝置通訊狀態（模組層級，禁止放在 request scope）
@@ -88,6 +92,8 @@ const YAW_MAX_STEP = 25;
 const PITCH_MAX_STEP = 25;
 // LOCKED 收斂判定閾值（像素）
 const LOCKED_CONVERGENCE_THRESHOLD = 20;
+// YOLO 推理逾時（ms），避免單次推理卡死影響整體流程
+const YOLO_INFER_TIMEOUT_MS = 12000;
 
 // ───────────────────────────────────────────────
 // iotVisionTurret 掃描/追蹤共用工具函式
@@ -181,9 +187,15 @@ async function executeRequest(data) {
  */
 function buildConfig(options = {}) {
   return {
-    pythonPath: options.pythonPath || state.config.pythonPath,
-    runnerPath: options.runnerPath || state.config.runnerPath,
-    timeoutMs: Number.isFinite(options.timeoutMs) ? options.timeoutMs : state.config.timeoutMs
+    pythonPath: options.pythonPath !== undefined ? options.pythonPath : state.config.pythonPath,
+    runnerPath: options.runnerPath !== undefined ? options.runnerPath : state.config.runnerPath,
+    timeoutMs: Number.isFinite(options.timeoutMs) ? options.timeoutMs : state.config.timeoutMs,
+    yoloWeightsPath: options.yoloWeightsPath !== undefined ? options.yoloWeightsPath : state.config.yoloWeightsPath,
+    yoloTarget: options.yoloTarget !== undefined ? options.yoloTarget : state.config.yoloTarget,
+    yoloConf: Number.isFinite(options.yoloConf) ? options.yoloConf : state.config.yoloConf,
+    yoloInferTimeoutMs: Number.isFinite(options.yoloInferTimeoutMs)
+      ? options.yoloInferTimeoutMs
+      : state.config.yoloInferTimeoutMs
   };
 }
 
@@ -593,6 +605,186 @@ function runPython(payload, config) {
   });
 }
 
+/**
+ * 以子進程呼叫 YOLO 推理並回傳結果
+ * @param {string} imagePath - 影像路徑
+ * @param {number} maxTimeoutMs - 最大超時時間（毫秒），用於遵守全域任務期限
+ * @returns {Promise<Object>} 成功回傳 { ok:true, payload }，失敗回傳 { ok:false }
+ */
+async function runYoloInfer(imagePath, maxTimeoutMs) {
+  // ───────────────────────────────────────────────
+  // 段落用途：組裝推理所需設定與輸入摘要（避免重複寫死在多處）
+  // ───────────────────────────────────────────────
+  const weightsPath = state.config.yoloWeightsPath;
+  const target = state.config.yoloTarget;
+  const conf = state.config.yoloConf;
+  const configuredTimeoutMs = Number.isFinite(state.config.yoloInferTimeoutMs)
+    ? state.config.yoloInferTimeoutMs
+    : YOLO_INFER_TIMEOUT_MS;
+  const timeoutMs = Number.isFinite(maxTimeoutMs)
+    ? Math.max(0, Math.min(configuredTimeoutMs, maxTimeoutMs))
+    : configuredTimeoutMs;
+
+  // 基本設定檢查：避免將空的權重路徑或目標傳給 Python runner，造成不明錯誤
+  if (!weightsPath || !target) {
+    const errorMessage = 'YOLO 推理設定缺失：yoloWeightsPath 或 yoloTarget 未設定或為空字串';
+    logger.error(errorMessage, {
+      imagePath,
+      yoloWeightsPath: weightsPath,
+      yoloTarget: target
+    });
+    return {
+      ok: false,
+      error: errorMessage,
+      detail: {
+        imagePath,
+        yoloWeightsPath: weightsPath,
+        yoloTarget: target
+      }
+    };
+  }
+
+  const inputSummary = {
+    imagePath,
+    weightsPath,
+    target,
+    conf
+  };
+
+  // ───────────────────────────────────────────────
+  // 段落用途：使用 spawn 呼叫 Python，便於精準控制 stdin/stdout/stderr 與 EOF
+  // ───────────────────────────────────────────────
+  return new Promise((resolve) => {
+    const processArgs = [state.config.runnerPath];
+    const child = spawn(state.config.pythonPath, processArgs, { stdio: ['pipe', 'pipe', 'pipe'] });
+    let stdout = '';
+    let stderr = '';
+    let settled = false;
+
+    // ───────────────────────────────────────────────
+    // 段落用途：設定推理逾時，逾時即 kill 子進程並回傳 { ok:false }
+    // ───────────────────────────────────────────────
+    const timeoutId = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      child.kill('SIGKILL');
+      logger.error(`[iotVisionTurret] YOLO 推理逾時：${JSON.stringify({ imagePath })}`);
+      resolve({ ok: false });
+    }, timeoutMs);
+
+    // ───────────────────────────────────────────────
+    // 段落用途：收集 stdout，必須等到 close 後再 parse
+    // ───────────────────────────────────────────────
+    child.stdout.on('data', (chunk) => {
+      stdout += chunk.toString();
+    });
+
+    // ───────────────────────────────────────────────
+    // 段落用途：收集 stderr，供 exit code 非 0 或錯誤時記錄
+    // ───────────────────────────────────────────────
+    child.stderr.on('data', (chunk) => {
+      stderr += chunk.toString();
+    });
+
+    // ───────────────────────────────────────────────
+    // 段落用途：子進程錯誤事件（例如無法啟動 Python），映射為 { ok:false }
+    // ───────────────────────────────────────────────
+    child.on('error', (err) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeoutId);
+      logger.error(`[iotVisionTurret] YOLO 推理子進程錯誤：${err.message}`);
+      resolve({ ok: false });
+    });
+
+    // ───────────────────────────────────────────────
+    // 段落用途：close 事件代表 stdout/stderr 已完整輸出，可安全解析 JSON
+    // ───────────────────────────────────────────────
+    child.on('close', (code) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeoutId);
+
+      // ───────────────────────────────────────────────
+      // 段落用途：exit code 非 0 視為失敗並記錄錯誤資訊，回傳 { ok:false }
+      // ───────────────────────────────────────────────
+      if (code !== 0) {
+        logger.error(
+          `[iotVisionTurret] YOLO 推理非正常結束：${JSON.stringify({
+            code,
+            stderr: stderr || null,
+            input: inputSummary
+          })}`
+        );
+        resolve({ ok: false });
+        return;
+      }
+
+      // ───────────────────────────────────────────────
+      // 段落用途：解析 stdout JSON（假設 stdout 僅輸出單一 JSON）
+      // 禁止分段解析，避免非 JSON 混入造成誤判
+      // ───────────────────────────────────────────────
+      try {
+        const trimmed = stdout.trim();
+        const parsed = trimmed ? JSON.parse(trimmed) : {};
+        const errorCode = parsed?.error_code;
+        const isExplicitFailure =
+          parsed?.ok === false ||
+          (typeof errorCode === 'string' && errorCode.length > 0);
+        if (isExplicitFailure) {
+          // ───────────────────────────────────────────────
+          // 段落用途：Python 明確回傳失敗，統一映射為 { ok:false }
+          // ───────────────────────────────────────────────
+          logger.error(
+            `[iotVisionTurret] YOLO 推理回傳失敗：${JSON.stringify({
+              errorCode: errorCode || null,
+              message: parsed?.message || parsed?.error?.message || null
+            })}`
+          );
+          resolve({ ok: false });
+          return;
+        }
+        resolve({ ok: true, payload: parsed });
+      } catch (err) {
+        // ───────────────────────────────────────────────
+        // 段落用途：stdout JSON 解析失敗，回傳 { ok:false } 並記錄原始輸出
+        // ───────────────────────────────────────────────
+        const preview = stdout.length > 500 ? `${stdout.slice(0, 500)}...` : stdout;
+        logger.error(
+          `[iotVisionTurret] YOLO 推理 JSON 解析失敗：${JSON.stringify({
+            error: err.message,
+            stdout: preview
+          })}`
+        );
+        resolve({ ok: false });
+      }
+    });
+
+    // ───────────────────────────────────────────────
+    // 段落用途：以 stdin 傳入 JSON 指令並確實 end()，避免 Python 等待 EOF
+    // ───────────────────────────────────────────────
+    try {
+      const payload = {
+        action: 'infer',
+        payload: {
+          image_path: imagePath,
+          weights_path: weightsPath,
+          target,
+          conf
+        }
+      };
+      child.stdin.write(JSON.stringify(payload));
+      child.stdin.end();
+    } catch (err) {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeoutId);
+      logger.error(`[iotVisionTurret] YOLO 推理 stdin 寫入失敗：${err.message}`);
+      resolve({ ok: false });
+    }
+  });
+}
+
 module.exports = {
   priority,
   /**
@@ -768,18 +960,13 @@ module.exports = {
             logger.warn('[iotVisionTurret] TASK_TIMEOUT：YOLO 推理（掃描）逾時');
             return { ok: false };
           }
-          const inferConfig = {
-            ...state.config,
-            timeoutMs: Math.min(state.config.timeoutMs, remainingForInfer)
-          };
-          let inferResult = null;
-          try {
-            inferResult = await runPython(
-              { action: 'infer', payload: { image_id: imageId, image_path: imagePath, meta: data || {} } },
-              inferConfig
-            );
-          } catch (err) {
-            logger.error(`[iotVisionTurret] YOLO 推理失敗（掃描）：${err.message}`);
+
+          // ───────────────────────────────────────────────
+          // 段落用途：呼叫 runYoloInfer（由內部處理逾時與錯誤）
+          // ───────────────────────────────────────────────
+          const inferResult = await runYoloInfer(imagePath, remainingForInfer);
+          if (!inferResult || inferResult.ok !== true) {
+            logger.error('[iotVisionTurret] YOLO 推理失敗（掃描）：runYoloInfer 回傳 ok=false');
             return { ok: false };
           }
 
@@ -922,18 +1109,12 @@ module.exports = {
           logger.warn('[iotVisionTurret] TASK_TIMEOUT：YOLO 推理（追蹤）逾時');
           return { ok: false };
         }
-        const trackInferConfig = {
-          ...state.config,
-          timeoutMs: Math.min(state.config.timeoutMs, remainingForTrackInfer)
-        };
-        let trackInferResult = null;
-        try {
-          trackInferResult = await runPython(
-            { action: 'infer', payload: { image_id: trackImageId, image_path: trackImagePath, meta: data || {} } },
-            trackInferConfig
-          );
-        } catch (err) {
-          logger.error(`[iotVisionTurret] YOLO 推理失敗（追蹤）：${err.message}`);
+        // ───────────────────────────────────────────────
+        // 段落用途：呼叫 runYoloInfer（追蹤階段）
+        // ───────────────────────────────────────────────
+        const trackInferResult = await runYoloInfer(trackImagePath, remainingForTrackInfer);
+        if (!trackInferResult || trackInferResult.ok !== true) {
+          logger.error('[iotVisionTurret] YOLO 推理失敗（追蹤）：runYoloInfer 回傳 ok=false');
           return { ok: false };
         }
 

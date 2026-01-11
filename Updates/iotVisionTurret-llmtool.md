@@ -2,6 +2,10 @@
 
 #### iotVisionTurret 插件更新紀錄
 
+### [v0.4]
+#### New
+- 新增 runYoloInfer 橋接流程，改以 stdin/stdout JSON 協議呼叫 Python YOLO 推理並補齊逾時與錯誤處理
+
 ### [v0.3]
 #### New
 - 新增 iotVisionTurret 工具入口 send(data) 的掃描、追蹤與 IR 發送流程，並加入全域逾時與上傳逾時控制
