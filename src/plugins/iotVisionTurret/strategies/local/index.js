@@ -166,12 +166,13 @@ module.exports = {
       try {
         await runningPromise;
       } catch (e) {
-        // 忽略前一個請求的錯誤
+        // 忽略前一個請求的錯誤，但記錄以供除錯
+        logger.warn('前一個請求失敗: ' + e.message);
       }
     }
     
-    // 建立新的執行 Promise
-    runningPromise = (async () => {
+    // 建立新的執行 Promise 並立即賦值以防止競態條件
+    const currentPromise = (async () => {
       try {
         const response = await runPython({ action: 'infer', payload: data }, state.config);
         state.lastResult = response;
@@ -180,10 +181,14 @@ module.exports = {
         state.metrics.totalRuns += 1;
         return true;
       } finally {
-        runningPromise = null;
+        // 只有當前 Promise 完成時才清空
+        if (runningPromise === currentPromise) {
+          runningPromise = null;
+        }
       }
     })();
     
-    return await runningPromise;
+    runningPromise = currentPromise;
+    return await currentPromise;
   }
 };
