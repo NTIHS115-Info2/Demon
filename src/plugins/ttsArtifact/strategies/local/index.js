@@ -5,6 +5,31 @@ const { ulid } = require('ulid');
 const Logger = require('../../../../utils/logger');
 const PM = require('../../../../core/pluginsManager');
 
+/**
+ * ttsArtifact 本地策略實作
+ * 
+ * 功能：
+ * - 接收 ttsEngine 輸出的 PCM 串流，並以增量方式建立可即時讀取的 WAV 音訊檔案
+ * - 提供 HTTP 端點供外部存取 artifact，支援 Range 請求與串流播放
+ * 
+ * 安全性考量：
+ * - **路徑遍歷防護**：artifact_id 已驗證為 ULID 格式，防止目錄遍歷攻擊
+ * - **資訊洩漏防護**：HTTP 錯誤訊息不包含內部檔案路徑
+ * - **存取控制**：目前未實作認證/授權機制，所有知道 artifact_id 的客戶端皆可存取檔案
+ *   - 建議：在生產環境中，應考慮在反向代理層（如 nginx）或中介軟體層加入認證機制
+ * 
+ * 效能考量：
+ * - **LRU 快取**：使用 LRU 策略快取最近存取的 artifact 路徑（上限 1000 筆），減少磁碟掃描
+ * - **檔案系統掃描**：快取未命中時會遞迴掃描日期目錄，artifact 數量大時可能較慢
+ *   - 建議：未來可考慮使用資料庫或持久化索引檔案來加速查詢
+ * - **速率限制**：目前未實作速率限制，惡意客戶端可能造成資源耗盡
+ *   - 建議：在生產環境中，應考慮在反向代理層（如 nginx）或使用 Express 中介軟體實作速率限制
+ * 
+ * 相容性需求：
+ * - ttsEngine 必須輸出 PCM s16le (16-bit) 格式的音訊串流
+ * - 若 ttsEngine 改變輸出格式，需同步調整本檔案的 DEFAULT_BITS_PER_SAMPLE 常數與相關處理流程
+ */
+
 // 建立記錄器，專門記錄 ttsArtifact 本地策略流程
 const logger = new Logger('ttsArtifact-local');
 
