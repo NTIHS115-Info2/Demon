@@ -18,8 +18,24 @@ const ARTIFACT_ROOT = path.resolve(__dirname, '../../../../..', 'data', 'artifac
 const DEFAULT_LISTEN_HOST = '0.0.0.0';
 const DEFAULT_LISTEN_PORT = 8090;
 
-// 設定音訊格式參數，假設 ttsEngine 輸出為 PCM s16le
+// 設定音訊格式參數：本地策略目前**只支援** ttsEngine 輸出為 PCM s16le (16-bit).
+// 這是與 ttsEngine 相容性的「硬性需求」，目前不提供動態設定或其他 bit depth。
+// 若未來 ttsEngine 改為輸出其他 bit depth，需同步調整此常數與相關處理流程。
 const DEFAULT_BITS_PER_SAMPLE = 16;
+
+// WAV 格式常數：減少 magic numbers，提升可維護性
+const WAV_HEADER_SIZE = 44;
+const WAV_RIFF_CHUNK_SIZE_OFFSET = 4;
+const WAV_FMT_CHUNK_OFFSET = 12;
+const WAV_FMT_CHUNK_SIZE_OFFSET = 16;
+const WAV_AUDIO_FORMAT_OFFSET = 20; // PCM = 1
+const WAV_NUM_CHANNELS_OFFSET = 22;
+const WAV_SAMPLE_RATE_OFFSET = 24;
+const WAV_BYTE_RATE_OFFSET = 28;
+const WAV_BLOCK_ALIGN_OFFSET = 32;
+const WAV_BITS_PER_SAMPLE_OFFSET = 34;
+const WAV_DATA_CHUNK_OFFSET = 36;
+const WAV_DATA_SIZE_OFFSET = 40;
 
 // 保存 HTTP server 與狀態，便於線上/離線管理
 let app = null;
@@ -30,7 +46,30 @@ let currentPort = DEFAULT_LISTEN_PORT;
 let currentPublicBaseUrl = null;
 
 // 建立 artifact 快取索引，提升查詢速度
+// 採用 LRU 策略，避免記憶體無限增長
+const ARTIFACT_INDEX_MAX_SIZE = 1000;
 const artifactIndex = new Map();
+
+function setArtifactInIndex(artifactId, paths) {
+  // 若超過上限，移除最舊的項目（Map 的第一個元素）
+  if (artifactIndex.size >= ARTIFACT_INDEX_MAX_SIZE) {
+    const firstKey = artifactIndex.keys().next().value;
+    artifactIndex.delete(firstKey);
+  }
+  // 刪除舊的項目並重新插入，保持 LRU 順序
+  artifactIndex.delete(artifactId);
+  artifactIndex.set(artifactId, paths);
+}
+
+function getArtifactFromIndex(artifactId) {
+  const cached = artifactIndex.get(artifactId);
+  if (cached) {
+    // 重新插入以更新 LRU 順序
+    artifactIndex.delete(artifactId);
+    artifactIndex.set(artifactId, cached);
+  }
+  return cached;
+}
 
 // 建立錯誤訊息模板，確保錯誤可追蹤 artifact_id
 const ERROR_CODES = {
@@ -54,21 +93,27 @@ function buildDatePath(date = new Date()) {
 function buildWavHeader({ sampleRate, channels, bitsPerSample, dataSize }) {
   const byteRate = sampleRate * channels * (bitsPerSample / 8);
   const blockAlign = channels * (bitsPerSample / 8);
-  const buffer = Buffer.alloc(44);
+
+  // 檢查計算值是否在合理範圍內，避免整數溢位或不合法值
+  if (byteRate > 0xFFFFFFFF || blockAlign > 0xFFFF) {
+    throw new Error(`WAV header 參數超出範圍：byteRate=${byteRate}, blockAlign=${blockAlign}`);
+  }
+
+  const buffer = Buffer.alloc(WAV_HEADER_SIZE);
 
   buffer.write('RIFF', 0);
-  buffer.writeUInt32LE(36 + dataSize, 4);
+  buffer.writeUInt32LE(WAV_HEADER_SIZE - 8 + dataSize, WAV_RIFF_CHUNK_SIZE_OFFSET);
   buffer.write('WAVE', 8);
-  buffer.write('fmt ', 12);
-  buffer.writeUInt32LE(16, 16);
-  buffer.writeUInt16LE(1, 20);
-  buffer.writeUInt16LE(channels, 22);
-  buffer.writeUInt32LE(sampleRate, 24);
-  buffer.writeUInt32LE(byteRate, 28);
-  buffer.writeUInt16LE(blockAlign, 32);
-  buffer.writeUInt16LE(bitsPerSample, 34);
-  buffer.write('data', 36);
-  buffer.writeUInt32LE(dataSize, 40);
+  buffer.write('fmt ', WAV_FMT_CHUNK_OFFSET);
+  buffer.writeUInt32LE(16, WAV_FMT_CHUNK_SIZE_OFFSET);
+  buffer.writeUInt16LE(1, WAV_AUDIO_FORMAT_OFFSET); // PCM = 1
+  buffer.writeUInt16LE(channels, WAV_NUM_CHANNELS_OFFSET);
+  buffer.writeUInt32LE(sampleRate, WAV_SAMPLE_RATE_OFFSET);
+  buffer.writeUInt32LE(byteRate, WAV_BYTE_RATE_OFFSET);
+  buffer.writeUInt16LE(blockAlign, WAV_BLOCK_ALIGN_OFFSET);
+  buffer.writeUInt16LE(bitsPerSample, WAV_BITS_PER_SAMPLE_OFFSET);
+  buffer.write('data', WAV_DATA_CHUNK_OFFSET);
+  buffer.writeUInt32LE(dataSize, WAV_DATA_SIZE_OFFSET);
 
   return buffer;
 }
@@ -111,14 +156,14 @@ function parseRange(rangeHeader, fileSize) {
   if (!match) return null;
   const start = match[1] ? parseInt(match[1], 10) : 0;
   const end = match[2] ? parseInt(match[2], 10) : fileSize - 1;
-  if (Number.isNaN(start) || Number.isNaN(end) || start > end) return null;
+  if (Number.isNaN(start) || Number.isNaN(end) || start < 0 || end < 0 || start > end) return null;
   return { start, end };
 }
 
 // 嘗試在檔案系統中尋找指定 artifact_id 的路徑
 async function resolveArtifactPath(artifactId) {
   // 優先從記憶體快取查詢，減少磁碟掃描
-  const cached = artifactIndex.get(artifactId);
+  const cached = getArtifactFromIndex(artifactId);
   if (cached) {
     return cached;
   }
@@ -146,7 +191,7 @@ async function resolveArtifactPath(artifactId) {
               audioPath: path.join(artifactDir, 'audio.wav'),
               metadataPath: path.join(artifactDir, 'artifact.json')
             };
-            artifactIndex.set(artifactId, result);
+            setArtifactInIndex(artifactId, result);
             return result;
           }
         }
@@ -199,6 +244,15 @@ function buildExpressApp() {
   _app.get('/media/:artifact_id/file', async (req, res) => {
     const artifactId = req.params.artifact_id;
 
+    // 驗證 artifact_id 格式，防止路徑遍歷攻擊
+    if (!/^[0-9A-HJKMNP-TV-Z]{26}$/.test(artifactId)) {
+      logger.warn(`[ttsArtifact] 無效的 artifact_id 格式: ${artifactId}`);
+      return res.status(400).json({
+        error: 'INVALID_ARTIFACT_ID',
+        message: '無效的 artifact_id 格式'
+      });
+    }
+
     // 檢查 artifact 是否存在，避免無效請求
     let paths;
     try {
@@ -214,7 +268,7 @@ function buildExpressApp() {
       logger.error(`[ttsArtifact] 查詢 artifact 失敗 (${artifactId}): ${err.message || err}`);
       return res.status(500).json({
         error: ERROR_CODES.FILE_IO,
-        message: `讀取 artifact 失敗 (${artifactId})`
+        message: '讀取 artifact 失敗'
       });
     }
 
@@ -226,7 +280,7 @@ function buildExpressApp() {
       logger.error(`[ttsArtifact] 讀取 metadata 失敗 (${artifactId}): ${err.message || err}`);
       return res.status(500).json({
         error: ERROR_CODES.METADATA_IO,
-        message: `讀取 metadata 失敗 (${artifactId})`
+        message: '讀取 metadata 失敗'
       });
     }
 
@@ -256,7 +310,7 @@ function buildExpressApp() {
       logger.error(`[ttsArtifact] 取得檔案資訊失敗 (${artifactId}): ${err.message || err}`);
       return res.status(500).json({
         error: ERROR_CODES.FILE_IO,
-        message: `取得檔案資訊失敗 (${artifactId})`
+        message: '取得檔案資訊失敗'
       });
     }
 
@@ -288,7 +342,7 @@ function buildExpressApp() {
         if (!res.headersSent) {
           res.status(500).json({
             error: ERROR_CODES.FILE_IO,
-            message: `Range 讀取失敗 (${artifactId})`
+            message: 'Range 讀取失敗'
           });
         } else {
           res.end();
@@ -309,7 +363,7 @@ function buildExpressApp() {
       if (!res.headersSent) {
         res.status(500).json({
           error: ERROR_CODES.FILE_IO,
-          message: `串流讀取失敗 (${artifactId})`
+          message: '串流讀取失敗'
         });
       } else {
         res.end();
@@ -326,7 +380,7 @@ module.exports = {
   name: 'ttsArtifact',
 
   /**
-   * 啟動插件並建立 HTTP route
+   * 插件上線生命周期方法：啟動 HTTP 服務並使 ttsArtifact 插件生效
    * @param {Object} options
    */
   async online(options = {}) {
@@ -346,6 +400,20 @@ module.exports = {
       server = app.listen(port, host, () => {
         logger.info(`[ttsArtifact] Listening on http://${host}:${port}/media/:artifact_id/file`);
       });
+
+      // 處理伺服器啟動後才發生的錯誤（例如埠號衝突）
+      server.on('error', (err) => {
+        if (err && err.code === 'EADDRINUSE') {
+          logger.error(`[ttsArtifact] 無法啟動 HTTP 服務：埠號 ${port} 已被使用 (${host}:${port})`);
+        } else {
+          logger.error(`[ttsArtifact] HTTP 服務錯誤: ${err && err.message ? err.message : err}`);
+        }
+        isOnline = false;
+        currentHost = null;
+        currentPort = null;
+        currentPublicBaseUrl = null;
+      });
+
       currentHost = host;
       currentPort = port;
       currentPublicBaseUrl = publicBaseUrl;
@@ -365,7 +433,7 @@ module.exports = {
     // 若尚未啟動則直接回報，避免拋錯
     if (!isOnline || !server) {
       logger.info('[ttsArtifact] 插件已經離線，無需重複關閉');
-      return 0;
+      return true;
     }
 
     try {
@@ -379,7 +447,7 @@ module.exports = {
       server = null;
       isOnline = false;
       logger.info('[ttsArtifact] 插件已成功離線');
-      return 1;
+      return true;
     } catch (err) {
       logger.error(`[ttsArtifact] 插件離線失敗: ${err.message || err}`);
       throw err;
@@ -406,9 +474,37 @@ module.exports = {
   },
 
   /**
-   * 呼叫 ttsEngine 並建立可即時讀取的 artifact
-   * @param {Object|string} data
-   * @returns {Promise<Object>}
+   * @typedef {Object} TTSArtifactSuccess
+   * @property {string} artifact_id - 已建立之語音 artifact 的唯一識別碼
+   * @property {string} url - artifact 的公開存取 URL
+   * @property {string} format - 音訊格式（例如 'wav'）
+   * @property {number} duration_ms - 音訊長度（毫秒）
+   */
+
+  /**
+   * @typedef {Object} TTSArtifactErrorObject
+   * @property {string} error - 錯誤訊息的文字描述
+   * @property {string} [artifact_id] - （選用）若在產生 artifact 過程中失敗，可能仍會附帶部分建立出的 artifact 識別碼
+   */
+
+  /**
+   * 呼叫 ttsEngine 並建立可即時讀取的 artifact。
+   *
+   * 輸入格式：
+   * - 若為 `string`：會被視為要轉換的文字內容。
+   * - 若為 `Object`：會嘗試從 `text`、`message` 或 `content` 欄位取得要轉換的文字。
+   *
+   * 回傳結果：
+   * - 成功時：回傳一個包含 `artifact_id`、`url`、`format`、`duration_ms` 等欄位的物件（對應 {@link TTSArtifactSuccess}）
+   * - 已預期並在此方法中處理的錯誤（例如：缺少文字、ttsEngine 未上線等）：回傳一個包含 `error` 訊息的物件，
+   *   可能還有 `artifact_id` 等補充欄位（對應 {@link TTSArtifactErrorObject}）
+   * - 某些來自底層 ttsEngine 或周邊流程的錯誤，可能會直接以「純字串錯誤訊息」形式被傳遞回呼叫端，而非包在物件中。
+   *
+   * 一般預期錯誤會透過成功解決的 Promise（以錯誤物件或字串表示）回傳；僅在非預期錯誤（例如 I/O 異常或程式錯誤）時，
+   * 才可能以 rejected Promise 的方式拋出。
+   *
+   * @param {Object|string} data - 要轉換為語音的文字或包含文字欄位的物件
+   * @returns {Promise<TTSArtifactSuccess|TTSArtifactErrorObject|string>} 可能的成功結果物件、錯誤物件或純錯誤字串
    */
   async send(data = {}) {
     // 解析輸入文字，避免傳入錯誤格式
@@ -469,6 +565,12 @@ module.exports = {
       return { error: `${ERROR_CODES.TTS_ENGINE}: ${message}` };
     }
 
+    if (!channels || Number.isNaN(channels) || channels < 1 || !Number.isInteger(channels)) {
+      const message = `ttsEngine 回傳 channels 無效 (${channels})`;
+      logger.error(`[ttsArtifact] ${message}`);
+      return { error: `${ERROR_CODES.TTS_ENGINE}: ${message}` };
+    }
+
     // 組合 metadata 內容並落地保存
     const publicUrl = buildPublicUrl(artifactId);
     const metadata = {
@@ -486,14 +588,22 @@ module.exports = {
       await fs.promises.mkdir(paths.artifactDir, { recursive: true });
       await createAudioFile(paths.audioPath, sampleRate, channels);
       await writeMetadata(paths.metadataPath, metadata);
-      artifactIndex.set(artifactId, paths);
+      setArtifactInIndex(artifactId, paths);
     } catch (err) {
       logger.error(`[ttsArtifact] 建立檔案失敗 (${artifactId}): ${err.message || err}`);
-      return { error: `${ERROR_CODES.FILE_IO}: ${err.message || err}`, artifact_id: artifactId };
+      // 嘗試清理部分建立的檔案
+      try {
+        if (fs.existsSync(paths.artifactDir)) {
+          await fs.promises.rm(paths.artifactDir, { recursive: true, force: true });
+        }
+      } catch (cleanupErr) {
+        logger.error(`[ttsArtifact] 清理失敗的 artifact 目錄失敗 (${artifactId}): ${cleanupErr.message || cleanupErr}`);
+      }
+      return { error: `${ERROR_CODES.FILE_IO}: ${err.message || err}` };
     }
 
     // 開始串流寫入 PCM chunks，並追蹤資料大小
-    let dataBytes = 0;
+    let pcmDataBytes = 0;
     let writeStream = null;
     let streamError = null;
 
@@ -502,17 +612,42 @@ module.exports = {
       writeStream.on('error', (err) => {
         streamError = err;
         logger.error(`[ttsArtifact] writeStream 錯誤 (${artifactId}): ${err.message || err}`);
-        if (!session.stream.destroyed) {
-          session.stream.destroy(err);
+        try {
+          if (
+            session &&
+            session.stream &&
+            typeof session.stream.destroy === 'function' &&
+            !session.stream.destroyed
+          ) {
+            session.stream.destroy(err);
+          }
+        } catch (destroyErr) {
+          logger.error(
+            `[ttsArtifact] session.stream.destroy 失敗 (${artifactId}): ${destroyErr.message || destroyErr}`
+          );
         }
       });
 
       for await (const chunk of session.stream) {
         if (streamError) break;
         if (!chunk) continue;
-        dataBytes += chunk.length;
+        pcmDataBytes += chunk.length;
         if (!writeStream.write(chunk)) {
-          await new Promise(resolve => writeStream.once('drain', resolve));
+          await new Promise((resolve, reject) => {
+            const onDrain = () => {
+              writeStream.removeListener('error', onError);
+              resolve();
+            };
+            const onError = (err) => {
+              writeStream.removeListener('drain', onDrain);
+              reject(err);
+            };
+            writeStream.once('drain', onDrain);
+            writeStream.once('error', onError);
+            if (streamError) {
+              onError(streamError);
+            }
+          });
         }
       }
     } catch (err) {
@@ -527,14 +662,14 @@ module.exports = {
     // 嘗試 patch WAV header，確保檔案可用於播放
     let patchError = null;
     try {
-      await patchWavHeader(paths.audioPath, sampleRate, channels, dataBytes);
+      await patchWavHeader(paths.audioPath, sampleRate, channels, pcmDataBytes);
     } catch (err) {
       patchError = err;
       logger.error(`[ttsArtifact] WAV header patch 失敗 (${artifactId}): ${err.message || err}`);
     }
 
     // 計算 duration 並更新 metadata 狀態
-    const durationMs = calculateDurationMs(dataBytes, sampleRate, channels, DEFAULT_BITS_PER_SAMPLE);
+    const durationMs = calculateDurationMs(pcmDataBytes, sampleRate, channels, DEFAULT_BITS_PER_SAMPLE);
     const finalStatus = streamError || patchError ? 'error' : 'ready';
     const finalMetadata = {
       ...metadata,
