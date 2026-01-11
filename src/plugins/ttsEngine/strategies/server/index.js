@@ -36,15 +36,16 @@ module.exports = {
             if (!res.headersSent) {
               res.status(500).json({ error: 'ttsEngine streaming failed', details: err.message });
             } else {
-              res.end();
+              logger.error('ttsEngine 串流在回應已開始後發生錯誤，連線將被中斷，可能已送出部分音訊資料');
+              if (typeof res.destroy === 'function') {
+                res.destroy(err);
+              } else {
+                res.end();
+              }
             }
           });
 
-          session.stream.on('end', () => {
-            res.end();
-          });
-
-          session.stream.pipe(res, { end: false });
+          session.stream.pipe(res);
           return;
         } catch (e) {
           logger.error('處理 ttsEngine 遠端請求失敗: ' + e.message);

@@ -29,8 +29,13 @@ function rejectPendingSessions(reason) {
     if (session?.stream && !session.stream.destroyed) {
       session.stream.destroy(reason);
     }
-    if (session?.metadataReject) {
-      session.metadataReject(reason);
+    // Only reject metadata if it hasn't been resolved yet
+    if (session?.metadataReject && !session?.metadataResolved) {
+      try {
+        session.metadataReject(reason);
+      } catch (err) {
+        // Promise may already be resolved/rejected, ignore error
+      }
     }
   }
   sessions.clear();
@@ -66,13 +71,16 @@ function buildSession() {
   });
 
   // 保存 session 供 frame 解析時查找
-  sessions.set(sessionId, {
+  const sessionData = {
     sessionId,
     stream,
     seq: 0,
     metadataResolve,
-    metadataReject
-  });
+    metadataReject,
+    metadataResolved: false,
+    textSent: false
+  };
+  sessions.set(sessionId, sessionData);
 
   return {
     sessionId,
@@ -83,8 +91,13 @@ function buildSession() {
         throw new Error("sendText 缺少 text");
       }
       writeInputEvent({ type: "text", session_id: sessionId, text });
+      // Mark that text has been sent
+      sessionData.textSent = true;
     },
     end: () => {
+      if (!sessionData.textSent) {
+        throw new Error("必須先呼叫 sendText 才能呼叫 end");
+      }
       writeInputEvent({ type: "end", session_id: sessionId });
     }
   };
@@ -103,6 +116,7 @@ function attachFrameParser() {
 
     if (frame.type === "start") {
       // 收到 start frame，回傳 metadata 並通知呼叫端
+      session.metadataResolved = true;
       session.metadataResolve({
         format: frame.format,
         sample_rate: frame.sample_rate,
@@ -123,7 +137,10 @@ function attachFrameParser() {
         Logger.error(`[ttsEngine] ${error.message}`);
         session.stream.destroy(error);
         sessions.delete(frame.session_id);
-        activeSessionId = null;
+        // Only clear activeSessionId if this is the active session
+        if (activeSessionId === frame.session_id) {
+          activeSessionId = null;
+        }
         return;
       }
       session.seq += 1;
@@ -134,7 +151,10 @@ function attachFrameParser() {
         Logger.error(`[ttsEngine] ${error.message}`);
         session.stream.destroy(error);
         sessions.delete(frame.session_id);
-        activeSessionId = null;
+        // Only clear activeSessionId if this is the active session
+        if (activeSessionId === frame.session_id) {
+          activeSessionId = null;
+        }
       }
       return;
     }
@@ -143,7 +163,10 @@ function attachFrameParser() {
       // 收到 done frame，結束 stream
       session.stream.end();
       sessions.delete(frame.session_id);
-      activeSessionId = null;
+      // Only clear activeSessionId if this is the active session
+      if (activeSessionId === frame.session_id) {
+        activeSessionId = null;
+      }
       return;
     }
 
@@ -153,9 +176,18 @@ function attachFrameParser() {
       error.code = frame.code;
       Logger.error(`[ttsEngine] Python error: ${error.message}`);
       session.stream.destroy(error);
-      session.metadataReject(error);
+      if (!session.metadataResolved) {
+        try {
+          session.metadataReject(error);
+        } catch (err) {
+          // Promise may already be handled, ignore
+        }
+      }
       sessions.delete(frame.session_id);
-      activeSessionId = null;
+      // Only clear activeSessionId if this is the active session
+      if (activeSessionId === frame.session_id) {
+        activeSessionId = null;
+      }
       return;
     }
 
@@ -167,6 +199,14 @@ function attachFrameParser() {
     buffer = Buffer.concat([buffer, chunk]);
     while (buffer.length >= 4) {
       const frameLen = buffer.readUInt32BE(0);
+      // Add maximum frame length validation to prevent resource exhaustion
+      const MAX_FRAME_LENGTH = 50 * 1024 * 1024; // 50MB
+      if (frameLen > MAX_FRAME_LENGTH) {
+        Logger.error(`[ttsEngine] frame 長度過大: ${frameLen} bytes，超過限制 ${MAX_FRAME_LENGTH} bytes`);
+        // Skip this corrupted frame and continue
+        buffer = buffer.slice(4);
+        continue;
+      }
       if (buffer.length < 4 + frameLen) {
         return;
       }
@@ -176,9 +216,9 @@ function attachFrameParser() {
         frame = JSON.parse(frameJson);
       } catch (err) {
         Logger.error(`[ttsEngine] 解析 frame JSON 失敗: ${err.message}`);
-        rejectPendingSessions(new Error("frame JSON 解析失敗"));
-        buffer = Buffer.alloc(0);
-        return;
+        // 單一 frame JSON 壞掉時，只丟棄該 frame，保留其餘 buffer，避免中止所有 sessions
+        buffer = buffer.slice(4 + frameLen);
+        continue;
       }
       let offset = 4 + frameLen;
       if (frame.type === "audio") {
@@ -259,15 +299,23 @@ module.exports = {
           resolve();
         }, 2000); // 2 second timeout for tests
 
-        processRef.on("close", (code, signal) => {
+        const closeHandler = (code, signal) => {
           clearTimeout(timeout);
           Logger.info(`[ttsEngine] 結束, code=${code}, signal=${signal}`);
           rejectPendingSessions(new Error("ttsEngine 已關閉"));
           processRef = null;
           resolve();
-        });
+        };
 
-        if (processRef.stdin) {
+        // Remove any existing close handlers before adding new one
+        processRef.removeAllListeners("close");
+        processRef.on("close", closeHandler);
+
+        if (
+          processRef.stdin &&
+          !processRef.stdin.destroyed &&
+          !processRef.stdin.writableEnded
+        ) {
           processRef.stdin.end();
         }
       });

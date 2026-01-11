@@ -316,9 +316,8 @@ def stdin_listener():
                         session_state["text_parts"] = []
                         continue
                     session_state["status"] = "processing"
-            # 在鎖外加入佇列，避免阻塞其他輸入
-            if event_type == "end":
-                input_queue.put({"session_id": session_id, "text": combined_text})
+                    # 在鎖外加入佇列，避免阻塞其他輸入
+                    input_queue.put({"session_id": session_id, "text": combined_text})
         except Exception as exc:
             # JSON 解析或流程錯誤時，記錄 log 並回傳錯誤 frame
             logger.exception(f"解析 stdin 失敗: {exc}")
