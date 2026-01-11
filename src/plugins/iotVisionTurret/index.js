@@ -15,119 +15,104 @@ module.exports = {
    * 更新策略模式（僅允許 local）
    * @param {string} newMode - 指定策略模式
    * @param {Object} options - 傳遞給策略的設定
-   * @returns {Promise<Object>} 更新結果
    */
   async updateStrategy(newMode = 'local', options = {}) {
-    try {
-      logger.info('iotVisionTurret 插件更新策略中...');
-      if (newMode !== 'local') {
-        const message = `不支援的模式 ${newMode}，僅允許 local`;
-        logger.error(message);
-        return { ok: false, error: { message, code: 'MODE_NOT_ALLOWED' } };
-      }
-      if (!strategies.local) {
-        const message = '找不到 local 策略實作';
-        logger.error(message);
-        return { ok: false, error: { message, code: 'LOCAL_STRATEGY_MISSING' } };
-      }
-      mode = newMode;
-      strategy = strategies.local;
-      this.priority = strategy.priority;
-      logger.info(`iotVisionTurret 已切換為 ${mode} 模式`);
-      return { ok: true, mode };
-    } catch (e) {
-      logger.error('iotVisionTurret updateStrategy 錯誤: ' + e.message);
-      return { ok: false, error: { message: e.message, code: 'UPDATE_STRATEGY_ERROR', details: e } };
+    logger.info('iotVisionTurret 插件更新策略中...');
+    if (newMode !== 'local') {
+      const message = `不支援的模式 ${newMode}，僅允許 local`;
+      logger.error(message);
+      throw new Error(message);
     }
+    if (!strategies.local) {
+      const message = '找不到 local 策略實作';
+      logger.error(message);
+      throw new Error(message);
+    }
+    mode = newMode;
+    strategy = strategies.local;
+    this.priority = strategy.priority;
+    logger.info(`iotVisionTurret 已切換為 ${mode} 模式`);
   },
 
   /**
    * 啟動插件
    * @param {Object} options - 啟動設定
-   * @returns {Promise<Object>} 啟動結果
    */
   async online(options = {}) {
+    const useMode = options.mode || mode;
+    if (!strategy || useMode !== mode) {
+      await this.updateStrategy(useMode, options);
+    }
     try {
-      const useMode = options.mode || mode;
-      if (!strategy || useMode !== mode) {
-        const updateResult = await this.updateStrategy(useMode, options);
-        if (!updateResult.ok) return updateResult;
-      }
-      return await strategy.online(options);
+      await strategy.online(options);
+      logger.info('iotVisionTurret 插件已成功上線');
     } catch (e) {
       logger.error('iotVisionTurret online 錯誤: ' + e.message);
-      return { ok: false, error: { message: e.message, code: 'ONLINE_ERROR', details: e } };
+      throw e;
     }
   },
 
   /**
    * 關閉插件
-   * @returns {Promise<Object>} 關閉結果
    */
   async offline() {
+    if (!strategy) {
+      await this.updateStrategy(mode);
+    }
     try {
-      if (!strategy) {
-        const updateResult = await this.updateStrategy(mode);
-        if (!updateResult.ok) return updateResult;
-      }
-      return await strategy.offline();
+      await strategy.offline();
+      logger.info('iotVisionTurret 插件已離線');
     } catch (e) {
       logger.error('iotVisionTurret offline 錯誤: ' + e.message);
-      return { ok: false, error: { message: e.message, code: 'OFFLINE_ERROR', details: e } };
+      throw e;
     }
   },
 
   /**
    * 重啟插件
    * @param {Object} options - 重啟設定
-   * @returns {Promise<Object>} 重啟結果
    */
   async restart(options = {}) {
+    const useMode = options.mode || mode;
+    if (!strategy || useMode !== mode) {
+      await this.updateStrategy(useMode, options);
+    }
     try {
-      const useMode = options.mode || mode;
-      if (!strategy || useMode !== mode) {
-        const updateResult = await this.updateStrategy(useMode, options);
-        if (!updateResult.ok) return updateResult;
-      }
-      return await strategy.restart(options);
+      await strategy.restart(options);
     } catch (e) {
       logger.error('iotVisionTurret restart 錯誤: ' + e.message);
-      return { ok: false, error: { message: e.message, code: 'RESTART_ERROR', details: e } };
+      throw e;
     }
   },
 
   /**
    * 取得插件狀態
-   * @returns {Promise<Object>} 狀態結果
+   * @returns {Promise<number>} 狀態碼：1=online, 0=offline, -1=error
    */
   async state() {
+    if (!strategy) {
+      await this.updateStrategy(mode);
+    }
     try {
-      if (!strategy) {
-        const updateResult = await this.updateStrategy(mode);
-        if (!updateResult.ok) return updateResult;
-      }
       return await strategy.state();
     } catch (e) {
       logger.error('iotVisionTurret state 查詢錯誤: ' + e.message);
-      return { ok: false, error: { message: e.message, code: 'STATE_ERROR', details: e } };
+      return -1;
     }
   },
 
   /**
    * 傳送資料給插件並取得結果
    * @param {Object} data - 影像或控制指令參數
-   * @returns {Promise<Object>} 傳送結果
+   * @returns {Promise<boolean>} 是否成功傳送
    */
   async send(data = {}) {
-    try {
-      if (!strategy) {
-        const updateResult = await this.updateStrategy(mode);
-        if (!updateResult.ok) return updateResult;
-      }
-      return await strategy.send(data);
-    } catch (e) {
-      logger.error('iotVisionTurret send 錯誤: ' + e.message);
-      return { ok: false, error: { message: e.message, code: 'SEND_ERROR', details: e } };
+    if (!strategy) {
+      await this.updateStrategy(mode);
     }
+    if (typeof strategy.send !== 'function') {
+      return false;
+    }
+    return await strategy.send(data);
   }
 };

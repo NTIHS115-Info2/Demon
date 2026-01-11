@@ -83,7 +83,7 @@ def main() -> None:
             "metrics": {},
             "artifacts": {},
         }
-        sys.stdout.write(json.dumps(error_response, ensure_ascii=False))
+        sys.stderr.write(json.dumps(error_response, ensure_ascii=False))
         sys.exit(1)
 
 
