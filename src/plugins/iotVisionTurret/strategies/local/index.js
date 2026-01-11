@@ -23,11 +23,49 @@ const state = {
   }
 };
 
-// 併發控制：保存正在執行的 Promise 以防止多個同時執行
-let runningPromise = null;
+// 併發控制：保存正在執行的 Promise 與佇列
+let activeRequest = null;
 
 // 預設啟動優先度
 const priority = 50;
+
+/**
+ * 處理佇列中的請求，確保一次只有一個請求執行
+ * @param {Object} data - 請求資料
+ * @returns {Promise<boolean>}
+ */
+async function executeRequest(data) {
+  // 等待前一個請求完成
+  while (activeRequest) {
+    try {
+      await activeRequest;
+    } catch (e) {
+      // 忽略前一個請求的錯誤
+      logger.warn('前一個請求失敗: ' + e.message);
+    }
+  }
+  
+  // 建立當前請求的 Promise
+  const requestPromise = (async () => {
+    try {
+      const response = await runPython({ action: 'infer', payload: data }, state.config);
+      state.lastResult = response;
+      state.lastError = null;
+      state.metrics.lastRunAt = new Date().toISOString();
+      state.metrics.totalRuns += 1;
+      return true;
+    } finally {
+      // 完成後清空 active request（僅當前請求）
+      if (activeRequest === requestPromise) {
+        activeRequest = null;
+      }
+    }
+  })();
+  
+  // 立即設定為活動請求
+  activeRequest = requestPromise;
+  return await requestPromise;
+}
 
 /**
  * 合併與驗證設定
@@ -160,35 +198,6 @@ module.exports = {
       throw new Error('iotVisionTurret 尚未上線');
     }
     
-    // 併發控制：如果有請求正在執行，等待其完成
-    if (runningPromise) {
-      logger.warn('iotVisionTurret 有請求正在處理中，等待完成...');
-      try {
-        await runningPromise;
-      } catch (e) {
-        // 忽略前一個請求的錯誤，但記錄以供除錯
-        logger.warn('前一個請求失敗: ' + e.message);
-      }
-    }
-    
-    // 建立新的執行 Promise 並立即賦值以防止競態條件
-    const currentPromise = (async () => {
-      try {
-        const response = await runPython({ action: 'infer', payload: data }, state.config);
-        state.lastResult = response;
-        state.lastError = null;
-        state.metrics.lastRunAt = new Date().toISOString();
-        state.metrics.totalRuns += 1;
-        return true;
-      } finally {
-        // 只有當前 Promise 完成時才清空
-        if (runningPromise === currentPromise) {
-          runningPromise = null;
-        }
-      }
-    })();
-    
-    runningPromise = currentPromise;
-    return await currentPromise;
+    return await executeRequest(data);
   }
 };
