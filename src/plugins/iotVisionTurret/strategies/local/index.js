@@ -23,6 +23,9 @@ const state = {
   }
 };
 
+// 併發控制：保存正在執行的 Promise 以防止多個同時執行
+let runningPromise = null;
+
 // 預設啟動優先度
 const priority = 50;
 
@@ -156,11 +159,31 @@ module.exports = {
     if (!state.online) {
       throw new Error('iotVisionTurret 尚未上線');
     }
-    const response = await runPython({ action: 'infer', payload: data }, state.config);
-    state.lastResult = response;
-    state.lastError = null;
-    state.metrics.lastRunAt = new Date().toISOString();
-    state.metrics.totalRuns += 1;
-    return true;
+    
+    // 併發控制：如果有請求正在執行，等待其完成
+    if (runningPromise) {
+      logger.warn('iotVisionTurret 有請求正在處理中，等待完成...');
+      try {
+        await runningPromise;
+      } catch (e) {
+        // 忽略前一個請求的錯誤
+      }
+    }
+    
+    // 建立新的執行 Promise
+    runningPromise = (async () => {
+      try {
+        const response = await runPython({ action: 'infer', payload: data }, state.config);
+        state.lastResult = response;
+        state.lastError = null;
+        state.metrics.lastRunAt = new Date().toISOString();
+        state.metrics.totalRuns += 1;
+        return true;
+      } finally {
+        runningPromise = null;
+      }
+    })();
+    
+    return await runningPromise;
   }
 };
