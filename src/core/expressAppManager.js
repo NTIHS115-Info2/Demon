@@ -38,8 +38,13 @@ function getExpressApp() {
  * @returns {Object} 注入後的 Express app
  */
 function setExpressApp(app) {
-  // 基本檢查：避免注入無效物件
-  if (!app || typeof app.use !== 'function') {
+  // 基本檢查：避免注入無效物件，並確保為類 Express 實例
+  if (
+    !app ||
+    typeof app.use !== 'function' ||
+    typeof app.listen !== 'function' ||
+    typeof app.get !== 'function'
+  ) {
     throw new Error('Express app 注入失敗：無效的 app 物件');
   }
   expressApp = app;

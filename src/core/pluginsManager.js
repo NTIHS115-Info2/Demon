@@ -564,7 +564,7 @@ class PluginsManager {
           // 將主服務 Express app 注入到插件啟動選項，避免插件自行開 server
           const mergedOptions = {
             ...options,
-            expressApp: options?.expressApp || this.getExpressApp()
+            expressApp: ('expressApp' in options) ? options.expressApp : this.getExpressApp()
           };
           await plugin.online(mergedOptions);  // 這裡的 online 是真實啟動流程
           Logger.info(`[Queue] 插件 ${label} 啟動完成`);

@@ -121,6 +121,14 @@ function resetDeviceState(reason) {
   // 清空待送指令
   pendingCommands.length = 0;
 
+  // 清空長輪詢等待者
+  for (const waiter of pendingPullWaiters) {
+    if (waiter.timeoutId) {
+      clearTimeout(waiter.timeoutId);
+    }
+  }
+  pendingPullWaiters.length = 0;
+
   // 清除所有影像等待者並回報錯誤
   for (const [imageId, waiter] of imageWaiters.entries()) {
     clearTimeout(waiter.timer);
@@ -212,56 +220,10 @@ function waitForImage(imageId, timeoutMs = 30000) {
   });
 }
 
-/**
- * 解析 multipart/form-data，取得第一個檔案內容
- * @param {Buffer} buffer - 原始 body
- * @param {string} boundary - multipart boundary
- * @returns {Buffer|null} 影像內容
- */
-function parseMultipartBuffer(buffer, boundary) {
-  // 以 boundary 切分各段內容
-  const delimiter = Buffer.from(`--${boundary}`);
-  const parts = [];
-  let start = 0;
 
-  while (start < buffer.length) {
-    const index = buffer.indexOf(delimiter, start);
-    if (index === -1) break;
-    if (index !== start) {
-      parts.push(buffer.slice(start, index));
-    }
-    start = index + delimiter.length;
-  }
-
-  // 逐段解析並取第一個含檔案的段落
-  for (const rawPart of parts) {
-    // 去除開頭結尾的換行符號
-    let part = rawPart;
-    if (part.length === 0) continue;
-    if (part.slice(0, 2).toString() === '\r\n') {
-      part = part.slice(2);
-    }
-    if (part.slice(-2).toString() === '\r\n') {
-      part = part.slice(0, -2);
-    }
-
-    const headerEnd = part.indexOf(Buffer.from('\r\n\r\n'));
-    if (headerEnd === -1) continue;
-
-    const headerText = part.slice(0, headerEnd).toString('utf8');
-    if (!headerText.includes('Content-Disposition')) continue;
-
-    const body = part.slice(headerEnd + 4);
-    if (body.length > 0) {
-      return body;
-    }
-  }
-
-  return null;
-}
 
 /**
- * 解析上傳內容，支援 binary 或 multipart/form-data
+ * 解析上傳內容，僅支援 binary body (application/octet-stream 或 image/*)
  * @param {Object} req - Express request
  * @returns {Buffer} 影像內容
  */
@@ -269,26 +231,12 @@ function extractUploadBuffer(req) {
   const contentType = req.headers['content-type'] || '';
   const bodyBuffer = Buffer.isBuffer(req.body) ? req.body : Buffer.from([]);
 
-  // binary body（application/octet-stream）
+  // 僅支援 binary body（application/octet-stream 或 image/*）
   if (contentType.startsWith('application/octet-stream') || contentType.startsWith('image/')) {
     return bodyBuffer;
   }
 
-  // multipart/form-data
-  if (contentType.startsWith('multipart/form-data')) {
-    const match = contentType.match(/boundary=([^;]+)/i);
-    if (!match) {
-      throw new Error('multipart/form-data 缺少 boundary');
-    }
-    const boundary = match[1];
-    const parsed = parseMultipartBuffer(bodyBuffer, boundary);
-    if (!parsed) {
-      throw new Error('multipart/form-data 解析失敗：找不到檔案內容');
-    }
-    return parsed;
-  }
-
-  throw new Error('不支援的 Content-Type');
+  throw new Error('不支援的 Content-Type，僅支援 application/octet-stream 或 image/*');
 }
 
 /**
@@ -329,10 +277,21 @@ function registerRoutes(app) {
       return sendError(res, 400, 'device_id 為必填欄位');
     }
 
+    // 驗證 device_id 格式：僅允許英數字、底線、連字號，長度 1-64
+    if (!/^[a-zA-Z0-9_-]{1,64}$/.test(deviceId)) {
+      logger.warn(`[iotVisionTurret] 註冊失敗：device_id 格式不符：${deviceId}`);
+      return sendError(res, 400, 'device_id 僅允許英數字、底線、連字號，長度 1-64 字元');
+    }
+
+    // 檢查是否有上傳作業進行中，避免在上傳時重置狀態造成衝突
+    if (jobLock) {
+      logger.warn(`[iotVisionTurret] 註冊被拒絕：目前有上傳作業進行中`);
+      return sendError(res, 409, '目前有上傳作業進行中，請稍後再試');
+    }
+
     // 重置狀態並標記裝置上線
     currentDeviceId = deviceId;
     deviceOnline = true;
-    jobLock = false;
     resetDeviceState('裝置重新註冊');
 
     logger.info(`[iotVisionTurret] 裝置已上線：${deviceId}，狀態已重置`);
@@ -392,11 +351,23 @@ function registerRoutes(app) {
       logger.warn('[iotVisionTurret] 長輪詢連線中斷，已清理等待者');
     });
 
+    // 先加入等待者後再次檢查，避免競態條件導致錯過指令
     pendingPullWaiters.push(waiter);
+    
+    // 再次檢查是否有新指令加入（避免在加入等待者前有指令進來）
+    if (pendingCommands.length > 0 && !finished) {
+      finished = true;
+      clearTimeout(timeoutId);
+      const index = pendingPullWaiters.indexOf(waiter);
+      if (index >= 0) {
+        pendingPullWaiters.splice(index, 1);
+      }
+      drainCommandsResponse(res);
+    }
   });
 
   // 影像上傳：POST /iot/upload?image_id=...
-  router.post('/iot/upload', express.raw({ type: ['application/octet-stream', 'multipart/form-data'], limit: '20mb' }), async (req, res) => {
+  router.post('/iot/upload', express.raw({ type: ['application/octet-stream', 'image/*'], limit: '20mb' }), async (req, res) => {
     // 裝置未註冊時拒絕
     if (!deviceOnline || !currentDeviceId) {
       logger.warn('[iotVisionTurret] 裝置未註冊卻嘗試上傳影像');
@@ -407,6 +378,12 @@ function registerRoutes(app) {
     if (!imageId) {
       logger.warn('[iotVisionTurret] 上傳失敗：缺少 image_id');
       return sendError(res, 400, 'image_id 為必填 query 參數');
+    }
+
+    // 驗證 imageId 格式：僅允許英數字、底線、連字號，防止路徑穿越攻擊
+    if (!/^[a-zA-Z0-9_-]{1,64}$/.test(imageId)) {
+      logger.warn(`[iotVisionTurret] 上傳失敗：image_id 格式不符：${imageId}`);
+      return sendError(res, 400, 'image_id 僅允許英數字、底線、連字號，長度 1-64 字元');
     }
 
     logger.info(`[iotVisionTurret] 收到影像上傳，Content-Type=${req.headers['content-type'] || 'unknown'}`);
@@ -586,7 +563,7 @@ module.exports = {
   /**
    * 傳送資料給 Python runner 並取得結果
    * @param {Object} data - 影像辨識或控制指令參數
-   * @returns {Promise<boolean>} 是否成功傳送
+   * @returns {Promise<boolean|string>} 若為 waitImageId 則回傳影像路徑，否則回傳是否成功
    */
   async send(data = {}) {
     if (!state.online) {
@@ -603,10 +580,10 @@ module.exports = {
       return true;
     }
 
-    // 若指定等待影像，則進入等待流程
+    // 若指定等待影像，則進入等待流程並回傳影像路徑
     if (data?.waitImageId) {
-      await waitForImage(data.waitImageId, Number(data.waitTimeoutMs) || 30000);
-      return true;
+      const imagePath = await waitForImage(data.waitImageId, Number(data.waitTimeoutMs) || 30000);
+      return imagePath;
     }
 
     return await executeRequest(data);

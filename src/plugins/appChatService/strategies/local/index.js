@@ -214,6 +214,11 @@ module.exports = {
    * 啟動插件：向主服務 Express app 註冊路由
    * options:
    *  - expressApp: 由主服務注入的 Express app
+   * 
+   * 設計說明：
+   *  - registered: 標記路由是否已註冊到 Express（路由無法動態解除，故僅註冊一次）
+   *  - isOnline: 標記插件的運行狀態（允許 offline/online 切換）
+   *  - 當 registered=true 且 isOnline=false 時，online() 會跳過路由註冊但更新 isOnline 狀態
    */
   async online(options = {}) {
     if (registered && isOnline) {
@@ -249,11 +254,13 @@ module.exports = {
 
   /**
    * 關閉插件：僅更新狀態（Express 路由無法動態解除）
+   * 注意：expressApp 引用保留以供重新上線時使用
    */
   async offline() {
     if (!registered) return true;
 
     // 無法解除路由，僅標記為離線，避免重複註冊
+    // expressApp 引用保留，因為 Express 路由一旦註冊無法移除
     isOnline = false;
     logger.warn('[appChatService] 已標記離線（Express 路由仍保留）');
     return true;
