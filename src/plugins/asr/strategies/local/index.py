@@ -50,7 +50,8 @@ try:
     base_dir = os.path.realpath(os.getenv("ASR_INPUT_BASE_DIR", os.getcwd()))
     
     # 段落說明：確認解析後的檔案路徑在允許的目錄底下
-    if os.path.commonpath([file_path_resolved, base_dir]) != base_dir:
+    relative_to_base = os.path.relpath(file_path_resolved, base_dir)
+    if relative_to_base.startswith("..") or relative_to_base == ".":
         print_json_output({
             "error": {
                 "code": "ASR_FILE_NOT_FOUND",

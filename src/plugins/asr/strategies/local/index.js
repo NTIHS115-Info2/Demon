@@ -91,12 +91,13 @@ function runPythonTranscription({
     });
 
     // 段落說明：設定轉寫逾時，避免單次任務佔用過久資源
+    let killTimeout = null;
     let timeoutHandler = setTimeout(() => {
       if (pyshell.childProcess) {
         // 段落說明：先嘗試正常終止，給予進程清理機會
         pyshell.childProcess.kill("SIGTERM");
         // 段落說明：若 3 秒後仍未結束，強制終止
-        setTimeout(() => {
+        killTimeout = setTimeout(() => {
           if (pyshell.childProcess && !pyshell.childProcess.killed) {
             pyshell.childProcess.kill("SIGKILL");
           }
@@ -119,6 +120,9 @@ function runPythonTranscription({
     // 段落說明：任務結束後回傳結果或錯誤
     pyshell.end((err) => {
       clearTimeout(timeoutHandler);
+      if (killTimeout) {
+        clearTimeout(killTimeout);
+      }
       if (err) {
         let error = err;
 
@@ -200,7 +204,8 @@ module.exports = {
     const relativePath = path.relative(baseDir, filePath);
 
     // 段落說明：若解析後路徑不在允許的目錄底下，則視為無效路徑
-    if (relativePath.startsWith("..") || relativePath === "") {
+    // 段落說明：relativePath 為 "." 表示檔案路徑等於基礎目錄本身，應拒絕
+    if (relativePath.startsWith("..") || relativePath === ".") {
       return buildError("ASR_FILE_NOT_FOUND", "指定的檔案路徑不被允許");
     }
 
