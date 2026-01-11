@@ -67,6 +67,17 @@ function sanitizeChunk(chunk) {
 }
 
 /**
+ * 消費 ttsEngine 回傳的串流，確保音訊資料被實際讀取
+ * @param {Object|false} engineResult - sendToTtsEngine 的回傳值
+ */
+function consumeEngineStream(engineResult) {
+  // 若 TTS 引擎回傳可讀串流，至少將其設為 flowing 狀態以實際消費音訊資料
+  if (engineResult && engineResult.stream && typeof engineResult.stream.resume === 'function') {
+    engineResult.stream.resume();
+  }
+}
+
+/**
  * 解析使用模式並提供預設值，保持對外接口相容
  * @param {Object} options
  * @returns {string} mode
@@ -274,7 +285,7 @@ async function sendToTtsEngine(sentence, traceInfo) {
         `[SpeechBroker] ttsEngine 串流未收到 done (trace_id=${traceInfo.traceId})`
       );
       try {
-        if (session.stream) {
+        if (session && session.stream) {
           if (typeof session.stream.destroy === 'function') {
             session.stream.destroy(
               new Error('ttsEngine stream timeout: did not receive end within expected time')
@@ -340,10 +351,7 @@ module.exports = {
             // 根據模式選擇 ttsArtifact 或 ttsEngine，避免隱式 fallback
             if (activeMode === TTS_MODES.ENGINE) {
               const engineResult = await sendToTtsEngine(sanitized, traceInfo);
-              // 若 TTS 引擎回傳可讀串流，至少將其設為 flowing 狀態以實際消費音訊資料
-              if (engineResult && engineResult.stream && typeof engineResult.stream.resume === 'function') {
-                engineResult.stream.resume();
-              }
+              consumeEngineStream(engineResult);
             } else {
               await sendToTtsArtifact(sanitized, traceInfo);
             }
@@ -370,10 +378,7 @@ module.exports = {
           );
           if (activeMode === TTS_MODES.ENGINE) {
             const engineResult = await sendToTtsEngine(remainingSentence, traceInfo);
-            // 若 TTS 引擎回傳可讀串流，至少將其設為 flowing 狀態以實際消費音訊資料
-            if (engineResult && engineResult.stream && typeof engineResult.stream.resume === 'function') {
-              engineResult.stream.resume();
-            }
+            consumeEngineStream(engineResult);
           } else {
             await sendToTtsArtifact(remainingSentence, traceInfo);
           }
@@ -397,10 +402,7 @@ module.exports = {
           );
           if (activeMode === TTS_MODES.ENGINE) {
             const engineResult = await sendToTtsEngine(remainingSentence, traceInfo);
-            // 若 TTS 引擎回傳可讀串流，至少將其設為 flowing 狀態以實際消費音訊資料
-            if (engineResult && engineResult.stream && typeof engineResult.stream.resume === 'function') {
-              engineResult.stream.resume();
-            }
+            consumeEngineStream(engineResult);
           } else {
             await sendToTtsArtifact(remainingSentence, traceInfo);
           }
