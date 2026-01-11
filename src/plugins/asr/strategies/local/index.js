@@ -299,7 +299,7 @@ module.exports = {
       }
 
       // 段落說明：清理空值欄位，符合上層可選欄位規格
-      if (payload && payload.confidence === null) {
+      if (payload && payload.confidence == null) {
         delete payload.confidence;
       }
       if (payload && payload.segments == null) {
