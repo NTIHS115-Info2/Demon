@@ -1,0 +1,5 @@
+{
+  "name": "ttsArtifact",
+  "priority": 60,
+  "pluginType": "Tool"
+}
