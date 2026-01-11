@@ -289,10 +289,10 @@ function registerRoutes(app) {
       return sendError(res, 409, '目前有上傳作業進行中，請稍後再試');
     }
 
-    // 重置狀態並標記裝置上線
+    // 先重置舊狀態，再標記裝置上線
+    resetDeviceState('裝置重新註冊');
     currentDeviceId = deviceId;
     deviceOnline = true;
-    resetDeviceState('裝置重新註冊');
 
     logger.info(`[iotVisionTurret] 裝置已上線：${deviceId}，狀態已重置`);
     return res.status(200).json({
@@ -351,10 +351,15 @@ function registerRoutes(app) {
       logger.warn('[iotVisionTurret] 長輪詢連線中斷，已清理等待者');
     });
 
-    // 先加入等待者後再次檢查，避免競態條件導致錯過指令
+    // 先加入等待者
     pendingPullWaiters.push(waiter);
     
-    // 再次檢查是否有新指令加入（避免在加入等待者前有指令進來）
+    // 再次檢查是否有新指令加入，避免以下競態條件：
+    // 1. 第一次檢查時 pendingCommands 為空
+    // 2. enqueueCommand 在另一個非同步操作中被呼叫，但此時 waiter 尚未加入 pendingPullWaiters
+    // 3. enqueueCommand 無法喚醒 waiter（因為還沒加入）
+    // 4. waiter 加入後會一直等待直到逾時
+    // 透過二次檢查，確保不會錯過在加入 waiter 前後到達的指令
     if (pendingCommands.length > 0 && !finished) {
       finished = true;
       clearTimeout(timeoutId);
@@ -563,7 +568,7 @@ module.exports = {
   /**
    * 傳送資料給 Python runner 並取得結果
    * @param {Object} data - 影像辨識或控制指令參數
-   * @returns {Promise<boolean|string>} 若為 waitImageId 則回傳影像路徑，否則回傳是否成功
+   * @returns {Promise<boolean|string>} Returns image path if waitImageId specified, otherwise returns success boolean
    */
   async send(data = {}) {
     if (!state.online) {
