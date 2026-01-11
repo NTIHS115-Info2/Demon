@@ -1,0 +1,10 @@
+{
+  "version": "1.0",
+  "mode": "unidirectional",
+  "description": "News Scraper Domain Synonyms Database",
+  "synonyms": {
+    "SpaceX": ["Starship", "Elon Musk", "Falcon 9"],
+    "TSMC": ["台積電", "Semiconductor", "Chip"],
+    "OpenAI": ["ChatGPT", "Sam Altman", "GPT-4"]
+  }
+}
