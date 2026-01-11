@@ -10,6 +10,11 @@ src/plugins/ttsEngine/strategies/local/f5_tts
 logs
 /index.js
 
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+
 src/plugins/discord/config.js
 
 __test__/localPass
