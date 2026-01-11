@@ -116,12 +116,18 @@ function buildDatePath(date = new Date()) {
 
 // 建立 WAV header，供 placeholder 與最終 patch 使用
 function buildWavHeader({ sampleRate, channels, bitsPerSample, dataSize }) {
-  const byteRate = sampleRate * channels * (bitsPerSample / 8);
-  const blockAlign = channels * (bitsPerSample / 8);
+  // 在進行乘法前先驗證參數範圍，避免計算過程中溢位
+  if (sampleRate > 0xFFFFFFFF || channels > 0xFFFF || bitsPerSample > 0xFFFF) {
+    throw new Error(`WAV header 參數超出範圍：sampleRate=${sampleRate}, channels=${channels}, bitsPerSample=${bitsPerSample}`);
+  }
 
-  // 檢查計算值是否在合理範圍內，避免整數溢位或不合法值
+  const bytesPerSample = bitsPerSample / 8;
+  const blockAlign = channels * bytesPerSample;
+  const byteRate = sampleRate * blockAlign;
+
+  // 檢查計算值是否在合理範圍內
   if (byteRate > 0xFFFFFFFF || blockAlign > 0xFFFF) {
-    throw new Error(`WAV header 參數超出範圍：byteRate=${byteRate}, blockAlign=${blockAlign}`);
+    throw new Error(`WAV header 計算值超出範圍：byteRate=${byteRate}, blockAlign=${blockAlign}`);
   }
 
   const buffer = Buffer.alloc(WAV_HEADER_SIZE);
@@ -657,7 +663,12 @@ module.exports = {
         if (streamError) break;
         if (!chunk) continue;
         pcmDataBytes += chunk.length;
-        if (!writeStream.write(chunk)) {
+        const needsDrain = !writeStream.write(chunk);
+        if (needsDrain) {
+          // 檢查是否已經 drained（避免競態條件導致無限等待）
+          if (!writeStream.writableNeedDrain) {
+            continue;
+          }
           await new Promise((resolve, reject) => {
             const onDrain = () => {
               writeStream.removeListener('error', onError);
