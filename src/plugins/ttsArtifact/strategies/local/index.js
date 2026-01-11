@@ -62,6 +62,13 @@ const WAV_BITS_PER_SAMPLE_OFFSET = 34;
 const WAV_DATA_CHUNK_OFFSET = 36;
 const WAV_DATA_SIZE_OFFSET = 40;
 
+// WAV 格式限制常數
+const MAX_UINT32 = 0xFFFFFFFF;
+const MAX_UINT16 = 0xFFFF;
+
+// ULID 格式驗證常數
+const ULID_PATTERN = /^[0-9A-HJKMNP-TV-Z]{26}$/;
+
 // 保存 HTTP server 與狀態，便於線上/離線管理
 let app = null;
 let server = null;
@@ -117,7 +124,7 @@ function buildDatePath(date = new Date()) {
 // 建立 WAV header，供 placeholder 與最終 patch 使用
 function buildWavHeader({ sampleRate, channels, bitsPerSample, dataSize }) {
   // 在進行乘法前先驗證參數範圍，避免計算過程中溢位
-  if (sampleRate > 0xFFFFFFFF || channels > 0xFFFF || bitsPerSample > 0xFFFF) {
+  if (sampleRate > MAX_UINT32 || channels > MAX_UINT16 || bitsPerSample > MAX_UINT16) {
     throw new Error(`WAV header 參數超出範圍：sampleRate=${sampleRate}, channels=${channels}, bitsPerSample=${bitsPerSample}`);
   }
 
@@ -126,7 +133,7 @@ function buildWavHeader({ sampleRate, channels, bitsPerSample, dataSize }) {
   const byteRate = sampleRate * blockAlign;
 
   // 檢查計算值是否在合理範圍內
-  if (byteRate > 0xFFFFFFFF || blockAlign > 0xFFFF) {
+  if (byteRate > MAX_UINT32 || blockAlign > MAX_UINT16) {
     throw new Error(`WAV header 計算值超出範圍：byteRate=${byteRate}, blockAlign=${blockAlign}`);
   }
 
@@ -166,6 +173,16 @@ function buildPublicUrl(artifactId) {
     || process.env.TTS_ARTIFACT_PUBLIC_BASE_URL
     || `http://localhost:${currentPort}`;
   return `${baseUrl}/media/${artifactId}/file`;
+}
+
+// 驗證 artifact_id 是否為合法的 ULID 格式
+function isValidArtifactId(artifactId) {
+  return ULID_PATTERN.test(artifactId);
+}
+
+// 驗證 channels 參數是否合法
+function isValidChannels(channels) {
+  return channels && !Number.isNaN(channels) && channels >= 1 && Number.isInteger(channels);
 }
 
 // 寫入 metadata 到檔案，確保 artifact 狀態落地保存
@@ -276,7 +293,7 @@ function buildExpressApp() {
     const artifactId = req.params.artifact_id;
 
     // 驗證 artifact_id 格式，防止路徑遍歷攻擊
-    if (!/^[0-9A-HJKMNP-TV-Z]{26}$/.test(artifactId)) {
+    if (!isValidArtifactId(artifactId)) {
       logger.warn(`[ttsArtifact] 無效的 artifact_id 格式: ${artifactId}`);
       return res.status(400).json({
         error: 'INVALID_ARTIFACT_ID',
@@ -596,7 +613,7 @@ module.exports = {
       return { error: `${ERROR_CODES.TTS_ENGINE}: ${message}` };
     }
 
-    if (!channels || Number.isNaN(channels) || channels < 1 || !Number.isInteger(channels)) {
+    if (!isValidChannels(channels)) {
       const message = `ttsEngine 回傳 channels 無效 (${channels})`;
       logger.error(`[ttsArtifact] ${message}`);
       return { error: `${ERROR_CODES.TTS_ENGINE}: ${message}` };
