@@ -25,3 +25,4 @@ config/*.js
 !config/*.example.js
 tokens/
 !tokens/README.md
+__pycache__/
