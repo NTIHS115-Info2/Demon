@@ -26,6 +26,9 @@ const SUPPORTED_MIME_TYPES = new Set([
 // 段落說明：預設逾時設定，避免轉寫過久阻塞上層流程
 const DEFAULT_TIMEOUT_MS = 120000;
 
+// 段落說明：SIGTERM 逾時設定，給予進程清理資源的時間
+const SIGTERM_GRACE_PERIOD_MS = 3000;
+
 // 段落說明：回傳錯誤格式的共用工具，統一錯誤結構
 function buildError(code, message) {
   return {
@@ -96,12 +99,12 @@ function runPythonTranscription({
       if (pyshell.childProcess) {
         // 段落說明：先嘗試正常終止，給予進程清理機會
         pyshell.childProcess.kill("SIGTERM");
-        // 段落說明：若 3 秒後仍未結束，強制終止
+        // 段落說明：若指定時間後仍未結束，強制終止
         killTimeout = setTimeout(() => {
           if (pyshell.childProcess && !pyshell.childProcess.killed) {
             pyshell.childProcess.kill("SIGKILL");
           }
-        }, 3000);
+        }, SIGTERM_GRACE_PERIOD_MS);
       }
       const error = new Error("ASR_TIMEOUT");
       error.code = "ASR_TIMEOUT";

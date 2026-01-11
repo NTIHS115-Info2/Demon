@@ -8,6 +8,10 @@ import sys
 import torch
 import whisper
 
+# 段落說明：定義 log 機率值裁剪範圍，避免 exp 計算溢位或下溢
+LOG_PROB_MIN = -50.0
+LOG_PROB_MAX = 50.0
+
 # 段落說明：解析命令列參數，定義檔案轉寫所需的輸入欄位
 parser = argparse.ArgumentParser(description="Whisper 檔案轉寫服務")
 parser.add_argument("--file-path", type=str, required=True, help="音訊檔案路徑")
@@ -124,7 +128,7 @@ try:
     if segment_logprobs:
         # 段落說明：數值穩定性改善，避免 exp 計算溢位或下溢
         confidence_value = sum(
-            math.exp(max(-50.0, min(50.0, value)))
+            math.exp(max(LOG_PROB_MIN, min(LOG_PROB_MAX, value)))
             for value in segment_logprobs
         ) / len(segment_logprobs)
         confidence = max(0.0, min(1.0, confidence_value))
