@@ -9,7 +9,7 @@
 
 ## Breaking changes
 
-- 無
+- **Plugin 名稱變更**：`tts` 已重新命名為 `ttsEngine`。任何直接引用 `tts` plugin 名稱的程式碼都需要更新為 `ttsEngine`。
 
 ## 遷移指南（Migration）
 
