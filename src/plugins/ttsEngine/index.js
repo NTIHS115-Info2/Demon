@@ -4,7 +4,8 @@ const strategies = require('./strategies');
 const serverInfo = require('./strategies/server/infor');
 const OsInfor = require('../../tools/OsInfor');
 const Logger = require('../../utils/logger');
-const logger = new Logger('TTS');
+// 設定對外顯示與記錄的插件名稱為 ttsEngine，避免舊名稱殘留
+const logger = new Logger('ttsEngine');
 
 let strategy = null;
 let mode = 'local';
@@ -17,14 +18,14 @@ module.exports = {
    * @param {'local'|'remote'|'server'} newMode
    */
   async updateStrategy(newMode = 'auto', options = {}) {
-    logger.info('TTS 插件策略更新中...');
+    logger.info('ttsEngine 插件策略更新中...');
     weights = { ...weights, ...(options.weights || {}) };
 
     if (newMode !== 'auto') {
       mode = newMode;
       strategy = strategies[newMode] || strategies.local;
       this.priority = strategy.priority;
-      logger.info(`TTS 插件策略已切換為 ${mode}`);
+      logger.info(`ttsEngine 插件策略已切換為 ${mode}`);
       return;
     }
 
@@ -38,7 +39,7 @@ module.exports = {
             mode = 'remote';
             strategy = strategies.remote;
             this.priority = strategy.priority;
-            logger.info('TTS 自動選擇 remote 策略');
+            logger.info('ttsEngine 自動選擇 remote 策略');
             return;
           } catch (e) {
             logger.warn('remote 無法連線: ' + e.message);
@@ -52,7 +53,7 @@ module.exports = {
             mode = 'server';
             strategy = strategies.server;
             this.priority = strategy.priority;
-            logger.info('TTS 自動選擇 server 策略');
+            logger.info('ttsEngine 自動選擇 server 策略');
             return;
           }
         } catch (e) {
@@ -62,7 +63,7 @@ module.exports = {
         mode = 'local';
         strategy = strategies.local;
         this.priority = strategy.priority;
-        logger.info('TTS 自動選擇 local 策略');
+        logger.info('ttsEngine 自動選擇 local 策略');
         return;
       }
     }
@@ -71,40 +72,40 @@ module.exports = {
     mode = 'local';
     strategy = strategies.local;
     this.priority = strategy.priority;
-    logger.info('TTS 自動選擇預設 local 策略');
+    logger.info('ttsEngine 自動選擇預設 local 策略');
   },
 
-  // 啟動 TTS
+  // 啟動 ttsEngine
   async online(options = {}) {
     const useMode = options.mode || mode;
     if (!strategy || useMode !== mode) await this.updateStrategy(useMode, options);
     try {
       return await strategy.online(options);
     } catch (e) {
-      logger.error('[TTS] online 發生錯誤: ' + e);
+      logger.error('[ttsEngine] online 發生錯誤: ' + e);
       throw e;
     }
   },
 
-  // 關閉 TTS
+  // 關閉 ttsEngine
   async offline() {
     if (!strategy) await this.updateStrategy(mode);
     try {
       return await strategy.offline();
     } catch (e) {
-      logger.error('[TTS] offline 發生錯誤: ' + e);
+      logger.error('[ttsEngine] offline 發生錯誤: ' + e);
       throw e;
     }
   },
 
-  // 重啟 TTS
+  // 重啟 ttsEngine
   async restart(options = {}) {
     const useMode = options.mode || mode;
     if (!strategy || useMode !== mode) await this.updateStrategy(useMode, options);
     try {
       return await strategy.restart(options);
     } catch (e) {
-      logger.error('[TTS] restart 發生錯誤: ' + e);
+      logger.error('[ttsEngine] restart 發生錯誤: ' + e);
       throw e;
     }
   },
@@ -115,7 +116,7 @@ module.exports = {
     try {
       return await strategy.state();
     } catch (e) {
-      logger.error('[TTS] state 查詢錯誤: ' + e);
+      logger.error('[ttsEngine] state 查詢錯誤: ' + e);
       return -1;
     }
   },

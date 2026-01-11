@@ -5,7 +5,7 @@ src/core/soulPresets
 Server/llama/llama_cpp_bin
 Server/llama/model
 
-src/plugins/tts/strategies/local/f5_tts
+src/plugins/ttsEngine/strategies/local/f5_tts
 
 logs
 /index.js

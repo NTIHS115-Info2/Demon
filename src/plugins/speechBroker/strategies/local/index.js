@@ -56,21 +56,22 @@ function sanitizeChunk(chunk) {
 }
 
 /**
- * 將文字傳送至 TTS 插件
+ * 將文字傳送至 ttsEngine 插件
  * @param {string} sentence
  */
-async function sendToTTS(sentence) {
+async function sendToTtsEngine(sentence) {
   try {
-    const ttsState = await PM.getPluginState('tts');
+    // 透過 pluginsManager 確認 ttsEngine 狀態，避免離線時送出請求
+    const ttsState = await PM.getPluginState('ttsEngine');
     if (ttsState !== 1) {
-      logger.warn(`[SpeechBroker] TTS 插件未上線，跳過語音輸出 (狀態: ${ttsState}): ${sentence}`);
+      logger.warn(`[SpeechBroker] ttsEngine 插件未上線，跳過語音輸出 (狀態: ${ttsState}): ${sentence}`);
       return false;
     }
-    PM.send('tts', sentence);
+    PM.send('ttsEngine', sentence);
     logger.info(`[SpeechBroker] 成功送出語音: ${sentence}`);
     return true;
   } catch (e) {
-    logger.error(`[SpeechBroker] TTS 輸出失敗: ${e.message || e}`);
+    logger.error(`[SpeechBroker] ttsEngine 輸出失敗: ${e.message || e}`);
     return false;
   }
 }
@@ -96,7 +97,7 @@ module.exports = {
           
           if (sanitized.length > 0) {
             logger.info(`[SpeechBroker] 偵測到句尾，處理完整句子: "${sentence}" → "${sanitized}"`);
-            await sendToTTS(sanitized);
+            await sendToTtsEngine(sanitized);
           }
           buffer = '';
         } else {
@@ -113,7 +114,7 @@ module.exports = {
         if (buffer.trim().length > 0) {
           const remainingSentence = sanitizeChunk(buffer.trim() + '.');
           logger.info(`[SpeechBroker] 串流結束，補播殘句: "${buffer.trim()}" → "${remainingSentence}"`);
-          await sendToTTS(remainingSentence);
+          await sendToTtsEngine(remainingSentence);
           buffer = '';
         }
       } catch (e) {
@@ -127,7 +128,7 @@ module.exports = {
         if (buffer.trim().length > 0) {
           const remainingSentence = sanitizeChunk(buffer.trim() + '.');
           logger.info(`[SpeechBroker] 串流中止，補播殘句: "${buffer.trim()}" → "${remainingSentence}"`);
-          await sendToTTS(remainingSentence);
+          await sendToTtsEngine(remainingSentence);
           buffer = '';
         }
       } catch (e) {
