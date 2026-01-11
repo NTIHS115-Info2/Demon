@@ -37,11 +37,8 @@ module.exports = {
               res.status(500).json({ error: 'ttsEngine streaming failed', details: err.message });
             } else {
               logger.error('ttsEngine 串流在回應已開始後發生錯誤，連線將被中斷，可能已送出部分音訊資料');
-              if (typeof res.destroy === 'function') {
-                res.destroy(err);
-              } else {
-                res.end();
-              }
+              // res.destroy() is available in Node.js >= 8.0.0 which is well supported
+              res.destroy(err);
             }
           });
 

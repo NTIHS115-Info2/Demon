@@ -12,6 +12,8 @@ const Logger = new logger("ttsEngine.log");
 let activeSessionId = null;
 // 保存 session 資料，供 stdout frame 解析時使用
 const sessions = new Map();
+// Maximum frame size to prevent resource exhaustion
+const MAX_FRAME_LENGTH = 50 * 1024 * 1024; // 50MB
 
 // 此策略的啟動優先度
 const priority = 70;
@@ -200,7 +202,6 @@ function attachFrameParser() {
     while (buffer.length >= 4) {
       const frameLen = buffer.readUInt32BE(0);
       // Add maximum frame length validation to prevent resource exhaustion
-      const MAX_FRAME_LENGTH = 50 * 1024 * 1024; // 50MB
       if (frameLen > MAX_FRAME_LENGTH) {
         Logger.error(`[ttsEngine] frame 長度過大: ${frameLen} bytes，超過限制 ${MAX_FRAME_LENGTH} bytes`);
         // Skip this corrupted frame and continue
@@ -285,6 +286,7 @@ module.exports = {
   async offline() {
     if (processRef) {
       await new Promise((resolve) => {
+        let closeHandlerRemoved = false;
         const timeout = setTimeout(() => {
           Logger.warn("[ttsEngine] 進程關閉超時，強制終止");
           try {
@@ -307,9 +309,8 @@ module.exports = {
           resolve();
         };
 
-        // Remove any existing close handlers before adding new one
-        processRef.removeAllListeners("close");
-        processRef.on("close", closeHandler);
+        // Use once() to ensure the handler is automatically removed after execution
+        processRef.once("close", closeHandler);
 
         if (
           processRef.stdin &&
