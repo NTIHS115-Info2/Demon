@@ -2,6 +2,12 @@
 
 #### iotVisionTurret 插件更新紀錄
 
+### [v0.2]
+#### New
+- 新增 IoT 裝置通訊路由（註冊、長輪詢拉取、影像上傳）並導入 Express app 注入機制
+- 加入模組層級裝置狀態與影像等待者管理流程，補齊長輪詢與上傳錯誤處理
+- 補充 iotVisionTurret README，說明裝置註冊、拉取與影像上傳流程
+
 ### [v0.1]
 #### New
 - 新增 iotVisionTurret 插件骨架，包含本地策略與 YOLOv11 目錄結構

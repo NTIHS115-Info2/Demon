@@ -48,6 +48,20 @@ function createSpawnMock(config = {}) {
 }
 
 /**
+ * 建立 mock Express app
+ * @returns {Object} mock Express app
+ */
+function createMockExpressApp() {
+  const app = {
+    use: jest.fn(),
+    get: jest.fn(),
+    post: jest.fn(),
+    listen: jest.fn()
+  };
+  return app;
+}
+
+/**
  * 依照需求載入 iotVisionTurret 本地策略
  * @param {Object} spawnConfig spawn 模擬配置
  * @returns {{strategy: Object, spawnMock: jest.Mock}}
@@ -76,7 +90,7 @@ describe('iotVisionTurret 本地策略', () => {
     };
     const { strategy, spawnMock } = loadLocalStrategy(spawnConfig);
 
-    await strategy.online();
+    await strategy.online({ expressApp: createMockExpressApp() });
 
     expect(spawnMock).toHaveBeenCalledTimes(1);
     const state = await strategy.state();
@@ -89,7 +103,7 @@ describe('iotVisionTurret 本地策略', () => {
     };
     const { strategy } = loadLocalStrategy(spawnConfig);
 
-    await expect(strategy.online()).rejects.toThrow('Python not found');
+    await expect(strategy.online({ expressApp: createMockExpressApp() })).rejects.toThrow('Python not found');
   });
 
   test('offline 應成功關閉並回傳 void', async () => {
@@ -99,7 +113,7 @@ describe('iotVisionTurret 本地策略', () => {
     };
     const { strategy } = loadLocalStrategy(spawnConfig);
 
-    await strategy.online();
+    await strategy.online({ expressApp: createMockExpressApp() });
     await strategy.offline();
 
     const state = await strategy.state();
@@ -118,7 +132,7 @@ describe('iotVisionTurret 本地策略', () => {
     expect(state).toBe(0);
 
     // 上線後應回傳 1
-    await strategy.online();
+    await strategy.online({ expressApp: createMockExpressApp() });
     state = await strategy.state();
     expect(state).toBe(1);
   });
@@ -130,10 +144,10 @@ describe('iotVisionTurret 本地策略', () => {
     };
     const { strategy, spawnMock } = loadLocalStrategy(spawnConfig);
 
-    await strategy.online();
+    await strategy.online({ expressApp: createMockExpressApp() });
     spawnMock.mockClear();
 
-    await strategy.restart();
+    await strategy.restart({ expressApp: createMockExpressApp() });
 
     // restart 會呼叫一次 online (ping)
     expect(spawnMock).toHaveBeenCalledTimes(1);
@@ -158,7 +172,7 @@ describe('iotVisionTurret 本地策略', () => {
     };
     const { strategy, spawnMock } = loadLocalStrategy(spawnConfig);
 
-    await strategy.online();
+    await strategy.online({ expressApp: createMockExpressApp() });
     spawnMock.mockClear();
 
     const result = await strategy.send({ test: 'data' });
@@ -198,7 +212,7 @@ describe('iotVisionTurret 本地策略', () => {
 
     const strategy = require('../src/plugins/iotVisionTurret/strategies/local');
 
-    await strategy.online();
+    await strategy.online({ expressApp: createMockExpressApp() });
     await expect(strategy.send({ test: 'data' })).rejects.toThrow();
   });
 
@@ -246,7 +260,7 @@ describe('iotVisionTurret 本地策略', () => {
 
     const strategy = require('../src/plugins/iotVisionTurret/strategies/local');
 
-    await strategy.online();
+    await strategy.online({ expressApp: createMockExpressApp() });
     delayedSpawnMock.mockClear();
 
     // 同時發起兩個請求
@@ -294,7 +308,7 @@ describe('iotVisionTurret 本地策略', () => {
 
     const strategy = require('../src/plugins/iotVisionTurret/strategies/local');
 
-    await strategy.online();
+    await strategy.online({ expressApp: createMockExpressApp() });
     await expect(strategy.send({ test: 'data' })).rejects.toThrow('JSON 解析失敗');
   });
 
@@ -319,7 +333,7 @@ describe('iotVisionTurret 本地策略', () => {
 
     const strategy = require('../src/plugins/iotVisionTurret/strategies/local');
 
-    const onlinePromise = strategy.online({ timeoutMs: 5000 });
+    const onlinePromise = strategy.online({ timeoutMs: 5000, expressApp: createMockExpressApp() });
 
     // 快進超時時間
     jest.advanceTimersByTime(5000);
@@ -367,7 +381,7 @@ describe('iotVisionTurret 插件整合', () => {
 
     const plugin = require('../src/plugins/iotVisionTurret');
 
-    await plugin.online();
+    await plugin.online({ expressApp: createMockExpressApp() });
     let state = await plugin.state();
     expect(state).toBe(1);
 
@@ -375,7 +389,7 @@ describe('iotVisionTurret 插件整合', () => {
     state = await plugin.state();
     expect(state).toBe(0);
 
-    await plugin.restart();
+    await plugin.restart({ expressApp: createMockExpressApp() });
     state = await plugin.state();
     expect(state).toBe(1);
   });
@@ -389,7 +403,7 @@ describe('iotVisionTurret 插件整合', () => {
 
     const plugin = require('../src/plugins/iotVisionTurret');
 
-    await plugin.online();
+    await plugin.online({ expressApp: createMockExpressApp() });
     const result = await plugin.send({ test: 'data' });
 
     expect(typeof result).toBe('boolean');

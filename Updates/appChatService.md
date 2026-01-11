@@ -1,5 +1,10 @@
 #### appChatService 插件更新紀錄
 
+## [v0.2]
+### Change
+- 改為使用主服務注入的 Express app 註冊路由，避免插件自行啟動 HTTP Server
+- 加入線上狀態管理與離線提示，保留路由避免重複註冊
+
 ## [v0.1]
 ### New
 - 新增 appChatService 功能型插件，提供 /ios-app/chat HTTP 入口
