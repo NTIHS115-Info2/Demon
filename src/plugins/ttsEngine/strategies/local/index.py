@@ -8,6 +8,10 @@ import logging
 import json
 import struct
 
+PROTOCOL_STDOUT = sys.__stdout__ if sys.__stdout__ else sys.stdout
+# 將非協議輸出的 stdout 轉到 stderr，避免污染 frame 通道
+sys.stdout = sys.stderr
+
 from scipy.signal import butter, sosfilt
 import numpy as np
 import tomli
@@ -158,11 +162,11 @@ def write_frame(frame, payload=b""):
         frame_json = json.dumps(frame, ensure_ascii=False).encode("utf-8")
         frame_len = struct.pack(">I", len(frame_json))
         with output_lock:
-            sys.stdout.buffer.write(frame_len)
-            sys.stdout.buffer.write(frame_json)
+            PROTOCOL_STDOUT.buffer.write(frame_len)
+            PROTOCOL_STDOUT.buffer.write(frame_json)
             if payload:
-                sys.stdout.buffer.write(payload)
-            sys.stdout.buffer.flush()
+                PROTOCOL_STDOUT.buffer.write(payload)
+            PROTOCOL_STDOUT.buffer.flush()
     except Exception as exc:
         logger.exception(f"寫入 frame 失敗: {exc}")
 

@@ -22,6 +22,7 @@ __test__/Archive
 
 # Additional configuration and temporary files
 *.log
+/data
 .env
 history/*.json
 !history/.gitkeep

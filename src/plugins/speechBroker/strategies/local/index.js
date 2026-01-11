@@ -5,6 +5,8 @@ const PM = require('../../../../core/pluginsManager.js');
 let buffer = '';
 let isOnline = false;
 let activeMode = 'artifact';
+let artifactSession = null;
+let artifactQueue = Promise.resolve();
 // 儲存事件處理函式，便於 offline 時移除
 const handlers = {};
 
@@ -40,6 +42,12 @@ const MAX_EXPRESSION_LENGTH = 10; // 表情最大長度，避免過長的表情�
 const TTS_MODES = {
   ARTIFACT: 'artifact',
   ENGINE: 'engine'
+};
+
+const ARTIFACT_ACTIONS = {
+  START: 'start',
+  APPEND: 'append',
+  FINALIZE: 'finalize'
 };
 
 // 定義 engine 模式監控超時，避免串流無限等待
@@ -123,6 +131,38 @@ function summarizePayload(payload) {
   return `keys=${keys.join(', ')} types=${JSON.stringify(types)}`;
 }
 
+function enqueueArtifactTask(task) {
+  const next = artifactQueue.then(task);
+  artifactQueue = next.catch(() => {});
+  return next;
+}
+
+async function sendArtifactSentence(sentence, traceInfo) {
+  const action = artifactSession ? ARTIFACT_ACTIONS.APPEND : ARTIFACT_ACTIONS.START;
+  const result = await sendToTtsArtifact(sentence, traceInfo, {
+    stream: true,
+    action,
+    artifactId: artifactSession?.artifactId
+  });
+  if (result && result.artifact_id) {
+    artifactSession = { artifactId: result.artifact_id, url: result.url };
+  } else if (!result) {
+    artifactSession = null;
+  }
+  return result;
+}
+
+async function finalizeArtifactSession(traceInfo) {
+  if (!artifactSession) return false;
+  const result = await sendToTtsArtifact(null, traceInfo, {
+    stream: true,
+    action: ARTIFACT_ACTIONS.FINALIZE,
+    artifactId: artifactSession.artifactId
+  });
+  artifactSession = null;
+  return result;
+}
+
 /**
  * 驗證 ttsArtifact 的回傳格式，避免上層拿不到預期欄位
  * @param {Object} result
@@ -153,7 +193,7 @@ function isValidArtifactResult(result) {
  * @param {{ traceId: string, requestedAt: string }} traceInfo
  * @returns {Promise<Object|false>} 成功時回傳包含 artifact_id、url、format、duration_ms 的物件，失敗時回傳 false
  */
-async function sendToTtsArtifact(sentence, traceInfo) {
+async function sendToTtsArtifact(sentence, traceInfo, options = {}) {
   // 檢查 ttsArtifact 插件狀態，避免未註冊或未上線時送出請求
   const ttsArtifactState = await PM.getPluginState('ttsArtifact');
   if (ttsArtifactState === -2) {
@@ -172,11 +212,24 @@ async function sendToTtsArtifact(sentence, traceInfo) {
   // 呼叫 ttsArtifact 建立 artifact，預設不做任何 fallback
   let result;
   try {
-    result = await PM.send('ttsArtifact', {
-      text: sentence,
+    const payload = {
       trace_id: traceInfo.traceId,
       requested_at: traceInfo.requestedAt
-    });
+    };
+    if (sentence) {
+      payload.text = sentence;
+    }
+    if (options.stream === true) {
+      payload.stream = true;
+    }
+    if (options.action) {
+      payload.action = options.action;
+    }
+    const artifactId = options.artifactId || options.artifact_id;
+    if (artifactId) {
+      payload.artifact_id = artifactId;
+    }
+    result = await PM.send('ttsArtifact', payload);
   } catch (e) {
     logger.error(
       `[SpeechBroker] 呼叫 ttsArtifact 失敗 (trace_id=${traceInfo.traceId}): ${e.message || e}`
@@ -331,6 +384,8 @@ module.exports = {
     }
     isOnline = true;
     buffer = '';
+    artifactSession = null;
+    artifactQueue = Promise.resolve();
     // 解析並儲存模式設定，確保後續串流處理一致
     activeMode = resolveMode(options);
     logger.info(`[SpeechBroker] 已設定 TTS 模式為 ${activeMode}`);
@@ -353,7 +408,7 @@ module.exports = {
               const engineResult = await sendToTtsEngine(sanitized, traceInfo);
               consumeEngineStream(engineResult);
             } else {
-              await sendToTtsArtifact(sanitized, traceInfo);
+              await enqueueArtifactTask(() => sendArtifactSentence(sanitized, traceInfo));
             }
           }
           buffer = '';
@@ -366,24 +421,42 @@ module.exports = {
     };
     talker.on('data', handlers.onData);
 
-    handlers.onEnd = async () => {
+    handlers.onEnd = async (endInfo = {}) => {
       try {
-        if (buffer.trim().length > 0) {
-          const remainingSentence = sanitizeChunk(buffer.trim() + '.');
-          // 產生追蹤資訊，補播殘句並維持模式一致
-          const traceInfo = buildTraceInfo();
-          logger.info(
-            `[SpeechBroker] 串流結束，補播殘句 (mode=${activeMode}, trace_id=${traceInfo.traceId}): ` +
-            `"${buffer.trim()}" → "${remainingSentence}"`
-          );
-          if (activeMode === TTS_MODES.ENGINE) {
+        const shouldFinalize = !endInfo?.toolTriggered;
+        if (activeMode === TTS_MODES.ENGINE) {
+          if (buffer.trim().length > 0) {
+            const remainingSentence = sanitizeChunk(buffer.trim() + '.');
+            // 產生追蹤資訊，補播殘句並維持模式一致
+            const traceInfo = buildTraceInfo();
+            logger.info(
+              `[SpeechBroker] 串流結束，補播殘句 (mode=${activeMode}, trace_id=${traceInfo.traceId}): ` +
+              `"${buffer.trim()}" → "${remainingSentence}"`
+            );
             const engineResult = await sendToTtsEngine(remainingSentence, traceInfo);
             consumeEngineStream(engineResult);
-          } else {
-            await sendToTtsArtifact(remainingSentence, traceInfo);
+            buffer = '';
           }
-          buffer = '';
+          return;
         }
+
+        await enqueueArtifactTask(async () => {
+          if (buffer.trim().length > 0) {
+            const remainingSentence = sanitizeChunk(buffer.trim() + '.');
+            const traceInfo = buildTraceInfo();
+            logger.info(
+              `[SpeechBroker] 串流結束，補播殘句 (mode=${activeMode}, trace_id=${traceInfo.traceId}): ` +
+              `"${buffer.trim()}" → "${remainingSentence}"`
+            );
+            await sendArtifactSentence(remainingSentence, traceInfo);
+            buffer = '';
+          }
+
+          if (shouldFinalize) {
+            const traceInfo = buildTraceInfo();
+            await finalizeArtifactSession(traceInfo);
+          }
+        });
       } catch (e) {
         logger.error(`[SpeechBroker] end事件處理錯誤: ${e.message || e}`);
       }
@@ -392,22 +465,37 @@ module.exports = {
 
     handlers.onAbort = async () => {
       try {
-        if (buffer.trim().length > 0) {
-          const remainingSentence = sanitizeChunk(buffer.trim() + '.');
-          // 產生追蹤資訊，補播殘句並維持模式一致
-          const traceInfo = buildTraceInfo();
-          logger.info(
-            `[SpeechBroker] 串流中止，補播殘句 (mode=${activeMode}, trace_id=${traceInfo.traceId}): ` +
-            `"${buffer.trim()}" → "${remainingSentence}"`
-          );
-          if (activeMode === TTS_MODES.ENGINE) {
+        if (activeMode === TTS_MODES.ENGINE) {
+          if (buffer.trim().length > 0) {
+            const remainingSentence = sanitizeChunk(buffer.trim() + '.');
+            // 產生追蹤資訊，補播殘句並維持模式一致
+            const traceInfo = buildTraceInfo();
+            logger.info(
+              `[SpeechBroker] 串流中止，補播殘句 (mode=${activeMode}, trace_id=${traceInfo.traceId}): ` +
+              `"${buffer.trim()}" → "${remainingSentence}"`
+            );
             const engineResult = await sendToTtsEngine(remainingSentence, traceInfo);
             consumeEngineStream(engineResult);
-          } else {
-            await sendToTtsArtifact(remainingSentence, traceInfo);
+            buffer = '';
           }
-          buffer = '';
+          return;
         }
+
+        await enqueueArtifactTask(async () => {
+          if (buffer.trim().length > 0) {
+            const remainingSentence = sanitizeChunk(buffer.trim() + '.');
+            // 產生追蹤資訊，補播殘句並維持模式一致
+            const traceInfo = buildTraceInfo();
+            logger.info(
+              `[SpeechBroker] 串流中止，補播殘句 (mode=${activeMode}, trace_id=${traceInfo.traceId}): ` +
+              `"${buffer.trim()}" → "${remainingSentence}"`
+            );
+            await sendArtifactSentence(remainingSentence, traceInfo);
+            buffer = '';
+          }
+          const traceInfo = buildTraceInfo();
+          await finalizeArtifactSession(traceInfo);
+        });
       } catch (e) {
         logger.error(`[SpeechBroker] abort事件處理錯誤: ${e.message || e}`);
       }
@@ -433,6 +521,8 @@ module.exports = {
     buffer = '';
     // 重設模式為預設值，避免下次啟動沿用舊設定
     activeMode = TTS_MODES.ARTIFACT;
+    artifactSession = null;
+    artifactQueue = Promise.resolve();
     
     try {
       // 移除所有事件監聽，避免離線後仍接收資料

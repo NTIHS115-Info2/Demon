@@ -375,3 +375,7 @@
 - speechBroker 的主要 TTS 入口改為 ttsArtifact，預設輸出 artifact 與 URL
 - 新增可選低階 ttsEngine 模式（mode="engine"），僅輸出音訊串流，不落檔不產生 URL
 - mode 預設為 "artifact" 以保持相容，明確指定 mode="engine" 才會走 ttsEngine
+
+# [v.1.5.3.6]
+### Fix
+- 修復speechBroker無法正確處理音訊串流的問題

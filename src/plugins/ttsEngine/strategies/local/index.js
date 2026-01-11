@@ -14,6 +14,8 @@ let activeSessionId = null;
 const sessions = new Map();
 // Maximum frame size to prevent resource exhaustion
 const MAX_FRAME_LENGTH = 50 * 1024 * 1024; // 50MB
+// Maximum bytes to scan when attempting to resync a corrupted frame
+const MAX_FRAME_RESYNC_SCAN_BYTES = 1024 * 1024; // 1MB
 
 // 此策略的啟動優先度
 const priority = 70;
@@ -108,6 +110,35 @@ function buildSession() {
 // 解析 Python stdout 的 frame protocol（長度前綴 + JSON header + PCM payload）
 function attachFrameParser() {
   let buffer = Buffer.alloc(0);
+
+  function tryResyncBuffer(input) {
+    const scanLimit = Math.min(input.length - 4, MAX_FRAME_RESYNC_SCAN_BYTES);
+    for (let offset = 1; offset <= scanLimit; offset += 1) {
+      const candidateLen = input.readUInt32BE(offset);
+      if (candidateLen <= 0 || candidateLen > MAX_FRAME_LENGTH) {
+        continue;
+      }
+      const frameStart = offset + 4;
+      if (input.length < frameStart + candidateLen) {
+        continue;
+      }
+      const frameJson = input.slice(frameStart, frameStart + candidateLen).toString("utf8");
+      try {
+        const frame = JSON.parse(frameJson);
+        if (
+          frame &&
+          typeof frame.type === "string" &&
+          typeof frame.session_id === "string"
+        ) {
+          Logger.warn(`[ttsEngine] frame 重新同步成功 (offset=${offset})`);
+          return input.slice(offset);
+        }
+      } catch (err) {
+        // Ignore invalid JSON candidates
+      }
+    }
+    return Buffer.alloc(0);
+  }
 
   function handleFrame(frame, payload) {
     const session = sessions.get(frame.session_id);
@@ -204,8 +235,8 @@ function attachFrameParser() {
       // Add maximum frame length validation to prevent resource exhaustion
       if (frameLen > MAX_FRAME_LENGTH) {
         Logger.error(`[ttsEngine] frame 長度過大: ${frameLen} bytes，超過限制 ${MAX_FRAME_LENGTH} bytes`);
-        // Skip this corrupted frame and continue
-        buffer = buffer.slice(4);
+        // Attempt to resync from a plausible next frame header
+        buffer = tryResyncBuffer(buffer);
         continue;
       }
       if (buffer.length < 4 + frameLen) {
@@ -268,8 +299,15 @@ module.exports = {
     attachFrameParser();
 
     processRef.stderr.on("data", (data) => {
-      // Python stderr 顯示的錯誤訊息，直接寫入 log 便於排查
-      Logger.error(`[ttsEngine] Python stderr: ${data.toString()}`);
+      const msg = data.toString();
+      // 大多數 Python 腳本與第三方庫會將一般資訊輸出到 stderr（我們在 index.py 也刻意將非協議 stdout 轉到 stderr），
+      // 為避免「誤報錯誤」，僅在偵測到明顯錯誤訊號時以 error 紀錄，其餘降級為 warn。
+      const isSevereError = /Traceback|Exception|Error|failed|No such file|not found|ValueError|RuntimeError|FileNotFound/i.test(msg);
+      if (isSevereError) {
+        Logger.error(`[ttsEngine] Python stderr: ${msg.trim()}`);
+      } else {
+        Logger.warn(`[ttsEngine] Python stderr: ${msg.trim()}`);
+      }
     });
 
     processRef.on("close", (code) => {

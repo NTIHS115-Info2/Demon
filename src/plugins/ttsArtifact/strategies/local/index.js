@@ -42,6 +42,7 @@ const ARTIFACT_ROOT = path.resolve(__dirname, '../../../../..', 'data', 'artifac
 // 設定 HTTP 服務監聽預設值與環境變數
 const DEFAULT_LISTEN_HOST = '0.0.0.0';
 const DEFAULT_LISTEN_PORT = 8090;
+const DEFAULT_LOCAL_SAVE_DIR = path.resolve(__dirname, '../../../../..', 'data', 'artifacts', 'tts-local-save');
 
 // 設定音訊格式參數：本地策略目前**只支援** ttsEngine 輸出為 PCM s16le (16-bit).
 // 這是與 ttsEngine 相容性的「硬性需求」，目前不提供動態設定或其他 bit depth。
@@ -69,6 +70,13 @@ const MAX_UINT16 = 0xFFFF;
 // ULID 格式驗證常數
 const ULID_PATTERN = /^[0-9A-HJKMNP-TV-Z]{26}$/;
 
+// 串流式 artifact 動作定義
+const STREAM_ACTIONS = {
+  START: 'start',
+  APPEND: 'append',
+  FINALIZE: 'finalize'
+};
+
 // 保存 HTTP server 與狀態，便於線上/離線管理
 let app = null;
 let server = null;
@@ -76,6 +84,11 @@ let isOnline = false;
 let currentHost = DEFAULT_LISTEN_HOST;
 let currentPort = DEFAULT_LISTEN_PORT;
 let currentPublicBaseUrl = null;
+let localSaveEnabled = false;
+let localSaveDir = DEFAULT_LOCAL_SAVE_DIR;
+
+// 追蹤串流式 artifact session
+const streamSessions = new Map();
 
 // 建立 artifact 快取索引，提升查詢速度
 // 採用 LRU 策略，避免記憶體無限增長
@@ -185,6 +198,59 @@ function isValidChannels(channels) {
   return channels && !Number.isNaN(channels) && channels >= 1 && Number.isInteger(channels);
 }
 
+function isStreamRequest(data) {
+  if (!data || typeof data !== 'object') return false;
+  return (
+    data.stream === true ||
+    data.mode === 'stream' ||
+    typeof data.action === 'string' ||
+    data.append === true ||
+    data.start === true ||
+    data.finalize === true
+  );
+}
+
+function resolveStreamAction(data, text) {
+  const rawAction = typeof data?.action === 'string' ? data.action.toLowerCase() : null;
+  if (rawAction && Object.values(STREAM_ACTIONS).includes(rawAction)) {
+    return rawAction;
+  }
+  if (data?.finalize === true) return STREAM_ACTIONS.FINALIZE;
+  if (data?.append === true) return STREAM_ACTIONS.APPEND;
+  if (data?.start === true) return STREAM_ACTIONS.START;
+  if (data?.artifact_id && text) return STREAM_ACTIONS.APPEND;
+  if (data?.artifact_id && !text) return STREAM_ACTIONS.FINALIZE;
+  if (text) return STREAM_ACTIONS.START;
+  return null;
+}
+
+function resolveArtifactId(data) {
+  return data?.artifact_id || data?.artifactId || null;
+}
+
+async function ensureLocalSaveDir() {
+  if (!localSaveEnabled) return;
+  try {
+    await fs.promises.mkdir(localSaveDir, { recursive: true });
+  } catch (err) {
+    logger.error(`[ttsArtifact] localSave 目錄建立失敗: ${err.message || err}`);
+    localSaveEnabled = false;
+  }
+}
+
+async function saveLocalCopy(artifactId, paths) {
+  if (!localSaveEnabled) return;
+  await ensureLocalSaveDir();
+  try {
+    const audioTarget = path.join(localSaveDir, `${artifactId}.wav`);
+    const metadataTarget = path.join(localSaveDir, `${artifactId}.json`);
+    await fs.promises.copyFile(paths.audioPath, audioTarget);
+    await fs.promises.copyFile(paths.metadataPath, metadataTarget);
+  } catch (err) {
+    logger.error(`[ttsArtifact] localSave 複製失敗 (${artifactId}): ${err.message || err}`);
+  }
+}
+
 // 寫入 metadata 到檔案，確保 artifact 狀態落地保存
 async function writeMetadata(metadataPath, metadata) {
   const payload = JSON.stringify(metadata, null, 2);
@@ -282,6 +348,123 @@ async function patchWavHeader(audioPath, sampleRate, channels, dataSize) {
   } finally {
     await handle.close();
   }
+}
+
+async function writePcmStream(engineSession, artifactId, audioPath) {
+  let pcmDataBytes = 0;
+  let writeStream = null;
+  let streamError = null;
+
+  try {
+    writeStream = fs.createWriteStream(audioPath, { flags: 'a' });
+    writeStream.on('error', (err) => {
+      streamError = err;
+      logger.error(`[ttsArtifact] writeStream 錯誤 (${artifactId}): ${err.message || err}`);
+      try {
+        if (
+          engineSession &&
+          engineSession.stream &&
+          typeof engineSession.stream.destroy === 'function' &&
+          !engineSession.stream.destroyed
+        ) {
+          engineSession.stream.destroy(err);
+        }
+      } catch (destroyErr) {
+        logger.error(
+          `[ttsArtifact] session.stream.destroy 失敗 (${artifactId}): ${destroyErr.message || destroyErr}`
+        );
+      }
+    });
+
+    for await (const chunk of engineSession.stream) {
+      if (streamError) break;
+      if (!chunk) continue;
+      pcmDataBytes += chunk.length;
+      const needsDrain = !writeStream.write(chunk);
+      if (needsDrain) {
+        if (!writeStream.writableNeedDrain) {
+          continue;
+        }
+        await new Promise((resolve, reject) => {
+          const onDrain = () => {
+            writeStream.removeListener('error', onError);
+            resolve();
+          };
+          const onError = (err) => {
+            writeStream.removeListener('drain', onDrain);
+            reject(err);
+          };
+          writeStream.once('drain', onDrain);
+          writeStream.once('error', onError);
+          if (streamError) {
+            onError(streamError);
+          }
+        });
+      }
+    }
+  } catch (err) {
+    streamError = err;
+    logger.error(`[ttsArtifact] 串流寫入失敗 (${artifactId}): ${err.message || err}`);
+  } finally {
+    if (writeStream) {
+      await new Promise((resolve) => writeStream.end(resolve));
+    }
+  }
+
+  return { pcmDataBytes, streamError };
+}
+
+async function createStreamSession(engineMetadata) {
+  const artifactId = ulid();
+  const paths = buildArtifactPaths(artifactId);
+  const sampleRate = Number(engineMetadata.sample_rate || 0);
+  const channels = Number(engineMetadata.channels || 1);
+
+  if (!sampleRate || Number.isNaN(sampleRate)) {
+    throw new Error(`ttsEngine 回傳 sample_rate 無效 (${sampleRate})`);
+  }
+  if (!isValidChannels(channels)) {
+    throw new Error(`ttsEngine 回傳 channels 無效 (${channels})`);
+  }
+
+  const publicUrl = buildPublicUrl(artifactId);
+  const metadata = {
+    artifact_id: artifactId,
+    format: 'wav',
+    sample_rate: sampleRate,
+    channels,
+    status: 'creating',
+    duration_ms: 0,
+    file_path: paths.audioPath,
+    public_url: publicUrl
+  };
+
+  try {
+    await fs.promises.mkdir(paths.artifactDir, { recursive: true });
+    await createAudioFile(paths.audioPath, sampleRate, channels);
+    await writeMetadata(paths.metadataPath, metadata);
+    setArtifactInIndex(artifactId, paths);
+  } catch (err) {
+    logger.error(`[ttsArtifact] 建立檔案失敗 (${artifactId}): ${err.message || err}`);
+    try {
+      if (fs.existsSync(paths.artifactDir)) {
+        await fs.promises.rm(paths.artifactDir, { recursive: true, force: true });
+      }
+    } catch (cleanupErr) {
+      logger.error(`[ttsArtifact] 清理失敗的 artifact 目錄失敗 (${artifactId}): ${cleanupErr.message || cleanupErr}`);
+    }
+    throw err;
+  }
+
+  return {
+    artifactId,
+    paths,
+    publicUrl,
+    sampleRate,
+    channels,
+    pcmDataBytes: 0,
+    metadata
+  };
 }
 
 // 建立可讀取的 HTTP 服務與路由
@@ -442,6 +625,12 @@ module.exports = {
     const host = options.host || process.env.TTS_ARTIFACT_HOST || DEFAULT_LISTEN_HOST;
     const port = Number(options.port || process.env.TTS_ARTIFACT_PORT || DEFAULT_LISTEN_PORT);
     const publicBaseUrl = options.publicBaseUrl || process.env.TTS_ARTIFACT_PUBLIC_BASE_URL || null;
+    localSaveEnabled = options.localSave === true;
+    localSaveDir = options.localSaveDir || process.env.TTS_ARTIFACT_LOCAL_SAVE_DIR || DEFAULT_LOCAL_SAVE_DIR;
+    if (localSaveEnabled) {
+      await ensureLocalSaveDir();
+      logger.info(`[ttsArtifact] localSave 已啟用: ${localSaveDir}`);
+    }
 
     try {
       app = buildExpressApp();
@@ -494,6 +683,9 @@ module.exports = {
       app = null;
       server = null;
       isOnline = false;
+      localSaveEnabled = false;
+      localSaveDir = DEFAULT_LOCAL_SAVE_DIR;
+      streamSessions.clear();
       logger.info('[ttsArtifact] 插件已成功離線');
       return true;
     } catch (err) {
@@ -559,9 +751,208 @@ module.exports = {
     const text = typeof data === 'string'
       ? data
       : (data?.text || data?.message || data?.content);
-    if (!text) {
+    const streamRequest = isStreamRequest(data);
+    if (!text && !streamRequest) {
       logger.error('[ttsArtifact] send 缺少 text');
       return { error: 'ttsArtifact 缺少 text' };
+    }
+
+    if (streamRequest) {
+      const action = resolveStreamAction(data, text);
+      const artifactId = resolveArtifactId(data);
+
+      if (!action) {
+        logger.error('[ttsArtifact] stream send 缺少 action');
+        return { error: 'ttsArtifact stream 缺少 action' };
+      }
+
+      if (!isOnline) {
+        logger.warn('[ttsArtifact] HTTP 服務未啟動，URL 可能無法即時存取');
+      }
+
+      if (action === STREAM_ACTIONS.FINALIZE) {
+        if (!artifactId) {
+          logger.error('[ttsArtifact] finalize 缺少 artifact_id');
+          return { error: 'ttsArtifact finalize 缺少 artifact_id' };
+        }
+        const sessionInfo = streamSessions.get(artifactId);
+        if (!sessionInfo) {
+          logger.warn(`[ttsArtifact] 找不到 streaming artifact: ${artifactId}`);
+          return { error: `${ERROR_CODES.NOT_FOUND}: 找不到 artifact (${artifactId})`, artifact_id: artifactId };
+        }
+
+        let patchError = null;
+        try {
+          await patchWavHeader(
+            sessionInfo.paths.audioPath,
+            sessionInfo.sampleRate,
+            sessionInfo.channels,
+            sessionInfo.pcmDataBytes
+          );
+        } catch (err) {
+          patchError = err;
+          logger.error(`[ttsArtifact] WAV header patch 失敗 (${artifactId}): ${err.message || err}`);
+        }
+
+        const durationMs = calculateDurationMs(
+          sessionInfo.pcmDataBytes,
+          sessionInfo.sampleRate,
+          sessionInfo.channels,
+          DEFAULT_BITS_PER_SAMPLE
+        );
+        const finalStatus = patchError ? 'error' : 'ready';
+        const finalMetadata = {
+          ...sessionInfo.metadata,
+          status: finalStatus,
+          duration_ms: durationMs
+        };
+
+        try {
+          await writeMetadata(sessionInfo.paths.metadataPath, finalMetadata);
+        } catch (err) {
+          logger.error(`[ttsArtifact] metadata 落地失敗 (${artifactId}): ${err.message || err}`);
+          return { error: `${ERROR_CODES.METADATA_IO}: ${err.message || err}`, artifact_id: artifactId };
+        } finally {
+          streamSessions.delete(artifactId);
+        }
+
+        if (finalStatus === 'ready') {
+          await saveLocalCopy(artifactId, sessionInfo.paths);
+        }
+
+        if (patchError) {
+          return { error: `${ERROR_CODES.HEADER_PATCH}: ${patchError.message || patchError}`, artifact_id: artifactId };
+        }
+
+        return {
+          artifact_id: artifactId,
+          url: sessionInfo.publicUrl,
+          format: 'wav',
+          duration_ms: durationMs,
+          status: finalStatus
+        };
+      }
+
+      if (!text) {
+        logger.error('[ttsArtifact] stream send 缺少 text');
+        return { error: 'ttsArtifact 缺少 text' };
+      }
+
+      // 確認 ttsEngine 已上線，保持責任邊界清楚
+      const ttsState = await PM.getPluginState('ttsEngine');
+      if (ttsState !== 1) {
+        const message = `ttsEngine 未上線 (狀態: ${ttsState})`;
+        logger.warn(`[ttsArtifact] ${message}`);
+        return { error: `${ERROR_CODES.TTS_ENGINE}: ${message}` };
+      }
+
+      let engineSession;
+      try {
+        engineSession = await PM.send('ttsEngine', { text });
+      } catch (err) {
+        logger.error(`[ttsArtifact] 呼叫 ttsEngine 失敗: ${err.message || err}`);
+        return { error: `${ERROR_CODES.TTS_ENGINE}: ${err.message || err}` };
+      }
+
+      if (!engineSession?.stream || !engineSession?.metadataPromise) {
+        logger.error('[ttsArtifact] 無法取得 ttsEngine stream 或 metadata');
+        return { error: `${ERROR_CODES.TTS_ENGINE}: ttsEngine 回傳格式異常` };
+      }
+
+      let engineMetadata;
+      try {
+        engineMetadata = await engineSession.metadataPromise;
+      } catch (err) {
+        logger.error(`[ttsArtifact] 取得 ttsEngine metadata 失敗: ${err.message || err}`);
+        return { error: `${ERROR_CODES.TTS_ENGINE}: ${err.message || err}` };
+      }
+
+      let sessionInfo;
+      if (action === STREAM_ACTIONS.START) {
+        try {
+          sessionInfo = await createStreamSession(engineMetadata);
+        } catch (err) {
+          return { error: `${ERROR_CODES.FILE_IO}: ${err.message || err}` };
+        }
+        streamSessions.set(sessionInfo.artifactId, sessionInfo);
+      } else {
+        if (!artifactId) {
+          logger.error('[ttsArtifact] append 缺少 artifact_id');
+          return { error: 'ttsArtifact append 缺少 artifact_id' };
+        }
+        sessionInfo = streamSessions.get(artifactId);
+        if (!sessionInfo) {
+          logger.warn(`[ttsArtifact] 找不到 streaming artifact: ${artifactId}`);
+          return { error: `${ERROR_CODES.NOT_FOUND}: 找不到 artifact (${artifactId})`, artifact_id: artifactId };
+        }
+        const sampleRate = Number(engineMetadata.sample_rate || 0);
+        const channels = Number(engineMetadata.channels || 1);
+        if (sampleRate !== sessionInfo.sampleRate || channels !== sessionInfo.channels) {
+          const message = `ttsEngine metadata 不一致 (sample_rate=${sampleRate}, channels=${channels})`;
+          logger.error(`[ttsArtifact] ${message}`);
+          return { error: `${ERROR_CODES.TTS_ENGINE}: ${message}`, artifact_id: artifactId };
+        }
+      }
+
+      const { pcmDataBytes, streamError } = await writePcmStream(
+        engineSession,
+        sessionInfo.artifactId,
+        sessionInfo.paths.audioPath
+      );
+      sessionInfo.pcmDataBytes += pcmDataBytes;
+
+      let patchError = null;
+      try {
+        await patchWavHeader(
+          sessionInfo.paths.audioPath,
+          sessionInfo.sampleRate,
+          sessionInfo.channels,
+          sessionInfo.pcmDataBytes
+        );
+      } catch (err) {
+        patchError = err;
+        logger.error(`[ttsArtifact] WAV header patch 失敗 (${sessionInfo.artifactId}): ${err.message || err}`);
+      }
+
+      const durationMs = calculateDurationMs(
+        sessionInfo.pcmDataBytes,
+        sessionInfo.sampleRate,
+        sessionInfo.channels,
+        DEFAULT_BITS_PER_SAMPLE
+      );
+      const updateStatus = streamError || patchError ? 'error' : 'creating';
+      const updatedMetadata = {
+        ...sessionInfo.metadata,
+        status: updateStatus,
+        duration_ms: durationMs
+      };
+
+      try {
+        await writeMetadata(sessionInfo.paths.metadataPath, updatedMetadata);
+      } catch (err) {
+        logger.error(`[ttsArtifact] metadata 落地失敗 (${sessionInfo.artifactId}): ${err.message || err}`);
+        return {
+          error: `${ERROR_CODES.METADATA_IO}: ${err.message || err}`,
+          artifact_id: sessionInfo.artifactId
+        };
+      }
+
+      sessionInfo.metadata = updatedMetadata;
+
+      if (streamError || patchError) {
+        streamSessions.delete(sessionInfo.artifactId);
+        const message = streamError?.message || patchError?.message || '未知錯誤';
+        const code = streamError ? ERROR_CODES.FILE_IO : ERROR_CODES.HEADER_PATCH;
+        return { error: `${code}: ${message}`, artifact_id: sessionInfo.artifactId };
+      }
+
+      return {
+        artifact_id: sessionInfo.artifactId,
+        url: sessionInfo.publicUrl,
+        format: 'wav',
+        duration_ms: durationMs,
+        status: updateStatus
+      };
     }
 
     // 確認 ttsEngine 已上線，保持責任邊界清楚
@@ -651,66 +1042,7 @@ module.exports = {
     }
 
     // 開始串流寫入 PCM chunks，並追蹤資料大小
-    let pcmDataBytes = 0;
-    let writeStream = null;
-    let streamError = null;
-
-    try {
-      writeStream = fs.createWriteStream(paths.audioPath, { flags: 'a' });
-      writeStream.on('error', (err) => {
-        streamError = err;
-        logger.error(`[ttsArtifact] writeStream 錯誤 (${artifactId}): ${err.message || err}`);
-        try {
-          if (
-            session &&
-            session.stream &&
-            typeof session.stream.destroy === 'function' &&
-            !session.stream.destroyed
-          ) {
-            session.stream.destroy(err);
-          }
-        } catch (destroyErr) {
-          logger.error(
-            `[ttsArtifact] session.stream.destroy 失敗 (${artifactId}): ${destroyErr.message || destroyErr}`
-          );
-        }
-      });
-
-      for await (const chunk of session.stream) {
-        if (streamError) break;
-        if (!chunk) continue;
-        pcmDataBytes += chunk.length;
-        const needsDrain = !writeStream.write(chunk);
-        if (needsDrain) {
-          // 檢查是否已經 drained（避免競態條件導致無限等待）
-          if (!writeStream.writableNeedDrain) {
-            continue;
-          }
-          await new Promise((resolve, reject) => {
-            const onDrain = () => {
-              writeStream.removeListener('error', onError);
-              resolve();
-            };
-            const onError = (err) => {
-              writeStream.removeListener('drain', onDrain);
-              reject(err);
-            };
-            writeStream.once('drain', onDrain);
-            writeStream.once('error', onError);
-            if (streamError) {
-              onError(streamError);
-            }
-          });
-        }
-      }
-    } catch (err) {
-      streamError = err;
-      logger.error(`[ttsArtifact] 串流寫入失敗 (${artifactId}): ${err.message || err}`);
-    } finally {
-      if (writeStream) {
-        await new Promise((resolve) => writeStream.end(resolve));
-      }
-    }
+    const { pcmDataBytes, streamError } = await writePcmStream(session, artifactId, paths.audioPath);
 
     // 嘗試 patch WAV header，確保檔案可用於播放
     let patchError = null;
@@ -735,6 +1067,10 @@ module.exports = {
     } catch (err) {
       logger.error(`[ttsArtifact] metadata 落地失敗 (${artifactId}): ${err.message || err}`);
       return { error: `${ERROR_CODES.METADATA_IO}: ${err.message || err}`, artifact_id: artifactId };
+    }
+
+    if (finalStatus === 'ready') {
+      await saveLocalCopy(artifactId, paths);
     }
 
     // 若發生串流或 header patch 錯誤，回傳可追蹤錯誤訊息
