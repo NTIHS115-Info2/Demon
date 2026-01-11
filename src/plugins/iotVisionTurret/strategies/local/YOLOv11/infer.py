@@ -131,10 +131,8 @@ def infer(
     # 匯入區塊用途：延後載入 ultralytics，避免 CLI 不需要推論時就失敗
     from ultralytics import YOLO
 
-    # 基本驗證區塊用途：確保信心值合理，避免模型推論異常
+    # 基本處理區塊用途：將信心值轉為 float，實際範圍驗證由 validate_infer_request 負責
     conf_value = float(conf)
-    if conf_value < 0.0 or conf_value > 1.0:
-        raise ValueError("conf 必須介於 0 到 1 之間")
 
     # 推論模型建構區塊用途：載入權重並執行推論
     model = YOLO(weights_path)
@@ -168,17 +166,31 @@ def infer(
         if target
         else detections
     )
-    best = max(matched, key=lambda item: item.get("confidence", 0.0), default=None)
+    best = max(matched, key=lambda item: item.get("confidence", 0.0)) if matched else None
     found = best is not None
+
+    # 防禦性檢查區塊用途：確保在 found=True 時必要欄位一定存在且非 None
+    best_confidence: float = 0.0
+    best_center: Optional[Any] = None
+    best_bbox: Optional[Any] = None
+    if found:
+        best_confidence = best.get("confidence")
+        best_center = best.get("center")
+        best_bbox = best.get("bbox")
+        if best_confidence is None or best_center is None or best_bbox is None:
+            raise ValueError(
+                "Internal error: detection is missing required fields "
+                "('confidence', 'center', 'bbox') when 'found' is True"
+            )
 
     # 組裝結果區塊用途：提供推論摘要與必要欄位
     return {
         "ok": True,
         "found": found,
         "target": target,
-        "confidence": best.get("confidence") if found else 0.0,
-        "center": best.get("center") if found else None,
-        "bbox": best.get("bbox") if found else None,
+        "confidence": best_confidence if found else 0.0,
+        "center": best_center if found else None,
+        "bbox": best_bbox if found else None,
         "image_size": image_size,
         "detections": detections,
         "metadata": {

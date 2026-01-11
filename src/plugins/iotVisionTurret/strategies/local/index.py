@@ -15,7 +15,7 @@ from YOLOv11.infer import infer
 # ───────────────────────────────────────────────
 # 常數區塊：定義錯誤代碼與必要欄位清單
 # ───────────────────────────────────────────────
-REQUIRED_FIELDS = ("image_path", "weights_path", "target", "conf")
+REQUIRED_FIELDS = ("image_path", "weights_path", "conf")
 
 
 # ───────────────────────────────────────────────
@@ -83,17 +83,44 @@ def read_stdin_payload() -> Dict[str, Any]:
 # 輔助函式區塊：正規化 stdin 請求格式（支援 op/action 與 payload）
 # ───────────────────────────────────────────────
 def normalize_request(payload: Dict[str, Any]) -> Tuple[str, Dict[str, Any]]:
-    """正規化 op 與參數來源，統一回傳推論必要欄位。"""
+    """正規化 op 與參數來源，統一回傳推論必要欄位。
+
+    規則說明：
+    - 先從頂層 payload 讀取 op/action。
+    - 若未提供 payload 子物件，parameters 保持與原先相同（整個頂層 payload）。
+    - 若提供 payload 子物件：
+      - 頂層除 op/action/payload 以外的欄位視為預設參數。
+      - payload 子物件內的欄位會覆蓋頂層同名欄位。
+      - 最終 parameters 不含 op/action/payload 這些控制欄位。
+    """
     op = payload.get("op") or payload.get("action")
     if not op:
         raise RunnerError("INVALID_INPUT", "缺少 op/action 欄位")
 
-    parameters = payload
-    if isinstance(payload.get("payload"), dict):
-        parameters = payload["payload"]
+    # 預設行為：與原本一致，若沒有 payload 子物件則直接使用整個頂層 payload。
+    parameters: Dict[str, Any] = payload
 
-    if not isinstance(parameters, dict):
-        raise RunnerError("INVALID_INPUT", "payload 欄位必須為 JSON 物件")
+    nested = payload.get("payload")
+    if nested is not None:
+        # 若有提供 payload 欄位但型別不是物件，視為錯誤輸入。
+        if not isinstance(nested, dict):
+            raise RunnerError("INVALID_INPUT", "payload 欄位必須為 JSON 物件")
+
+        # 合併頂層參數與 payload 子物件：
+        # - 先放入頂層欄位（排除 payload 本身）
+        merged: Dict[str, Any] = {}
+        for key, value in payload.items():
+            if key != "payload":
+                merged[key] = value
+
+        # - 再由 payload 子物件覆蓋同名欄位
+        merged.update(nested)
+
+        # - 移除控制欄位，避免與參數混用
+        for meta_key in ("op", "action", "payload"):
+            merged.pop(meta_key, None)
+
+        parameters = merged
 
     return str(op), parameters
 
@@ -109,11 +136,18 @@ def validate_infer_request(parameters: Dict[str, Any]) -> Dict[str, Any]:
 
     image_path = str(parameters.get("image_path", "")).strip()
     weights_path = str(parameters.get("weights_path", "")).strip()
-    target = str(parameters.get("target", "")).strip()
+    target_raw = parameters.get("target")
     conf_raw = parameters.get("conf")
 
-    if not image_path or not weights_path or not target:
-        raise RunnerError("INVALID_INPUT", "image_path/weights_path/target 不可為空字串")
+    if not image_path or not weights_path:
+        raise RunnerError("INVALID_INPUT", "image_path/weights_path 不可為空字串")
+    
+    # target 為選填欄位：若未提供或為空字串，視為不過濾目標
+    target = None
+    if target_raw is not None:
+        target_str = str(target_raw).strip()
+        if target_str:
+            target = target_str
 
     try:
         conf_value = float(conf_raw)
