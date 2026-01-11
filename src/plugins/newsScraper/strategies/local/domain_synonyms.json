@@ -1,10 +1,1182 @@
 {
-  "version": "1.0",
+  "version": "2.0",
   "mode": "unidirectional",
-  "description": "News Scraper Domain Synonyms Database",
+  "description": "Merged Domain Synonyms from Perplexity, Grok, Gemini, and GPT. Target Year: 2025-2026.",
   "synonyms": {
-    "SpaceX": ["Starship", "Elon Musk", "Falcon 9"],
-    "TSMC": ["台積電", "Semiconductor", "Chip"],
-    "OpenAI": ["ChatGPT", "Sam Altman", "GPT-4"]
+    "NVIDIA": [
+      "AI Chips",
+      "B200",
+      "Blackwell",
+      "Blackwell B200",
+      "Blackwell Ultra",
+      "CUDA",
+      "GPU Computing",
+      "Jensen Huang",
+      "NVDA",
+      "NVL72",
+      "RTX 5090",
+      "Rubin Architecture",
+      "Rubin GPU",
+      "Vera CPU"
+    ],
+    "TSMC": [
+      "2330.TW",
+      "2nm Process",
+      "3nm Process",
+      "A16 Node",
+      "Advanced Packaging",
+      "BSPDN",
+      "C.C. Wei",
+      "CoWoS",
+      "CoWoS-L",
+      "Foundry Leader",
+      "N2 Process",
+      "N2P",
+      "Super Power Rail",
+      "TSM",
+      "Taiwan Semiconductor"
+    ],
+    "OpenAI": [
+      "AI Researcher",
+      "AI審計委員會",
+      "ChatGPT",
+      "Frontier Model",
+      "GPT-4.5",
+      "GPT-4模型",
+      "GPT-5",
+      "O3 Model",
+      "Project Orion",
+      "Reasoning Models",
+      "Sam Altman",
+      "微軟投資",
+      "o3-mini"
+    ],
+    "Google": [
+      "Alphabet",
+      "Bard chatbot",
+      "DeepMind",
+      "GOOGL",
+      "Gemini 2.0",
+      "Gemini 3",
+      "Gemini Al",
+      "Google DeepMind",
+      "Satya Nadella",
+      "Sundar Pichai",
+      "TPU"
+    ],
+    "Microsoft": [
+      "Azure AI",
+      "Azure Foundry",
+      "Azure OpenAl",
+      "ChatGPT partnership",
+      "Copilot",
+      "Copilot Pro",
+      "MSFT",
+      "Satya Nadella",
+      "Surface Laptop 7",
+      "Windows AI",
+      "Windows Al Copilot"
+    ],
+    "Meta": [
+      "Facebook",
+      "Llama 4",
+      "Llama AI",
+      "Mark Zuckerberg",
+      "Menlo Park",
+      "Metaverse project",
+      "Quest 3 headset",
+      "Quest 4",
+      "Ray-Ban Glasses",
+      "Ray-Ban Meta 2",
+      "Superintelligence",
+      "Threads app"
+    ],
+    "DeepSeek": [
+      "Chinese AI",
+      "Cost-Efficient LLM",
+      "DeepSeek-R1",
+      "DeepSeek-V3",
+      "High-Flyer Capital",
+      "Liang Wenfeng",
+      "MOE Architecture",
+      "R1 Model",
+      "V3 Model",
+      "o3-mini Competitor"
+    ],
+    "Anthropic": [
+      "AI Safety",
+      "AI安全至上",
+      "Amazon合作",
+      "Claude",
+      "Claude 2",
+      "Claude 3.5 Opus",
+      "Claude 3.5 Sonnet",
+      "Computer Use",
+      "Computer Use Beta",
+      "Constitutional AI",
+      "Dario Amodei",
+      "Google Cloud注資"
+    ],
+    "Tesla": [
+      "Cybercab",
+      "Cybertruck",
+      "Elon Musk",
+      "Energy Storage",
+      "Full Self-Driving",
+      "Full Self-Driving (FSD)",
+      "Gigafactory",
+      "Model Y",
+      "Optimus Gen 2",
+      "Robotaxi",
+      "TSLA"
+    ],
+    "SpaceX": [
+      "Elon Musk",
+      "Falcon 9",
+      "Mechazilla",
+      "Rocket Company",
+      "Starlink",
+      "Starlink Direct-to-Cell",
+      "Starship",
+      "Super Heavy"
+    ],
+    "Apple": [
+      "A20 Chip",
+      "AAPL",
+      "Apple Intelligence",
+      "Apple Vision Pro",
+      "M3 chip",
+      "M5 Chip",
+      "M6 Chip",
+      "Tim Cook",
+      "Vision Pro",
+      "Vision Pro 2",
+      "iPhone",
+      "iPhone 16",
+      "iPhone 17 Air",
+      "iPhone 17 Slim",
+      "iPhone 18"
+    ],
+    "Intel": [
+      "18A Process",
+      "Arrow Lake-S",
+      "Core Ultra Series 3",
+      "Fab 52 Arizona",
+      "Foundry Revival",
+      "INTC",
+      "Lip-Bu Tan",
+      "Panther Lake"
+    ],
+    "Samsung": [
+      "2nm Process",
+      "Exynos 2500",
+      "Foundry Alliance",
+      "Lee Jae-yong",
+      "SSNLF",
+      "Semiconductor Manufacturing"
+    ],
+    "Qualcomm": [
+      "6G Research",
+      "AI Chips",
+      "Auto Chips",
+      "Cristiano Amon",
+      "Mobile Processor",
+      "Oryon CPU",
+      "QCOM",
+      "Snapdragon 7 Gen 4",
+      "Snapdragon 8 Elite",
+      "Snapdragon X Elite"
+    ],
+    "MediaTek": [
+      "Dimensity 9400e",
+      "Dimensity 9500",
+      "Smartphone Chip",
+      "TSMC 2nm"
+    ],
+    "ASML": [
+      "Christophe Fouquet",
+      "Dutch Tech",
+      "EUV Lithography",
+      "EUV技術",
+      "High NA EUV",
+      "High-NA EUV",
+      "NXE:3800E",
+      "Semiconductor Equipment",
+      "Twinscan EXE:5200",
+      "半導體設備龍頭",
+      "晶圓光刻",
+      "極紫外光刻機",
+      "荷蘭出口限制"
+    ],
+    "Ukraine": [
+      "Donbas Conflict",
+      "Kyiv",
+      "NATO Aspiration",
+      "Russo-Ukrainian War",
+      "Volodymyr Zelenskyy",
+      "Zelenskyy"
+    ],
+    "Russia": [
+      "Military Supply Chain",
+      "North Korea Alliance",
+      "Putin",
+      "Ukraine Invasion",
+      "Vladimir Putin"
+    ],
+    "China": [
+      "Semiconductor Export Control",
+      "Taiwan Strait",
+      "Tariff War",
+      "Xi Jinping"
+    ],
+    "Taiwan": [
+      "Cross-Strait Tensions",
+      "Geopolitical Risk",
+      "Silicon Shield",
+      "TSMC",
+      "US Relations"
+    ],
+    "United States": [
+      "Donald Trump",
+      "Export Controls",
+      "Federal Reserve",
+      "Jerome Powell",
+      "Tariff Policy",
+      "Trump"
+    ],
+    "Israel": [
+      "Benjamin Netanyahu",
+      "Gaza War",
+      "Iran Conflict",
+      "Middle East",
+      "Netanyahu"
+    ],
+    "Iran": [
+      "Islamic Republic",
+      "Israel Strikes",
+      "Nuclear Program",
+      "Regional Influence"
+    ],
+    "North Korea": [
+      "DPRK",
+      "Kim Jong Un",
+      "Missile Production",
+      "Nuclear Submarine",
+      "Russia Alliance"
+    ],
+    "Saudi Arabia": [
+      "ARAMCO",
+      "Crown Prince",
+      "Oil Exports",
+      "Renewable Energy",
+      "Vision 2030"
+    ],
+    "Japan": [
+      "Asia Strategy",
+      "Economic Growth",
+      "Semiconductor Policy",
+      "Toyota"
+    ],
+    "South Korea": [
+      "LG",
+      "North Korea Relations",
+      "Samsung",
+      "Semiconductor Leader",
+      "US Alliance"
+    ],
+    "Germany": [
+      "Europe Defense",
+      "Friedrich Merz",
+      "NATO Leadership",
+      "Trade Partner"
+    ],
+    "France": [
+      "European Security",
+      "Macron",
+      "Middle East Policy",
+      "NATO Member"
+    ],
+    "Bitcoin": [
+      "2024 Halving",
+      "BTC",
+      "Cryptocurrency",
+      "Digital Gold",
+      "Halving 2028",
+      "Institutional Adoption",
+      "Spot ETFs",
+      "Store of Value"
+    ],
+    "Ethereum": [
+      "DeFi Platform",
+      "EIP-1559",
+      "ETH",
+      "Layer 2 Scaling",
+      "Proof of Stake",
+      "Smart Contracts"
+    ],
+    "Federal Reserve": [
+      "3.50%-3.75% Range",
+      "Balance Sheet Runoff",
+      "FOMC Meetings",
+      "Fed",
+      "Inflation Control",
+      "Interest Rates",
+      "Jerome Powell",
+      "Monetary Policy",
+      "Rate Cuts 2026"
+    ],
+    "S&P 500": [
+      "Large Cap Index",
+      "Market Index",
+      "Market Performance",
+      "Record Highs",
+      "SPX",
+      "Stock Market",
+      "Tech Heavy",
+      "US Equities",
+      "Vanguard S&P ETF"
+    ],
+    "NASDAQ": [
+      "AI Stocks",
+      "Growth Index",
+      "Market Benchmark",
+      "Tech Stocks"
+    ],
+    "Dow Jones": [
+      "Blue Chip Stocks",
+      "Industrial Average",
+      "Market Indicator"
+    ],
+    "GPT-5": [
+      "AI Capabilities",
+      "Frontier LLM",
+      "OpenAI Model",
+      "Reasoning Model"
+    ],
+    "Claude": [
+      "Anthropic AI",
+      "Coding Excellence",
+      "Computer Use",
+      "Enterprise AI",
+      "Safe AI"
+    ],
+    "AI": [
+      "Artificial Intelligence",
+      "Deep Learning",
+      "Generative AI",
+      "LLM",
+      "Machine Learning",
+      "Neural Networks"
+    ],
+    "Semiconductor": [
+      "2nm",
+      "3nm",
+      "Advanced Nodes",
+      "Chip Manufacturing",
+      "Foundry",
+      "Process Node",
+      "Wafer"
+    ],
+    "EUV": [
+      "ASML Technology",
+      "Advanced Lithography",
+      "Extreme Ultraviolet",
+      "Sub-2nm Manufacturing"
+    ],
+    "Tariff": [
+      "Economic Policy",
+      "Export Control",
+      "Import Tax",
+      "Reciprocal Tariff",
+      "Trade War"
+    ],
+    "Green Energy": [
+      "Carbon Neutral",
+      "Renewable Energy",
+      "Solar Power",
+      "Sustainable Energy",
+      "Wind Energy"
+    ],
+    "Geopolitics": [
+      "Great Power Competition",
+      "International Relations",
+      "Regional Conflict",
+      "Strategic Tension"
+    ],
+    "Supply Chain": [
+      "Component Sourcing",
+      "Global Trade",
+      "Logistics",
+      "Manufacturing Network"
+    ],
+    "AI Chip": [
+      "Custom Processor",
+      "GPU",
+      "Neural Processing",
+      "TPU",
+      "Tensor Core"
+    ],
+    "Drone": [
+      "Autonomous System",
+      "Military Technology",
+      "Surveillance",
+      "Unmanned Vehicle"
+    ],
+    "Quantum Computing": [
+      "Error Correction",
+      "Google Sycamore",
+      "IBM Heron",
+      "Next Generation Computing",
+      "Quantum Processor",
+      "Quantum Technology",
+      "Qubit"
+    ],
+    "5G": [
+      "Fifth Generation",
+      "Mobile Network",
+      "Telecommunications",
+      "Wireless Technology"
+    ],
+    "Data Center": [
+      "AI Infrastructure",
+      "Cloud Infrastructure",
+      "Computing Facility",
+      "Server Farm"
+    ],
+    "Cybersecurity": [
+      "Data Protection",
+      "Digital Security",
+      "Network Defense",
+      "Threat Detection"
+    ],
+    "Metaverse": [
+      "Digital World",
+      "VR Platform",
+      "Virtual Economy",
+      "Virtual Reality"
+    ],
+    "ESG": [
+      "Corporate Responsibility",
+      "Environmental Social Governance",
+      "Impact Investing",
+      "Sustainability"
+    ],
+    "Inflation": [
+      "Cost of Living",
+      "Goods Inflation",
+      "Monetary Stability",
+      "PCE",
+      "Price Increase"
+    ],
+    "Recession": [
+      "Economic Downturn",
+      "Economic Slowdown",
+      "GDP Decline",
+      "Market Contraction"
+    ],
+    "Trade Deal": [
+      "Commercial Pact",
+      "Economic Negotiation",
+      "International Commerce",
+      "Trade Agreement"
+    ],
+    "Sanction": [
+      "Economic Penalty",
+      "Embargoes",
+      "International Pressure",
+      "Trade Restriction"
+    ],
+    "IPO": [
+      "Initial Public Offering",
+      "Market Launch",
+      "Public Markets",
+      "Stock Debut"
+    ],
+    "Alphabet": [
+      "GOOGL",
+      "Gemini 2.0",
+      "Pixel 10",
+      "Sundar Pichai",
+      "Waymo One"
+    ],
+    "Amazon": [
+      "AMZN",
+      "AWS Bedrock",
+      "AWS cloud",
+      "Andy Jassy",
+      "Echo Hub",
+      "Generative Al stack",
+      "Prime membership",
+      "Rivian R2"
+    ],
+    "Palantir": [
+      "AIP",
+      "Alex Karp",
+      "Foundry",
+      "Foundry for Builders",
+      "Gotham",
+      "Gotham Platform",
+      "PLTR"
+    ],
+    "Salesforce": [
+      "Agentforce",
+      "CRM",
+      "Einstein 1",
+      "Marc Benioff",
+      "Slack AI"
+    ],
+    "Micron": [
+      "GDDR7",
+      "HBM4",
+      "MU",
+      "Sanjay Mehrotra",
+      "UFS 4.0"
+    ],
+    "Samsung Electronics": [
+      "005930.KS",
+      "Exynos 2600",
+      "Galaxy S26",
+      "HBM4",
+      "TM Roh"
+    ],
+    "AMD": [
+      "EPYC Turin",
+      "Lisa Su",
+      "MI400",
+      "MI400X",
+      "Medusa Architecture",
+      "Ryzen AI 400",
+      "UDNA",
+      "Zen 6"
+    ],
+    "Arm Holdings": [
+      "ARM",
+      "Armv9",
+      "Armv9.2",
+      "CSS",
+      "CSS for AI",
+      "Neoverse V3",
+      "Rene Haas"
+    ],
+    "SK Hynix": [
+      "000660.KS",
+      "12-Layer HBM",
+      "GDDR7",
+      "HBM4",
+      "HBM4E",
+      "Kwak Noh-Jung",
+      "LPDDR6"
+    ],
+    "KLA": [
+      "Gen5 Inspection",
+      "KLAC",
+      "Metrology AI",
+      "Orbotech Prism",
+      "Rick Wallace"
+    ],
+    "Applied Materials": [
+      "AMAT",
+      "Endura Volta",
+      "Gary Dickerson",
+      "Producer GT",
+      "Vistara Platform"
+    ],
+    "Lam Research": [
+      "Altus Series",
+      "LRCX",
+      "SABRE 3D",
+      "Semiverse Solutions",
+      "Tim Archer"
+    ],
+    "Ukraine-Russia War": [
+      "Donetsk Offensive",
+      "NATO Support",
+      "Russo-Ukrainian Conflict",
+      "Vladimir Putin",
+      "Volodymyr Zelenskyy"
+    ],
+    "US-China Relations": [
+      "CHIPS Act 2.0",
+      "Donald Trump",
+      "Sino-US Trade",
+      "Tariff Wars",
+      "Xi Jinping"
+    ],
+    "Donald Trump": [
+      "America First Policy",
+      "Border Wall",
+      "MAGA 2.0",
+      "Tax Cuts Extension",
+      "US President"
+    ],
+    "Israel-Hamas Conflict": [
+      "Benjamin Netanyahu",
+      "Ceasefire Talks",
+      "Gaza Crisis",
+      "Rafah Operation",
+      "Yahya Sinwar"
+    ],
+    "Climate Change": [
+      "COP31",
+      "Global Warming",
+      "Green Transition",
+      "Net Zero 2050",
+      "Paris Accord"
+    ],
+    "Vladimir Putin": [
+      "BRICS Expansion",
+      "Kremlin Policies",
+      "Nord Stream 2",
+      "Russian President",
+      "Ukraine Invasion"
+    ],
+    "Xi Jinping": [
+      "AIIB",
+      "Belt and Road 2.0",
+      "CCP Congress",
+      "Chinese President",
+      "Taiwan Reunification"
+    ],
+    "Volodymyr Zelenskyy": [
+      "EU Accession",
+      "F-16 Jets",
+      "Grain Corridor",
+      "Kyiv Defense",
+      "Ukrainian President"
+    ],
+    "Kim Jong-un": [
+      "DPRK Missiles",
+      "North Korean Leader",
+      "Nuclear Program",
+      "Russia Alliance",
+      "Songun Policy"
+    ],
+    "Narendra Modi": [
+      "BJP Agenda",
+      "G20 Presidency",
+      "Indian PM",
+      "Quad Summit",
+      "Viksit Bharat"
+    ],
+    "Goldman Sachs": [
+      "Apple Card",
+      "David Solomon",
+      "GS",
+      "Marcus Platform",
+      "Private Credit"
+    ],
+    "JPMorgan Chase": [
+      "Blockchain Onyx",
+      "Chase Sapphire",
+      "Fintech Acquisitions",
+      "JPM",
+      "Jamie Dimon"
+    ],
+    "BlackRock": [
+      "Aladdin",
+      "Aladdin AI",
+      "BLK",
+      "Bitcoin ETF",
+      "Larry Fink",
+      "Tokenization",
+      "iShares ETFs"
+    ],
+    "Vanguard": [
+      "ESG Funds",
+      "Index Funds",
+      "Retirement Plans",
+      "Tim Buckley",
+      "Vanguard Group"
+    ],
+    "Nasdaq": [
+      "Adena Friedman",
+      "Cloud Exchange",
+      "IPO Boom",
+      "NDAQ",
+      "Tech Index"
+    ],
+    "NYSE": [
+      "Direct Listings",
+      "Floor Trading AI",
+      "Lynn Martin",
+      "New York Stock Exchange",
+      "SPAC Listings"
+    ],
+    "Berkshire Hathaway": [
+      "Apple Stake",
+      "BRK.A",
+      "Insurance Float",
+      "Occidental Petroleum",
+      "Warren Buffett"
+    ],
+    "Oracle": [
+      "Fusion Cloud",
+      "NetSuite AI",
+      "OCI Gen2",
+      "ORCL",
+      "Safra Catz"
+    ],
+    "IBM": [
+      "Arvind Krishna",
+      "Quantum System Two",
+      "Red Hat OpenShift",
+      "Red Hat integration",
+      "WatsonX AI",
+      "Watsonx",
+      "quantum computing"
+    ],
+    "Cisco": [
+      "CSCO",
+      "Chuck Robbins",
+      "Meraki Cloud",
+      "Splunk Acquisition",
+      "Webex AI"
+    ],
+    "Adobe": [
+      "ADBE",
+      "Experience Cloud",
+      "Firefly AI",
+      "Photoshop GenAI",
+      "Shantanu Narayen"
+    ],
+    "Netflix": [
+      "Ad-Supported Tier",
+      "Gaming Expansion",
+      "Live Events",
+      "NFLX",
+      "Reed Hastings",
+      "Ted Sarandos",
+      "original content",
+      "password sharing crackdown",
+      "streaming subscribers"
+    ],
+    "Broadcom": [
+      "AI Accelerators",
+      "AVGO",
+      "Custom AI Chips",
+      "Hock Tan",
+      "Symantec Security",
+      "VMware",
+      "VMware Cloud"
+    ],
+    "Texas Instruments": [
+      "Analog Semiconductors",
+      "DLP Technology",
+      "Embedded Processing",
+      "Rich Templeton",
+      "TXN"
+    ],
+    "NVIDIA Corporation": [
+      "B200",
+      "Blackwell Ultra",
+      "Jensen Huang",
+      "NVL72",
+      "Rubin Architecture",
+      "Vera CPU"
+    ],
+    "Intel Corporation": [
+      "18A Process",
+      "Clearwater Forest",
+      "Diamond Rapids",
+      "Lip-Bu Tan",
+      "Nova Lake",
+      "Panther Lake"
+    ],
+    "Samsung Foundry": [
+      "Exynos 2600",
+      "GAAFET",
+      "HBM4",
+      "SF2"
+    ],
+    "Google DeepMind": [
+      "Agentic AI",
+      "Demis Hassabis",
+      "Gemini 2.0 Flash",
+      "Gemini 3.0",
+      "Project Astra"
+    ],
+    "Huawei AI": [
+      "Ascend 910C",
+      "Ascend 910D",
+      "CANN 8.0",
+      "Kunpeng"
+    ],
+    "Meta AI": [
+      "Llama 4",
+      "Mark Zuckerberg",
+      "Metaverse",
+      "Yann LeCun"
+    ],
+    "Apple Inc": [
+      "A19 Pro",
+      "M5 Chip",
+      "Tim Cook",
+      "iPhone 17 Air",
+      "iPhone 17 Slim"
+    ],
+    "Xiaomi EV": [
+      "Kunlun Glass",
+      "Lei Jun",
+      "SU7 Ultra",
+      "YU7 SUV"
+    ],
+    "BYD Auto": [
+      "Blade Battery",
+      "DM-i 6.0",
+      "Seal 06",
+      "e-Platform 4.0"
+    ],
+    "Tesla Inc": [
+      "Cybercab",
+      "Elon Musk",
+      "FSD v13",
+      "Optimus Gen 2",
+      "Robotaxi"
+    ],
+    "Anduril Industries": [
+      "Fury Drone",
+      "Lattice OS",
+      "Palmer Luckey",
+      "Roadrunner"
+    ],
+    "Palantir Technologies": [
+      "AIP",
+      "Alex Karp",
+      "Foundry",
+      "Gotham"
+    ],
+    "Replicator Initiative": [
+      "Cheap Drones",
+      "Counter-UAS",
+      "Replicator-1",
+      "Replicator-2"
+    ],
+    "BioSecure Act Targets": [
+      "1260H List",
+      "BGI Group",
+      "WuXi AppTec",
+      "WuXi Biologics"
+    ],
+    "Hamas Leadership 2025": [
+      "Gaza Ceasefire",
+      "Khaled Mashal",
+      "Khalil al-Hayya"
+    ],
+    "NATO Leadership": [
+      "Defense Spending 2%",
+      "Eastern Flank",
+      "Mark Rutte"
+    ],
+    "US Trade Policy": [
+      "Entity List",
+      "Export Controls",
+      "Katherine Tai",
+      "Tariff War"
+    ],
+    "Bitcoin Institutional": [
+      "BlackRock",
+      "FBTC",
+      "IBIT",
+      "Spot ETF"
+    ],
+    "Solana Ecosystem": [
+      "QSOL",
+      "SOLZ",
+      "Solana Mobile",
+      "VanEck ETF"
+    ],
+    "Ripple XRP": [
+      "Brad Garlinghouse",
+      "RLUSD",
+      "XRPC"
+    ],
+    "Hedera Hashgraph": [
+      "Canary Capital",
+      "HBAR ETF",
+      "HBR"
+    ],
+    "Litecoin Institutional": [
+      "Canary ETF",
+      "LTCC"
+    ],
+    "Federal Reserve 2025": [
+      "3.5% Target",
+      "Jerome Powell",
+      "Rate Cut Cycle",
+      "Soft Landing"
+    ],
+    "Nvidia": [
+      "AI GPU H100",
+      "CUDA platform",
+      "Generative Al boom",
+      "Jensen Huang",
+      "NVDA"
+    ],
+    "中美關係": [
+      "南海緊張局勢",
+      "拜習會",
+      "科技脫鉤",
+      "美中貿易戰",
+      "間諜氣球事件"
+    ],
+    "俄烏戰爭": [
+      "俄軍動員",
+      "克里米亞衝突",
+      "普京侵略",
+      "澤連斯基",
+      "烏克蘭反攻"
+    ],
+    "以哈衝突": [
+      "人質交換",
+      "以色列地面攻勢",
+      "內塔尼亞胡",
+      "加薩戰爭",
+      "哈馬斯武裝"
+    ],
+    "台海局勢": [
+      "兩岸關係",
+      "戰略模糊政策",
+      "美台軍售",
+      "臺灣大選",
+      "解放軍軍演"
+    ],
+    "朝鮮半島局勢": [
+      "導彈試射",
+      "核武試驗",
+      "無核化談判",
+      "聯合國制裁",
+      "金正恩"
+    ],
+    "伊朗核協議": [
+      "IAEA監督",
+      "中俄斡旋",
+      "濃縮鈾上限",
+      "經濟制裁",
+      "美伊談判"
+    ],
+    "中美科技戰": [
+      "EDA禁運",
+      "出口管制清單",
+      "晶片禁令",
+      "科技冷戰",
+      "華為制裁"
+    ],
+    "南海局勢": [
+      "九段線爭端",
+      "島礁軍事化",
+      "東協調停",
+      "航行自由巡航",
+      "菲律賓仁愛礁"
+    ],
+    "金磚國家": [
+      "去美元化",
+      "擴員六國",
+      "金磚峰會",
+      "金磚貨幣",
+      "開發銀行"
+    ],
+    "聯準會政策": [
+      "FOMC會議",
+      "利率升降趨勢",
+      "縮表計畫",
+      "通膨目標2%",
+      "鮑威爾"
+    ],
+    "AI 概念股": [
+      "AI ETF",
+      "AI泡沫",
+      "NVIDIA 輝達",
+      "生成式AI熱潮",
+      "超微 AMD"
+    ],
+    "比特幣 ETF": [
+      "ETF申請潮",
+      "SEC批准",
+      "加密貨幣監管",
+      "灰度信託",
+      "黑岩現貨ETF"
+    ],
+    "通膨趨勢": [
+      "CPI年增率",
+      "核心通膨",
+      "物價指數",
+      "薪資成長",
+      "通膨預期管理"
+    ],
+    "經濟軟著陸": [
+      "GDP溫和成長",
+      "企業投資回溫",
+      "就業市場穩健",
+      "消費信心",
+      "避免衰退"
+    ],
+    "公債殖利率": [
+      "10年期國債",
+      "債券拋售潮",
+      "殖利率曲線倒掛",
+      "避風港買盤",
+      "長短天期利差"
+    ],
+    "債務上限": [
+      "國會預算僵局",
+      "政府關門危機",
+      "臨時撥款法案",
+      "舉債上限談判",
+      "違約風險"
+    ],
+    "OPEC+": [
+      "原油減產協議",
+      "市場供需平衡",
+      "沙俄主導",
+      "油價波動",
+      "產能配額"
+    ],
+    "黃金價格": [
+      "央行增持黃金",
+      "實質利率影響",
+      "貴金屬需求",
+      "避險買盤",
+      "金價新高"
+    ],
+    "中國經濟放緩": [
+      "GDP成長下滑",
+      "出口減速",
+      "地方債務風險",
+      "房地產危機",
+      "青年失業率"
+    ],
+    "台積電": [
+      "2330.TW",
+      "3nm製程",
+      "Apple Silicon 代工",
+      "亞利桑那廠",
+      "魏哲家"
+    ],
+    "EDA 工具": [
+      "Cadence 楷登電子",
+      "EDA軟體",
+      "IC設計自動化",
+      "Mentor Graphics",
+      "Synopsys 新思科技"
+    ],
+    "先進封裝": [
+      "3D IC堆疊",
+      "Chiplet設計",
+      "CoWoS",
+      "封裝產能",
+      "異質集成"
+    ],
+    "三星電子": [
+      "3奈米GAA",
+      "Exynos處理器",
+      "晶圓代工事業",
+      "記憶體龍頭",
+      "韓國晶片業"
+    ],
+    "英特爾": [
+      "IDM 2.0轉型",
+      "INTC",
+      "Intel 18A製程",
+      "Pat Gelsinger",
+      "x86架構"
+    ],
+    "半導體出口管制": [
+      "供應鏈去中國化",
+      "先進晶片限售",
+      "對華技術禁令",
+      "美日荷協調",
+      "設備銷售許可"
+    ],
+    "ARM": [
+      "Arm China爭端",
+      "Arm IPO",
+      "RISC架構授權",
+      "物聯網晶片",
+      "軟銀集團"
+    ],
+    "美光科技": [
+      "DRAM/NAND大廠",
+      "MU",
+      "中國禁令",
+      "西安封測廠",
+      "記憶體價格週期"
+    ],
+    "Cohere": [
+      "Aidan Gomez",
+      "Oracle資金",
+      "企業AI平台",
+      "多語種模型",
+      "大型語言模型"
+    ],
+    "Mistral Al": [
+      "Arthur Mensch",
+      "Mistral 7B",
+      "歐盟AI自主",
+      "法國AI新創",
+      "開源模型"
+    ],
+    "xAl": [
+      "AI言論自由",
+      "Elon Musk",
+      "Grok聊天機器人",
+      "TruthGPT",
+      "推特整合"
+    ],
+    "Inflection Al": [
+      "1.3B融資",
+      "Greylock創投",
+      "Mustafa Suleyman",
+      "Pi AI助手",
+      "個人AI助理"
+    ],
+    "Character Al": [
+      "Andreessen Horowitz投資",
+      "Noam Shazeer",
+      "生成式角色扮演",
+      "用戶黏著度",
+      "虛擬角色聊天"
+    ],
+    "Stability Al": [
+      "AI繪圖社群",
+      "Emad Mostaque",
+      "LAION資料集",
+      "Stable Diffusion",
+      "開源影像模型"
+    ],
+    "Al21 Labs": [
+      "Amnon Shashua",
+      "Jurassic-2模型",
+      "Wordtune應用",
+      "以色列獨角獸",
+      "多語言文本生成"
+    ],
+    "Hugging Face": [
+      "Clement Delangue",
+      "Transformers庫",
+      "模型中心",
+      "機器學習社區",
+      "開源AI生態"
+    ],
+    "Adept Al": [
+      "ACT-1",
+      "David Luan",
+      "前谷歌Transformer團隊",
+      "工作流程AI",
+      "自動化軟體操作"
+    ],
+    "Midjourney": [
+      "AI繪圖",
+      "David Holz",
+      "Discord平台",
+      "圖像生成模型",
+      "藝術家工具"
+    ],
+    "Twitter": [
+      "Elon Musk收購",
+      "X Corp",
+      "內容審查爭議",
+      "推特改名",
+      "社交媒體平台"
+    ]
   }
 }
