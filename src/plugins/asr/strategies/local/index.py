@@ -21,20 +21,57 @@ args = parser.parse_args()
 log_formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger("ASR")
 logger.setLevel(logging.INFO)
-file_handler = logging.FileHandler(args.log_path, encoding='utf-8')
-file_handler.setFormatter(log_formatter)
-logger.addHandler(file_handler)
+
+# 段落說明：確保 log 目錄存在，避免 file handler 建立失敗
+try:
+    log_dir = os.path.dirname(args.log_path)
+    if log_dir and not os.path.exists(log_dir):
+        os.makedirs(log_dir, exist_ok=True)
+    file_handler = logging.FileHandler(args.log_path, encoding='utf-8')
+    file_handler.setFormatter(log_formatter)
+    logger.addHandler(file_handler)
+except Exception as e:
+    # 段落說明：若 log handler 設定失敗，仍繼續執行但無法寫入 log
+    print(json.dumps({
+        "error": {
+            "code": "ASR_FAILED",
+            "message": f"無法建立 log 檔案：{e}"
+        }
+    }, ensure_ascii=False), file=sys.stderr, flush=True)
 
 # 段落說明：統一 JSON 輸出格式，維持上層解析一致性
 def print_json_output(obj):
     print(json.dumps(obj, ensure_ascii=False), flush=True)
 
 # 段落說明：檢查檔案是否存在，避免後續轉寫流程中斷
-if not os.path.isfile(args.file_path):
+# 段落說明：路徑安全性檢查，避免目錄穿越攻擊
+try:
+    file_path_resolved = os.path.realpath(args.file_path)
+    base_dir = os.path.realpath(os.getenv("ASR_INPUT_BASE_DIR", os.getcwd()))
+    
+    # 段落說明：確認解析後的檔案路徑在允許的目錄底下
+    if not file_path_resolved.startswith(base_dir):
+        print_json_output({
+            "error": {
+                "code": "ASR_FILE_NOT_FOUND",
+                "message": "指定的檔案路徑不被允許"
+            }
+        })
+        sys.exit(1)
+    
+    if not os.path.isfile(file_path_resolved):
+        print_json_output({
+            "error": {
+                "code": "ASR_FILE_NOT_FOUND",
+                "message": "找不到指定的音訊檔案"
+            }
+        })
+        sys.exit(1)
+except Exception as e:
     print_json_output({
         "error": {
             "code": "ASR_FILE_NOT_FOUND",
-            "message": "找不到指定的音訊檔案"
+            "message": f"檔案路徑驗證失敗：{e}"
         }
     })
     sys.exit(1)
@@ -59,11 +96,11 @@ except Exception as e:
 
 # 段落說明：執行檔案轉寫並組裝回傳結構
 try:
-    audio = whisper.load_audio(args.file_path)
-    duration_ms = int(len(audio) / whisper.audio.SAMPLE_RATE * 1000)
+    audio = whisper.load_audio(file_path_resolved)
+    duration_ms = round(len(audio) / whisper.audio.SAMPLE_RATE * 1000)
 
     result = model.transcribe(
-        args.file_path,
+        file_path_resolved,
         language=args.lang,
         temperature=0,
         no_speech_threshold=0.5
@@ -84,7 +121,11 @@ try:
 
     confidence = None
     if segment_logprobs:
-        confidence_value = sum(math.exp(value) for value in segment_logprobs) / len(segment_logprobs)
+        # 段落說明：數值穩定性改善，避免 exp 計算溢位或下溢
+        confidence_value = sum(
+            math.exp(max(-50.0, min(50.0, value)))
+            for value in segment_logprobs
+        ) / len(segment_logprobs)
         confidence = max(0.0, min(1.0, confidence_value))
 
     print_json_output({

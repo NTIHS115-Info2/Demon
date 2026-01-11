@@ -59,7 +59,8 @@ function runPythonTranscription({
   model,
   timeoutMs,
   logPath,
-  pythonPath
+  pythonPath,
+  useCpu
 }) {
   return new Promise((resolve, reject) => {
     // 段落說明：建立 PythonShell 執行個體並準備接收輸出
@@ -67,25 +68,40 @@ function runPythonTranscription({
     const messages = [];
     const stderrLines = [];
 
+    const args = [
+      "--file-path",
+      filePath,
+      "--lang",
+      lang,
+      "--model",
+      model,
+      "--log-path",
+      logPath
+    ];
+
+    // 段落說明：依照選項加入 CPU 模式旗標
+    if (useCpu) {
+      args.push("--use-cpu");
+    }
+
     const pyshell = new PythonShell(scriptPath, {
       pythonPath,
-      args: [
-        "--file-path",
-        filePath,
-        "--lang",
-        lang,
-        "--model",
-        model,
-        "--log-path",
-        logPath
-      ],
+      args,
       env: { ...process.env, PYTHONIOENCODING: "utf-8" }
     });
 
     // 段落說明：設定轉寫逾時，避免單次任務佔用過久資源
-    const timeoutHandler = setTimeout(() => {
+    let timeoutHandler = setTimeout(() => {
+      clearTimeout(timeoutHandler);
       if (pyshell.childProcess) {
-        pyshell.childProcess.kill("SIGKILL");
+        // 段落說明：先嘗試正常終止，給予進程清理機會
+        pyshell.childProcess.kill("SIGTERM");
+        // 段落說明：若 3 秒後仍未結束，強制終止
+        setTimeout(() => {
+          if (pyshell.childProcess && !pyshell.childProcess.killed) {
+            pyshell.childProcess.kill("SIGKILL");
+          }
+        }, 3000);
       }
       const error = new Error("ASR_TIMEOUT");
       error.code = "ASR_TIMEOUT";
@@ -105,9 +121,28 @@ function runPythonTranscription({
     pyshell.end((err) => {
       clearTimeout(timeoutHandler);
       if (err) {
-        const error = new Error("ASR_FAILED");
-        error.code = "ASR_FAILED";
-        error.detail = stderrLines.join("\n");
+        let error = err;
+
+        // 段落說明：若 err 非 Error 物件，轉換為 Error 以統一處理
+        if (!(error instanceof Error)) {
+          error = new Error(String(err));
+        }
+
+        // 段落說明：若原本沒有錯誤代碼，才套用預設 ASR_FAILED
+        if (!error.code) {
+          error.code = "ASR_FAILED";
+        }
+
+        // 段落說明：確保至少有一個錯誤訊息
+        if (!error.message) {
+          error.message = "ASR_FAILED";
+        }
+
+        // 段落說明：補上 stderr 訊息以利除錯，除非原本已有 detail
+        if (!error.detail) {
+          error.detail = stderrLines.join("\n");
+        }
+
         return reject(error);
       }
       return resolve({ messages, stderrLines });
@@ -150,14 +185,24 @@ module.exports = {
       return buildError("ASR_FAILED", "輸入格式不正確");
     }
 
-    const filePath = input.file_path;
+    const originalFilePath = input.file_path;
     const mime = input.mime;
     const lang = normalizeLanguage(input.lang);
     const traceId = input.trace_id || "-";
 
     // 段落說明：檔案路徑檢查，提供明確錯誤訊息
-    if (!filePath) {
+    if (!originalFilePath) {
       return buildError("ASR_FILE_NOT_FOUND", "未提供檔案路徑");
+    }
+
+    // 段落說明：路徑安全性檢查，避免目錄穿越攻擊
+    const baseDir = path.resolve(process.env.ASR_INPUT_BASE_DIR || process.cwd());
+    const filePath = path.resolve(originalFilePath);
+    const relativePath = path.relative(baseDir, filePath);
+
+    // 段落說明：若解析後路徑不在允許的目錄底下，則視為無效路徑
+    if (relativePath.startsWith("..") || path.isAbsolute(relativePath)) {
+      return buildError("ASR_FILE_NOT_FOUND", "指定的檔案路徑不被允許");
     }
 
     if (!fs.existsSync(filePath)) {
@@ -174,6 +219,7 @@ module.exports = {
     const model = options.model || process.env.ASR_MODEL || "large-v3";
     const logPath = options.logPath || process.env.ASR_LOG_PATH || `${Logger.getLogPath()}/asr.log`;
     const pythonPath = resolvePythonPath(options);
+    const useCpu = options.useCpu || false;
 
     Logger.info(`[ASR] 開始檔案轉寫，trace_id=${traceId}`);
 
@@ -185,23 +231,61 @@ module.exports = {
         model,
         timeoutMs,
         logPath,
-        pythonPath
+        pythonPath,
+        useCpu
       });
 
-      const lastMessage = messages[messages.length - 1];
-      // 段落說明：確認 Python 回傳內容存在
-      if (!lastMessage) {
-        Logger.error(`[ASR] 無法取得轉寫結果，trace_id=${traceId}`);
+      // 段落說明：確認 Python 有回傳任何訊息
+      if (!Array.isArray(messages) || messages.length === 0) {
+        Logger.error(`[ASR] 無法取得轉寫結果（無輸出訊息），trace_id=${traceId}`);
         return buildError("ASR_FAILED", "無法取得轉寫結果");
       }
 
       let payload = null;
-      // 段落說明：解析 JSON 結果，確保回傳格式正確
-      try {
-        payload = JSON.parse(lastMessage);
-      } catch (parseError) {
-        Logger.error(`[ASR] 轉寫結果解析失敗，trace_id=${traceId}: ${parseError.message}`);
-        return buildError("ASR_FAILED", "轉寫結果解析失敗");
+
+      // 段落說明：逐一處理 Python 輸出，支援多個 JSON 物件（例如進度與最終結果）
+      for (let i = 0; i < messages.length; i++) {
+        const rawMessage = messages[i];
+        if (typeof rawMessage !== "string") {
+          continue;
+        }
+
+        try {
+          const parsed = JSON.parse(rawMessage);
+
+          // 段落說明：若為進度或狀態更新，僅記錄日誌，不作為最終回傳
+          if (parsed && (parsed.progress != null || parsed.status != null)) {
+            Logger.debug(
+              `[ASR] Python 進度更新，trace_id=${traceId}: ${rawMessage}`
+            );
+          }
+
+          // 段落說明：若包含錯誤或轉寫結果相關欄位，視為候選最終結果
+          if (
+            parsed &&
+            (parsed.error ||
+              parsed.result != null ||
+              parsed.text != null ||
+              parsed.transcript != null)
+          ) {
+            payload = parsed;
+          }
+        } catch (parseError) {
+          // 段落說明：若最後一則訊息無法解析且尚無任何有效 payload，視為錯誤
+          if (i === messages.length - 1 && !payload) {
+            Logger.error(
+              `[ASR] 轉寫結果解析失敗，trace_id=${traceId}: ${parseError.message}`
+            );
+            return buildError("ASR_FAILED", "轉寫結果解析失敗");
+          }
+          // 段落說明：其他無法解析的中間訊息視為一般輸出，忽略即可
+        }
+      }
+
+      // 段落說明：最終仍無可用結果時回傳錯誤
+      if (!payload) {
+        Logger.error(`[ASR] 無法取得轉寫結果，trace_id=${traceId}`);
+        return buildError("ASR_FAILED", "無法取得轉寫結果");
       }
 
       // 段落說明：若 Python 回報錯誤，直接回傳錯誤結果
@@ -214,7 +298,7 @@ module.exports = {
       if (payload && payload.confidence === null) {
         delete payload.confidence;
       }
-      if (payload && payload.segments == null) {
+      if (payload && (payload.segments === null || payload.segments === undefined)) {
         delete payload.segments;
       }
 
