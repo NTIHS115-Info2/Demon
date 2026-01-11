@@ -43,9 +43,10 @@ cp src/plugins/newsScraper/setting.json src/plugins/newsScraper/setting.local.js
 ```
 
 2. 編輯 `setting.local.json`，欄位說明如下：
-- `search_priority`：搜尋順序（如 `searxng`、`google_cse`、`tavily` 的優先順序）。
+- `search_priority`：搜尋順序（如 `searxng`、`google`、`tavily` 的優先順序）。
 - `searxng_base_url`：SearXNG 服務位址，預設為 `http://localhost:8080/`。
 - `google_api_key`：Google Custom Search API Key（選填）。
+- `google_cse_id`：Google Custom Search Engine ID (CX)，使用 Google 搜尋時必填。
 - `tavily_api_key`：Tavily API Key（選填）。
 
 ### Step 3: SearXNG 服務啟動 (Critical)
