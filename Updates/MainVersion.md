@@ -363,3 +363,9 @@
 - 將 tts 插件更名為 ttsEngine，並同步更新 plugins 目錄與 setting.json 註冊名稱
 - ttsEngine 職責調整為僅語音合成與音訊輸出，移除播放與存檔行為
 - 同步更新 ttsEngine 相關引用點與策略日誌、子網域設定
+
+# [v.1.5.3.4]
+### Change
+- 新增 stdin JSON Lines 增量輸入協議，支援同一 session 連續傳入 text 並由 end 結束
+- 新增 stdout 長度前綴 frame protocol（JSON header + PCM payload），維持輸出為裸 PCM s16le
+- ttsEngine 現在可持續產出 audio chunks（不落檔、不播放）

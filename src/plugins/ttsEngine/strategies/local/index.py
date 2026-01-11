@@ -6,7 +6,7 @@ import queue
 import time
 import logging
 import json
-import base64
+import struct
 
 from scipy.signal import butter, sosfilt
 import numpy as np
@@ -140,23 +140,55 @@ def advanced_soften_audio(audio, sr):
     return audio
 
 
-# 使用佇列處理輸入與輸出，避免主線程阻塞
+# 使用佇列處理輸入，避免主線程阻塞
 input_queue = queue.Queue()
-output_queue = queue.Queue()
 output_lock = threading.Lock()
 
+# 單一 session 狀態管理，避免多 session 同時合成
+session_state_lock = threading.Lock()
+session_state = {
+    "session_id": None,
+    "status": "idle",  # idle | collecting | processing
+    "text_parts": []
+}
 
-# 進行語音合成並把結果放入輸出佇列
+# 將 frame 封包寫入 stdout（長度前綴 + JSON header + PCM payload）
+def write_frame(frame, payload=b""):
+    try:
+        frame_json = json.dumps(frame, ensure_ascii=False).encode("utf-8")
+        frame_len = struct.pack(">I", len(frame_json))
+        with output_lock:
+            sys.stdout.buffer.write(frame_len)
+            sys.stdout.buffer.write(frame_json)
+            if payload:
+                sys.stdout.buffer.write(payload)
+            sys.stdout.buffer.flush()
+    except Exception as exc:
+        logger.exception(f"寫入 frame 失敗: {exc}")
 
+
+# 統一輸出錯誤 frame，方便 Node 端辨識
+def emit_error_frame(session_id, message, code="UNKNOWN_ERROR"):
+    frame = {
+        "type": "error",
+        "session_id": session_id,
+        "message": message,
+        "code": code
+    }
+    write_frame(frame)
+
+
+# 進行語音合成並把結果輸出到 stdout
 def tts_worker():
     while True:
         item = input_queue.get()
         if item is None:
             input_queue.task_done()
             break
-        request_id = item.get("id")
+        session_id = item.get("session_id")
         text = item.get("text")
         try:
+            # 進行模型推論，取得 PCM audio
             ref_audio_, ref_text_ = preprocess_ref_audio_text(ref_audio, ref_text)
             audio_segment, final_sample_rate, _ = infer_process(
                 ref_audio_, ref_text_, text, ema_model, vocoder,
@@ -165,6 +197,7 @@ def tts_worker():
                 cfg_strength=cfg_strength, sway_sampling_coef=sway_sampling_coef,
                 speed=speed, fix_duration=fix_duration,
             )
+            # 進行音訊後處理，確保輸出品質與安全範圍
             audio = advanced_soften_audio(audio_segment, final_sample_rate)
             peak = np.max(np.abs(audio))
             if peak > 1.0:
@@ -174,62 +207,122 @@ def tts_worker():
                 logger.warning("音訊過小，將放大")
                 audio = audio / (peak + 1e-6)
             safe_audio = np.clip(audio, -1.0, 1.0)
-            pcm = (safe_audio * 32767).astype(np.int16)
+            pcm = (safe_audio * 32767).astype(np.int16).tobytes()
 
-            # 方案 A：回傳完整音訊資料（base64 PCM）與 metadata
-            payload = {
-                "id": request_id,
+            # 輸出 start frame，描述音訊格式
+            start_frame = {
+                "type": "start",
+                "session_id": session_id,
                 "format": "pcm_s16le",
                 "sample_rate": final_sample_rate,
-                "audio_base64": base64.b64encode(pcm.tobytes()).decode("utf-8")
+                "channels": 1
             }
-            output_queue.put(payload)
+            write_frame(start_frame)
+
+            # 依序輸出 audio frame，每段都附上 payload_bytes
+            seq = 0
+            chunk_size = 4096
+            for offset in range(0, len(pcm), chunk_size):
+                chunk = pcm[offset:offset + chunk_size]
+                audio_frame = {
+                    "type": "audio",
+                    "session_id": session_id,
+                    "seq": seq,
+                    "payload_bytes": len(chunk)
+                }
+                write_frame(audio_frame, payload=chunk)
+                seq += 1
+
+            # 輸出 done frame，通知 Node 端結束
+            done_frame = {
+                "type": "done",
+                "session_id": session_id
+            }
+            write_frame(done_frame)
         except Exception as exc:
+            # 合成過程發生錯誤時，回傳 error frame 並記錄 log
             logger.exception(f"ttsEngine 合成失敗: {exc}")
-            output_queue.put({"id": request_id, "error": str(exc)})
+            emit_error_frame(session_id, f"ttsEngine 合成失敗: {exc}", code="SYNTH_FAIL")
         finally:
+            # 無論成功或失敗，都釋放 session，允許下一次合成
+            with session_state_lock:
+                session_state["session_id"] = None
+                session_state["status"] = "idle"
+                session_state["text_parts"] = []
             input_queue.task_done()
 
 
-# 將輸出統一寫到 stdout，讓 Node.js 接收
-
-def output_worker():
-    while True:
-        payload = output_queue.get()
-        if payload is None:
-            output_queue.task_done()
-            break
-        try:
-            with output_lock:
-                print(json.dumps(payload, ensure_ascii=False), flush=True)
-        except Exception as exc:
-            logger.exception(f"ttsEngine 輸出失敗: {exc}")
-        finally:
-            output_queue.task_done()
-
-
-# 監聽 stdin，解析 JSON 請求並加入佇列
-
+# 監聽 stdin（JSON Lines），解析增量輸入並加入佇列
 def stdin_listener():
     for line in sys.stdin:
-        text = line.strip()
-        if not text:
+        raw_text = line.strip()
+        if not raw_text:
             continue
-        request_id = None
+        session_id = None
         try:
-            payload = json.loads(text)
-            request_id = payload.get("id")
-            input_text = payload.get("text")
-            if not request_id or not input_text:
-                logger.error("輸入 JSON 缺少 id 或 text")
-                if request_id:
-                    output_queue.put({"id": request_id, "error": "Missing required field: text"})
+            # 解析 JSONL，取得 type/session_id 以及 text
+            payload = json.loads(raw_text)
+            event_type = payload.get("type")
+            session_id = payload.get("session_id")
+            if event_type not in {"text", "end"} or not session_id:
+                logger.error("輸入 JSON 缺少 type 或 session_id")
+                if session_id:
+                    emit_error_frame(session_id, "輸入 JSON 缺少 type 或 session_id", code="INVALID_INPUT")
                 continue
-            input_queue.put({"id": request_id, "text": input_text})
+
+            with session_state_lock:
+                current_id = session_state["session_id"]
+                status = session_state["status"]
+
+                if status != "idle" and current_id != session_id:
+                    # 單一 session 限制：不同 session 同時輸入直接回錯誤
+                    logger.error(f"收到不同 session_id={session_id}，但目前忙碌中: {current_id}")
+                    emit_error_frame(session_id, "已有 session 正在處理，請稍後再試", code="SESSION_INFLIGHT")
+                    continue
+
+                if event_type == "text":
+                    input_text = payload.get("text")
+                    if not input_text:
+                        logger.error("text 事件缺少 text 欄位")
+                        emit_error_frame(session_id, "text 事件缺少 text 欄位", code="INVALID_INPUT")
+                        continue
+                    # 設定或延續收集狀態，允許同 session 多次輸入
+                    if status == "idle":
+                        session_state["session_id"] = session_id
+                        session_state["status"] = "collecting"
+                    if session_state["status"] == "processing":
+                        logger.error("session 已結束輸入，等待處理完成")
+                        emit_error_frame(session_id, "session 已結束輸入，無法再追加 text", code="SESSION_CLOSED")
+                        continue
+                    session_state["text_parts"].append(input_text)
+                    continue
+
+                if event_type == "end":
+                    # 只有在 collecting 狀態才允許結束
+                    if status == "idle":
+                        logger.error("收到 end 但尚未開始 session")
+                        emit_error_frame(session_id, "收到 end 但尚未開始 session", code="INVALID_STATE")
+                        continue
+                    if status == "processing":
+                        logger.error("收到重複 end，session 已在處理中")
+                        emit_error_frame(session_id, "session 已在處理中，無法重複 end", code="INVALID_STATE")
+                        continue
+                    combined_text = "".join(session_state["text_parts"])
+                    if not combined_text.strip():
+                        logger.error("收到 end 但 text 為空")
+                        emit_error_frame(session_id, "收到 end 但 text 為空", code="INVALID_INPUT")
+                        session_state["session_id"] = None
+                        session_state["status"] = "idle"
+                        session_state["text_parts"] = []
+                        continue
+                    session_state["status"] = "processing"
+                    # 在鎖外加入佇列，避免阻塞其他輸入
+                    input_queue.put({"session_id": session_id, "text": combined_text})
         except Exception as exc:
+            # JSON 解析或流程錯誤時，記錄 log 並回傳錯誤 frame
             logger.exception(f"解析 stdin 失敗: {exc}")
-            if request_id:
-                output_queue.put({"id": request_id, "error": f"JSON parsing error: {str(exc)}"})
+            if session_id:
+                emit_error_frame(session_id, f"JSON parsing error: {str(exc)}", code="PARSE_ERROR")
 
 
 # 啟動處理執行緒
@@ -242,9 +335,6 @@ if TTS_THREAD_POOL:
 else:
     tts_thread = threading.Thread(target=tts_worker)
     tts_thread.start()
-
-output_thread = threading.Thread(target=output_worker)
-output_thread.start()
 threading.Thread(target=stdin_listener, daemon=True).start()
 
 logger.info('ttsEngine ready. Waiting for input...')
@@ -266,6 +356,4 @@ finally:
     else:
         input_queue.put(None)
         tts_thread.join()
-    output_queue.put(None)
-    output_thread.join()
     logger.info('ttsEngine 已完成所有處理')
