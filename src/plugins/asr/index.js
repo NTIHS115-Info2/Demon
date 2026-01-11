@@ -148,6 +148,50 @@ module.exports = {
     }
   },
 
+  // 檔案轉寫，僅回傳轉寫結果資料
+  async transcribeFile(input = {}, options = {}) {
+    // 段落說明：確保策略已就緒，並交由策略執行檔案轉寫
+    const useMode = options.mode || mode;
+    if (!strategy || useMode !== mode) await this.updateStrategy(useMode, options);
+
+    // 段落說明：策略能力檢查，避免呼叫未實作的行為
+    if (typeof strategy.transcribeFile !== 'function') {
+      logger.error('[ASR] 策略不支援檔案轉寫功能');
+      return {
+        error: {
+          code: 'ASR_FAILED',
+          message: '策略不支援檔案轉寫功能'
+        }
+      };
+    }
+
+    // 段落說明：執行轉寫並記錄耗時與結果
+    const startTime = Date.now();
+    try {
+      logger.info(`[ASR] 開始檔案轉寫，模式=${useMode}`);
+      const result = await strategy.transcribeFile(input, options);
+      const duration = Date.now() - startTime;
+
+      // 段落說明：依照策略回傳內容記錄成功或錯誤狀態
+      if (result && result.error) {
+        logger.warn(`[ASR] 檔案轉寫返回錯誤 (耗時 ${duration}ms): ${result.error.message}`);
+      } else {
+        logger.info(`[ASR] 檔案轉寫完成 (耗時 ${duration}ms)`);
+      }
+      return result;
+    } catch (e) {
+      const duration = Date.now() - startTime;
+      // 段落說明：轉寫失敗統一回傳錯誤格式，避免拋出例外
+      logger.error(`[ASR] 檔案轉寫失敗 (耗時 ${duration}ms): ${e.message}`);
+      return {
+        error: {
+          code: e.code || 'ASR_FAILED',
+          message: '檔案轉寫失敗'
+        }
+      };
+    }
+  },
+
   // 選用函式，目前策略未提供
   async send(data) {
     if (!strategy) await this.updateStrategy(mode);
