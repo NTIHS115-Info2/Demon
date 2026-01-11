@@ -62,6 +62,12 @@ const priority = 50;
 // iotVisionTurret 掃描/追蹤/IR 流程參數（可依需求調整）
 // ───────────────────────────────────────────────
 // 全域任務逾時（ms）
+// 注意：掃描階段最多執行 5×5=25 個格點，每格需執行 move、capture、upload 與推理
+// 若 UPLOAD_TIMEOUT_MS=5000 且推理平均需時 2-3 秒，完整掃描最壞情況可能需 200+ 秒
+// 當前設定 45 秒是基於以下假設：
+// - 大多數情況下會在前幾個格點即找到目標，提前結束掃描
+// - 實際應用場景中，目標通常出現在預期區域附近
+// 若需完整掃描支援，請調整為 TASK_TIMEOUT_MS = 300000（5 分鐘）或更高
 const TASK_TIMEOUT_MS = 45000;
 // 單張影像上傳等待逾時（ms）
 const UPLOAD_TIMEOUT_MS = 5000;
@@ -241,7 +247,15 @@ function drainCommandsResponse(res) {
 
 /**
  * 新增待送指令並嘗試喚醒長輪詢
- * @param {Object} command - 指令內容
+ * 
+ * 指令格式說明：
+ * - v0.3 起採用扁平化指令格式，直接包含 type 與參數欄位
+ * - move 指令：{ type: 'move', yaw: number, pitch: number }
+ * - capture 指令：{ type: 'capture', image_id: string }
+ * - ir_send 指令：{ type: 'ir_send', profile: string }
+ * - 裝置端需支援此格式，舊版 { command, payload, queuedAt } 格式已廢棄
+ * 
+ * @param {Object} command - 指令內容（需包含 type 欄位）
  */
 function enqueueCommand(command) {
   // 若裝置尚未註冊則拒絕加入
@@ -808,8 +822,7 @@ module.exports = {
         }
 
         // ───────────────────────────────────────────────
-        // 段落用途：取出目標中心點與影像尺寸，計算偏移誤差
-        // ex/ey 符號定義：ex > 0 表示目標在畫面右側；ey > 0 表示目標在畫面下方
+        // 段落用途：取出最新 YOLO 結果並驗證有效性
         // ───────────────────────────────────────────────
         const { center, imageSize, found } = lastYoloResult || {};
         if (!found) {
@@ -830,20 +843,45 @@ module.exports = {
           return { ok: false };
         }
 
+        // ───────────────────────────────────────────────
+        // 段落用途：計算目標偏移量（ex/ey）
+        // ex > 0 表示目標在畫面右側；ey > 0 表示目標在畫面下方
+        // ───────────────────────────────────────────────
         const ex = cx - width / 2;
         const ey = cy - height / 2;
 
         // ───────────────────────────────────────────────
-        // 段落用途：計算步進並更新 yaw/pitch
+        // 段落用途：檢查 LOCKED 收斂條件
+        // ───────────────────────────────────────────────
+        if (Math.abs(ex) < LOCKED_CONVERGENCE_THRESHOLD && Math.abs(ey) < LOCKED_CONVERGENCE_THRESHOLD) {
+          lockStreak += 1;
+          logger.info(`[iotVisionTurret] LOCKED 判定命中：streak=${lockStreak}`);
+          
+          if (lockStreak >= LOCK_STREAK) {
+            // ───────────────────────────────────────────────
+            // 段落用途：LOCKED 後只負責將 IR 指令排入佇列，並立即返回
+            // 注意：此處回傳 ok=true 代表指令已成功佇列，並不保證實際已在裝置上執行完成
+            // ───────────────────────────────────────────────
+            enqueueCommand({
+              type: 'ir_send',
+              profile: 'LIGHT_ON'
+            });
+            logger.info('[iotVisionTurret] LOCKED 成功，IR 指令已排入佇列（不保證已於裝置端執行完成）');
+            return { ok: true };
+          }
+        } else {
+          lockStreak = 0;
+          logger.info('[iotVisionTurret] LOCKED 判定未命中，streak 重置為 0');
+        }
+
+        // ───────────────────────────────────────────────
+        // 段落用途：未達 LOCKED，計算步進並執行下一次移動/捕獲
         // ───────────────────────────────────────────────
         const yawStep = clamp((ex / width) * YAW_GAIN_DEG, -YAW_MAX_STEP, YAW_MAX_STEP);
         const pitchStep = clamp((ey / height) * PITCH_GAIN_DEG, -PITCH_MAX_STEP, PITCH_MAX_STEP);
         currentYaw = clamp(currentYaw + yawStep, 0, 180);
         currentPitch = clamp(currentPitch + pitchStep, 0, 180);
 
-        // ───────────────────────────────────────────────
-        // 段落用途：enqueue move/capture 並等待影像上傳與推理
-        // ───────────────────────────────────────────────
         enqueueCommand({
           type: 'move',
           yaw: currentYaw,
@@ -900,56 +938,13 @@ module.exports = {
         }
 
         // ───────────────────────────────────────────────
-        // 段落用途：判斷追蹤推理結果與收斂狀態
+        // 段落用途：更新 lastYoloResult 供下一迭代使用
         // ───────────────────────────────────────────────
         const trackNormalized = normalizeYoloResult(trackInferResult);
         lastYoloResult = trackNormalized;
         if (!trackNormalized.found) {
           logger.warn('[iotVisionTurret] 追蹤推理 found=false，立即中止');
           return { ok: false };
-        }
-
-        // ───────────────────────────────────────────────
-        // 段落用途：以最新推理結果計算 LOCKED 判定用的偏移
-        // ───────────────────────────────────────────────
-        const lockCenter = trackNormalized.center ?? null;
-        const lockImageSize = trackNormalized.imageSize ?? null;
-        if (!lockCenter || !lockImageSize) {
-          logger.warn('[iotVisionTurret] LOCKED 判定失敗：缺少 center 或 image_size');
-          return { ok: false };
-        }
-
-        const lockWidth = Number(lockImageSize?.width ?? lockImageSize?.w ?? lockImageSize?.[0] ?? 0);
-        const lockHeight = Number(lockImageSize?.height ?? lockImageSize?.h ?? lockImageSize?.[1] ?? 0);
-        const lockCx = Number(lockCenter?.x ?? lockCenter?.[0] ?? 0);
-        const lockCy = Number(lockCenter?.y ?? lockCenter?.[1] ?? 0);
-        if (!lockWidth || !lockHeight) {
-          logger.warn('[iotVisionTurret] LOCKED 判定失敗：影像尺寸無效');
-          return { ok: false };
-        }
-
-        const lockEx = lockCx - lockWidth / 2;
-        const lockEy = lockCy - lockHeight / 2;
-
-        if (Math.abs(lockEx) < LOCKED_CONVERGENCE_THRESHOLD && Math.abs(lockEy) < LOCKED_CONVERGENCE_THRESHOLD) {
-          lockStreak += 1;
-          logger.info(`[iotVisionTurret] LOCKED 判定命中：streak=${lockStreak}`);
-        } else {
-          lockStreak = 0;
-          logger.info('[iotVisionTurret] LOCKED 判定未命中，streak 重置為 0');
-        }
-
-        if (lockStreak >= LOCK_STREAK) {
-          // ───────────────────────────────────────────────
-          // 段落用途：LOCKED 後只負責將 IR 指令排入佇列，並立即返回
-          // 注意：此處回傳 ok=true 代表指令已成功佇列，並不保證實際已在裝置上執行完成
-          // ───────────────────────────────────────────────
-          enqueueCommand({
-            type: 'ir_send',
-            profile: 'LIGHT_ON'
-          });
-          logger.info('[iotVisionTurret] LOCKED 成功，IR 指令已排入佇列（不保證已於裝置端執行完成）');
-          return { ok: true };
         }
       }
 
