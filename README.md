@@ -51,7 +51,7 @@
 | Plugin 名稱         | 功能簡述                            | 版本 |
 |----------------------|-------------------------------------|---|
 | `ASR`   | 即時語音辨識，支援斷句與清理        ||
-| `ttsEngine`   | 低階語音合成引擎，僅輸出音訊串流（不播放、不存檔、不產生 URL） ||
+| `ttsEngine`   | 低階語音合成引擎，僅輸出音訊串流與相關 metadata（不播放、不存檔、不產生 URL） ||
 | `ttsArtifact` | 預設語音入口，建立 artifact 並回傳 URL（engine → chunks → wav → metadata → url） ||
 | `llamaServer`     | 語言模型推理 ||
 | `discord`   | 對於discord的使用支持(discord bot)  ||
