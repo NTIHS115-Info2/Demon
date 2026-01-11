@@ -369,3 +369,9 @@
 - 新增 stdin JSON Lines 增量輸入協議，支援同一 session 連續傳入 text 並由 end 結束
 - 新增 stdout 長度前綴 frame protocol（JSON header + PCM payload），維持輸出為裸 PCM s16le
 - ttsEngine 現在可持續產出 audio chunks（不落檔、不播放）
+
+# [v.1.5.3.5]
+### Change
+- speechBroker 的主要 TTS 入口改為 ttsArtifact，預設輸出 artifact 與 URL
+- 新增可選低階 ttsEngine 模式（mode="engine"），僅輸出音訊串流，不落檔不產生 URL
+- mode 預設為 "artifact" 以保持相容，明確指定 mode="engine" 才會走 ttsEngine
