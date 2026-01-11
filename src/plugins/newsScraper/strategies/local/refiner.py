@@ -116,7 +116,7 @@ class QueryRefiner:
         if not term or not alternatives:
             return query
 
-        pattern = re.compile(rf"(?i)(?<!\w){re.escape(term)}(?!\w)")
+        pattern = re.compile(rf"(?i)(?<![a-zA-Z0-9_]){re.escape(term)}(?![a-zA-Z0-9_])")
         if not pattern.search(query):
             return query
 
