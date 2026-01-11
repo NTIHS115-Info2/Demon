@@ -55,7 +55,7 @@
 | `ttsArtifact` | 預設語音入口，建立 artifact 並回傳 URL（engine → chunks → wav → metadata → url） ||
 | `llamaServer`     | 語言模型推理 ||
 | `discord`   | 對於discord的使用支持(discord bot)  ||
-| `speechBroker`       | 負責文字轉語音的中間處裡（預設使用 ttsArtifact） ||
+| `speechBroker`       | 負責文字轉語音的中間處理（預設使用 ttsArtifact） ||
 | `toolReference(llmTool)` | 即時整理並提供工具描述（系統會自動產生摘要，LLM 需以 ToolName 查詢詳細內容）  |v0.5|
 | `getTime(llmTool)` | 取得並偏移時間的工具 |v0.1.1|
 | `diffTime(llmTool)` | 計算時間差距的工具 |v0.1.1|
