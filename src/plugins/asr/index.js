@@ -200,6 +200,8 @@ module.exports = {
     if (data && typeof data === 'object' && data.action) {
       if (data.action === 'transcribeFile') {
         return this.transcribeFile(data.payload || {}, data.options || {});
+      } else {
+        logger.warn(`[ASR] 收到未識別的 action: ${String(data.action)}，將轉交給當前策略處理`);
       }
     }
 

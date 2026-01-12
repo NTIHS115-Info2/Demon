@@ -26,6 +26,9 @@ const DEFAULT_TTS_WAIT_TIMEOUT_MS = 45000;
 // ───────────────────────────────────────────────
 // 區段：支援的音訊格式
 // 用途：限制上傳格式，避免不支援的音訊造成流程錯誤
+// 注意：'audio/mp4' 通常用於 MP4 容器格式（可能包含視訊），
+//       但在此映射為 .m4a（純音訊）。'audio/m4a' 與 'audio/x-m4a'
+//       是 M4A 音訊的常見 MIME 類型。請根據預期的客戶端行為驗證。
 // ───────────────────────────────────────────────
 const SUPPORTED_MIME_TYPES = new Map([
   ['audio/wav', '.wav'],
@@ -48,6 +51,9 @@ const traceLocks = new Map();
 // ───────────────────────────────────────────────
 // 區段：LLM 請求序列化
 // 用途：避免 talker 事件流混淆
+// 說明：以下狀態為模組層級共享，所有 VoiceMessagePipeline 實例會共用
+//       同一個 LLM 請求佇列，以「全域序列化」方式避免 talker 事件流互相干擾。
+//       若改為每個實例各自持有佇列，將失去這個全域排序保證。
 // ───────────────────────────────────────────────
 let requestQueue = [];
 let isProcessing = false;
@@ -55,22 +61,34 @@ let isProcessing = false;
 function enqueueTalkerRequest(payload) {
   return new Promise((resolve, reject) => {
     requestQueue.push({ ...payload, resolve, reject });
-    processNextTalkerRequest();
+    // 僅在佇列先前閒置時啟動處理
+    if (!isProcessing) {
+      processNextTalkerRequest();
+    }
   });
 }
 
-function processNextTalkerRequest() {
-  if (isProcessing || requestQueue.length === 0) return;
+async function processNextTalkerRequest() {
+  if (isProcessing) return;
   isProcessing = true;
 
-  const task = requestQueue.shift();
-  collectTalkerResponse(task)
-    .then(task.resolve)
-    .catch(task.reject)
-    .finally(() => {
-      isProcessing = false;
-      setImmediate(processNextTalkerRequest);
-    });
+  try {
+    while (requestQueue.length > 0) {
+      const task = requestQueue.shift();
+      try {
+        const result = await collectTalkerResponse(task);
+        task.resolve(result);
+      } catch (err) {
+        task.reject(err);
+      }
+    }
+  } finally {
+    isProcessing = false;
+    // 如果在迴圈結束後、釋放旗標前有新任務加入，確保它們被處理
+    if (requestQueue.length > 0) {
+      processNextTalkerRequest();
+    }
+  }
 }
 
 function collectTalkerResponse({ username, message, timeoutMs, logger }) {
@@ -112,10 +130,11 @@ function collectTalkerResponse({ username, message, timeoutMs, logger }) {
     // ───────────────────────────────────────────
     // 區段：綁定事件
     // 用途：確保 talker 回應能被完整收集
+    // 說明：使用 .once() 以避免全域 talker 實例上的監聽器累積
     // ───────────────────────────────────────────
     talker.on('data', onData);
-    talker.on('end', onEnd);
-    talker.on('error', onError);
+    talker.once('end', onEnd);
+    talker.once('error', onError);
 
     timeoutId = setTimeout(() => {
       if (finished) return;
@@ -125,14 +144,14 @@ function collectTalkerResponse({ username, message, timeoutMs, logger }) {
       // 區段：逾時中止
       // 用途：避免 LLM 回應無限等待
       // ───────────────────────────────────────
-      if (typeof talker.abort === 'function') {
+      if (talker.abort && typeof talker.abort === 'function') {
         try {
           talker.abort();
         } catch (error) {
           logger.error('LLM abort 失敗: ' + (error?.message || error));
         }
       }
-      if (typeof talker.stop === 'function') {
+      if (talker.stop && typeof talker.stop === 'function') {
         try {
           talker.stop();
         } catch (error) {
@@ -154,6 +173,13 @@ function collectTalkerResponse({ username, message, timeoutMs, logger }) {
   });
 }
 
+/**
+ * 自訂錯誤類別，用於攜帶額外的錯誤資訊
+ * @param {string} code - 錯誤代碼
+ * @param {string} message - 錯誤訊息
+ * @param {*} details - 詳細錯誤資訊
+ * @param {number} [status=500] - HTTP 狀態碼
+ */
 class PipelineError extends Error {
   constructor(code, message, details, status = 500) {
     super(message);
@@ -226,6 +252,8 @@ class VoiceMessagePipeline {
       storage,
       limits: {
         files: 1,
+        // 50MB 檔案大小限制
+        // 注意：公開端點可能面臨 DoS 攻擊風險，建議在基礎設施層實作速率限制
         fileSize: 50 * 1024 * 1024
       },
       fileFilter: (req, file, cb) => {
@@ -328,9 +356,33 @@ class VoiceMessagePipeline {
       // 區段：LLM 回覆
       // 用途：將轉寫文字送入 LLM 取得回應
       // ───────────────────────────────────────
+      
+      // 驗證並清理 username，防止注入攻擊或記錄敏感資料
+      let username = 'app';
+      const rawUsername =
+        req &&
+        req.body &&
+        typeof req.body.username === 'string'
+          ? req.body.username
+          : '';
+
+      if (rawUsername) {
+        const trimmedUsername = rawUsername.trim();
+        const normalizedUsername = trimmedUsername.toLowerCase();
+        // 僅允許安全字元子集，並限制長度上限
+        const isValidUsername = /^[a-z0-9_.-]{1,64}$/i.test(normalizedUsername);
+
+        if (isValidUsername) {
+          username = normalizedUsername;
+        } else if (this.logger && typeof this.logger.warn === 'function') {
+          // 避免記錄原始的、可能惡意的 username 內容
+          this.logger.warn('收到無效的 username；使用預設值。');
+        }
+      }
+
       timers.llmStart = Date.now();
       const replyText = await enqueueTalkerRequest({
-        username: req.body?.username || 'app',
+        username,
         message: transcript,
         timeoutMs: DEFAULT_LLM_TIMEOUT_MS,
         logger: this.logger
@@ -405,14 +457,24 @@ class VoiceMessagePipeline {
       const status = error?.status || 500;
 
       this.logger.error(`[appVoiceMessageService] 流程失敗: ${message} (${detail})`);
-      await this.cleanupFiles(cleanupTargets);
-      return this.sendErrorResponse(res, {
+      
+      // 先回應錯誤給前端，避免清理檔案阻塞回應
+      const response = this.sendErrorResponse(res, {
         traceId,
         code,
         message,
         details: detail,
         status
       });
+
+      // 非同步清理暫存檔案，不阻塞錯誤回應，並獨立處理清理錯誤
+      this.cleanupFiles(cleanupTargets).catch((cleanupError) => {
+        this.logger.warn(
+          `[appVoiceMessageService] 清理暫存檔案失敗: ${cleanupError?.message || cleanupError}`
+        );
+      });
+
+      return response;
     } finally {
       // ───────────────────────────────────────
       // 區段：釋放鎖
@@ -478,6 +540,11 @@ class VoiceMessagePipeline {
     // ─────────────────────────────────────────
     // 區段：相容性備援
     // 用途：若 TTS 未提供檔案，嘗試從輸出資料夾偵測
+    // 警告：此備援機制存在已知問題：
+    //   1) 未傳遞 trace_id 或 turn_id，難以關聯輸出
+    //   2) 指數退避輪詢仍可能造成效能問題
+    //   3) 併發 TTS 請求可能取得錯誤的檔案（競爭條件）
+    // 建議：TTS 插件應實作 `ttsArtifact` 動作以避免使用此備援
     // ─────────────────────────────────────────
     try {
       await this.pluginsManager.send('tts', text);
@@ -498,11 +565,24 @@ class VoiceMessagePipeline {
   // ───────────────────────────────────────────
   async transcodeToM4a({ wavPath, traceId }) {
     const outputPath = path.join(this.voiceOutboxDir, `${traceId}.m4a`);
+    const FFMPEG_TIMEOUT_MS = 60000; // 60 秒逾時限制
 
     return new Promise((resolve, reject) => {
       const args = ['-y', '-i', wavPath, '-c:a', 'aac', '-b:a', '128k', outputPath];
       const ffmpeg = spawn('ffmpeg', args, { stdio: ['ignore', 'ignore', 'pipe'] });
       let stderr = '';
+      let completed = false;
+
+      // ───────────────────────────────────────
+      // 區段：逾時機制
+      // 用途：避免 ffmpeg 程序無限期執行
+      // ───────────────────────────────────────
+      const timeoutId = setTimeout(() => {
+        if (completed) return;
+        completed = true;
+        ffmpeg.kill('SIGTERM');
+        reject(new PipelineError('TRANSCODE_TIMEOUT', '音訊轉碼逾時', `ffmpeg 超過 ${FFMPEG_TIMEOUT_MS}ms 未完成`));
+      }, FFMPEG_TIMEOUT_MS);
 
       // ───────────────────────────────────────
       // 區段：錯誤監聽
@@ -513,10 +593,17 @@ class VoiceMessagePipeline {
       });
 
       ffmpeg.on('error', (error) => {
+        if (completed) return;
+        completed = true;
+        clearTimeout(timeoutId);
         reject(new PipelineError('TRANSCODE_FAILED', '音訊轉碼失敗', error.message || error));
       });
 
       ffmpeg.on('close', (code) => {
+        if (completed) return;
+        completed = true;
+        clearTimeout(timeoutId);
+        
         if (code !== 0) {
           return reject(new PipelineError('TRANSCODE_FAILED', '音訊轉碼失敗', stderr || `ffmpeg exit code ${code}`));
         }
@@ -548,7 +635,11 @@ class VoiceMessagePipeline {
     res.status(200);
 
     return new Promise((resolve, reject) => {
-      const stream = fs.createReadStream(m4aPath);
+      // 使用較大的 highWaterMark 以改善大型音訊檔串流效能
+      // 預設為 64KB，這裡改為 256KB 以在記憶體與吞吐量間取得平衡
+      const stream = fs.createReadStream(m4aPath, {
+        highWaterMark: 256 * 1024
+      });
 
       // ───────────────────────────────────────
       // 區段：串流錯誤處理
@@ -556,6 +647,7 @@ class VoiceMessagePipeline {
       // ───────────────────────────────────────
       stream.on('error', (error) => {
         this.logger.error('[appVoiceMessageService] 音訊串流失敗: ' + (error?.message || error));
+        stream.destroy();
         if (!res.headersSent) {
           this.sendErrorResponse(res, {
             traceId,
@@ -576,6 +668,8 @@ class VoiceMessagePipeline {
   // ───────────────────────────────────────────
   // 區段：錯誤回應
   // 用途：統一 JSON 錯誤格式
+  // 注意：使用 snake_case 'trace_id' 以保持與 API 回應標頭
+  //       (`X-Trace-Id`) 的一致性，符合外部 API 契約。
   // ───────────────────────────────────────────
   sendErrorResponse(res, { traceId, code, message, details, status }) {
     if (res.headersSent) return;
@@ -622,7 +716,7 @@ class VoiceMessagePipeline {
   // ───────────────────────────────────────────
   resolveExtension(file) {
     const originalExt = path.extname(file?.originalname || '').toLowerCase();
-    if (originalExt && /^[\.\w]+$/.test(originalExt)) {
+    if (originalExt && /^\.[a-z0-9]+$/i.test(originalExt)) {
       return originalExt;
     }
     return SUPPORTED_MIME_TYPES.get(file?.mimetype) || '.wav';
@@ -660,11 +754,13 @@ class VoiceMessagePipeline {
 
   // ───────────────────────────────────────────
   // 區段：等待檔案
-  // 用途：輪詢輸出資料夾取得最新 wav
+  // 用途：使用指數退避輪詢輸出資料夾取得最新 wav
   // ───────────────────────────────────────────
   async waitForWavFile(directory, timeoutMs) {
     const startTime = Date.now();
     const endTime = startTime + timeoutMs;
+    let delay = 100; // 初始延遲 100ms
+    const maxDelay = 2000; // 最大延遲 2 秒
 
     while (Date.now() < endTime) {
       try {
@@ -688,7 +784,9 @@ class VoiceMessagePipeline {
         this.logger.error('[appVoiceMessageService] 讀取 TTS 輸出失敗: ' + (error?.message || error));
       }
 
-      await new Promise((resolve) => setTimeout(resolve, 500));
+      // 使用指數退避以減少檔案系統操作次數
+      await new Promise((resolve) => setTimeout(resolve, delay));
+      delay = Math.min(delay * 1.5, maxDelay);
     }
 
     return '';

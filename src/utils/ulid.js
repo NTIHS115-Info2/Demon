@@ -33,7 +33,7 @@ function encodeTime(time) {
 // ───────────────────────────────────────────────
 function encodeRandom(bytes) {
   if (!Buffer.isBuffer(bytes) || bytes.length !== 10) {
-    throw new Error('ULID 亂數長度錯誤');
+    throw new Error(`ULID 亂數長度錯誤：預期 10 bytes，實際收到 ${bytes && typeof bytes.length === 'number' ? bytes.length : '未知'} bytes`);
   }
 
   let randomValue = 0n;
@@ -44,6 +44,8 @@ function encodeRandom(bytes) {
   let output = '';
   for (let i = RANDOM_LENGTH - 1; i >= 0; i -= 1) {
     const shift = BigInt(i * 5);
+    // 使用 31n (0x1F) 遮罩擷取 5-bit 區塊以進行 base-32 編碼
+    // 5 bits 可表示 0-31，對應 Crockford Base32 字元集的 32 個字元
     const index = Number((randomValue >> shift) & 31n);
     output += ENCODING[index];
   }
