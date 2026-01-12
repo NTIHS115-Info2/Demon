@@ -25,6 +25,13 @@ const DEFAULT_TTS_WAIT_TIMEOUT_MS = 45000;
 const DEFAULT_FFMPEG_TIMEOUT_MS = 30000;
 
 // ───────────────────────────────────────────────
+// 區段：驗證模式
+// 用途：統一輸入驗證規則
+// ───────────────────────────────────────────────
+const USERNAME_PATTERN = /^[a-z0-9_.-]{1,64}$/;
+const FILE_EXTENSION_PATTERN = /^\.[a-z0-9]+$/;
+
+// ───────────────────────────────────────────────
 // 區段：支援的音訊格式
 // 用途：限制上傳格式，避免不支援的音訊造成流程錯誤
 // 說明：audio/mp4 可容納視訊但通常用於 M4A 音訊容器，
@@ -442,7 +449,7 @@ class VoiceMessagePipeline {
       if (rawUsername && typeof rawUsername === 'string') {
         const trimmedUsername = rawUsername.trim();
         const normalizedUsername = trimmedUsername.toLowerCase();
-        const isValidUsername = /^[a-z0-9_.-]{1,64}$/i.test(normalizedUsername);
+        const isValidUsername = USERNAME_PATTERN.test(normalizedUsername);
 
         if (isValidUsername) {
           username = normalizedUsername;
@@ -799,7 +806,7 @@ class VoiceMessagePipeline {
   // ───────────────────────────────────────────
   resolveExtension(file) {
     const originalExt = path.extname(file?.originalname || '').toLowerCase();
-    if (originalExt && /^\.[a-z0-9]+$/i.test(originalExt)) {
+    if (originalExt && FILE_EXTENSION_PATTERN.test(originalExt)) {
       return originalExt;
     }
     return SUPPORTED_MIME_TYPES.get(file?.mimetype) || '.wav';
