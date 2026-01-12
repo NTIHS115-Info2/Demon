@@ -45,8 +45,26 @@ const SUPPORTED_MIME_TYPES = new Map([
 // ───────────────────────────────────────────────
 // 區段：處理鎖
 // 用途：避免相同 trace_id 併發重入
+// 說明：雖然 ULID 應該是唯一的，但長時間執行可能累積記憶體。
+//       實際上，鎖會在 finally 區塊中釋放，因此成功或失敗的請求
+//       都會清理。此 Map 不應無限增長，除非發生程序中止等異常。
 // ───────────────────────────────────────────────
 const traceLocks = new Map();
+
+// ───────────────────────────────────────────────
+// 區段：鎖定清理
+// 用途：定期清理超過 10 分鐘的過期鎖（防止異常情況累積）
+// ───────────────────────────────────────────────
+const LOCK_EXPIRY_MS = 10 * 60 * 1000; // 10 分鐘
+setInterval(() => {
+  const now = Date.now();
+  for (const [traceId, timestamp] of traceLocks.entries()) {
+    if (now - timestamp > LOCK_EXPIRY_MS) {
+      traceLocks.delete(traceId);
+    }
+  }
+}, 5 * 60 * 1000).unref(); // 每 5 分鐘執行一次，unref() 避免阻止程序退出
+
 
 // ───────────────────────────────────────────────
 // 區段：LLM 請求序列化
@@ -199,6 +217,16 @@ class VoiceMessagePipeline {
     this.pluginsManager = pluginsManager;
     this.voiceInboxDir = VOICE_INBOX_DIR;
     this.voiceOutboxDir = VOICE_OUTBOX_DIR;
+
+    // ─────────────────────────────────────────
+    // 區段：啟動定期清理
+    // 用途：每小時清理超過 2 小時的孤立檔案
+    // ─────────────────────────────────────────
+    this.cleanupInterval = setInterval(() => {
+      this.cleanupOrphanedFiles(2 * 60 * 60 * 1000).catch((err) => {
+        this.logger.error('[appVoiceMessageService] 孤立檔案清理失敗: ' + (err?.message || err));
+      });
+    }, 60 * 60 * 1000).unref(); // 每小時執行一次，unref() 避免阻止程序退出
   }
 
   // ───────────────────────────────────────────
@@ -702,6 +730,35 @@ class VoiceMessagePipeline {
   }
 
   // ───────────────────────────────────────────
+  // 區段：孤立檔案清理
+  // 用途：清理超過指定時間的暫存檔案（防止客戶端中斷等異常情況累積）
+  // ───────────────────────────────────────────
+  async cleanupOrphanedFiles(maxAgeMs = 60 * 60 * 1000) {
+    const now = Date.now();
+    const directories = [this.voiceInboxDir, this.voiceOutboxDir];
+
+    for (const dir of directories) {
+      try {
+        const entries = await fs.promises.readdir(dir);
+        for (const entry of entries) {
+          const fullPath = path.join(dir, entry);
+          try {
+            const stat = await fs.promises.stat(fullPath);
+            if (stat.isFile() && (now - stat.mtimeMs > maxAgeMs)) {
+              await fs.promises.unlink(fullPath);
+              this.logger.info(`[appVoiceMessageService] 清理孤立檔案: ${entry}`);
+            }
+          } catch (error) {
+            // 忽略無法讀取或已被刪除的檔案
+          }
+        }
+      } catch (error) {
+        // 忽略目錄不存在等錯誤
+      }
+    }
+  }
+
+  // ───────────────────────────────────────────
   // 區段：目錄建立
   // 用途：確保暫存目錄存在
   // ───────────────────────────────────────────
@@ -755,10 +812,13 @@ class VoiceMessagePipeline {
   // ───────────────────────────────────────────
   // 區段：等待檔案
   // 用途：使用指數退避輪詢輸出資料夾取得最新 wav
+  // 注意：由於每個 traceId 使用獨立目錄，併發 TTS 的競爭條件已被緩解。
+  //       時間戳記檢查使用小緩衝區以處理檔案系統時間精度問題。
   // ───────────────────────────────────────────
   async waitForWavFile(directory, timeoutMs) {
-    const startTime = Date.now();
-    const endTime = startTime + timeoutMs;
+    // 減去 100ms 緩衝以處理檔案系統時間精度
+    const startTime = Date.now() - 100;
+    const endTime = Date.now() + timeoutMs;
     let delay = 100; // 初始延遲 100ms
     const maxDelay = 2000; // 最大延遲 2 秒
 
