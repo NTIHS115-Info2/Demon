@@ -48,23 +48,9 @@ const SUPPORTED_MIME_TYPES = new Map([
 // 說明：雖然 ULID 應該是唯一的，但長時間執行可能累積記憶體。
 //       實際上，鎖會在 finally 區塊中釋放，因此成功或失敗的請求
 //       都會清理。此 Map 不應無限增長，除非發生程序中止等異常。
+//       鎖定清理由 VoiceMessagePipeline 實例管理。
 // ───────────────────────────────────────────────
 const traceLocks = new Map();
-
-// ───────────────────────────────────────────────
-// 區段：鎖定清理
-// 用途：定期清理超過 10 分鐘的過期鎖（防止異常情況累積）
-// ───────────────────────────────────────────────
-const LOCK_EXPIRY_MS = 10 * 60 * 1000; // 10 分鐘
-setInterval(() => {
-  const now = Date.now();
-  for (const [traceId, timestamp] of traceLocks.entries()) {
-    if (now - timestamp > LOCK_EXPIRY_MS) {
-      traceLocks.delete(traceId);
-    }
-  }
-}, 5 * 60 * 1000).unref(); // 每 5 分鐘執行一次，unref() 避免阻止程序退出
-
 
 // ───────────────────────────────────────────────
 // 區段：LLM 請求序列化
@@ -222,11 +208,45 @@ class VoiceMessagePipeline {
     // 區段：啟動定期清理
     // 用途：每小時清理超過 2 小時的孤立檔案
     // ─────────────────────────────────────────
-    this.cleanupInterval = setInterval(() => {
+    this.orphanedFileCleanupInterval = setInterval(() => {
       this.cleanupOrphanedFiles(2 * 60 * 60 * 1000).catch((err) => {
         this.logger.error('[appVoiceMessageService] 孤立檔案清理失敗: ' + (err?.message || err));
       });
     }, 60 * 60 * 1000).unref(); // 每小時執行一次，unref() 避免阻止程序退出
+
+    // ─────────────────────────────────────────
+    // 區段：啟動鎖定清理（僅執行一次）
+    // 用途：定期清理過期的 traceLocks
+    // ─────────────────────────────────────────
+    VoiceMessagePipeline.ensureLockCleanup();
+  }
+
+  /**
+   * 清理並停止所有定期任務
+   */
+  destroy() {
+    if (this.orphanedFileCleanupInterval) {
+      clearInterval(this.orphanedFileCleanupInterval);
+      this.orphanedFileCleanupInterval = null;
+    }
+  }
+
+  /**
+   * 確保鎖定清理計時器啟動（僅執行一次）
+   */
+  static ensureLockCleanup() {
+    if (VoiceMessagePipeline._lockCleanupInitialized) return;
+    VoiceMessagePipeline._lockCleanupInitialized = true;
+
+    const LOCK_EXPIRY_MS = 10 * 60 * 1000; // 10 分鐘
+    setInterval(() => {
+      const now = Date.now();
+      for (const [traceId, timestamp] of traceLocks.entries()) {
+        if (now - timestamp > LOCK_EXPIRY_MS) {
+          traceLocks.delete(traceId);
+        }
+      }
+    }, 5 * 60 * 1000).unref(); // 每 5 分鐘執行一次，unref() 避免阻止程序退出
   }
 
   // ───────────────────────────────────────────
@@ -397,8 +417,8 @@ class VoiceMessagePipeline {
       if (rawUsername) {
         const trimmedUsername = rawUsername.trim();
         const normalizedUsername = trimmedUsername.toLowerCase();
-        // 僅允許安全字元子集，並限制長度上限
-        const isValidUsername = /^[a-z0-9_.-]{1,64}$/i.test(normalizedUsername);
+        // 僅允許字母、數字與底線，防止路徑遍歷攻擊，並限制長度上限
+        const isValidUsername = /^[a-z0-9_]{1,64}$/i.test(normalizedUsername);
 
         if (isValidUsername) {
           username = normalizedUsername;
@@ -773,7 +793,8 @@ class VoiceMessagePipeline {
   // ───────────────────────────────────────────
   resolveExtension(file) {
     const originalExt = path.extname(file?.originalname || '').toLowerCase();
-    if (originalExt && /^\.[a-z0-9]+$/i.test(originalExt)) {
+    // 使用白名單方式驗證副檔名，與 SUPPORTED_MIME_TYPES 對應
+    if (originalExt && /^\.(wav|mp3|m4a|ogg|webm|flac)$/i.test(originalExt)) {
       return originalExt;
     }
     return SUPPORTED_MIME_TYPES.get(file?.mimetype) || '.wav';
