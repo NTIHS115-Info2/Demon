@@ -2,6 +2,10 @@
 
 #### iotVisionTurret 插件更新紀錄
 
+### [v0.9]
+#### New
+- 補充 YOLOv11 README 的資料集格式、訓練與推論說明，並加入常見錯誤排除指引
+
 ### [v0.8]
 #### Fix
 - 調整 infer() 改為顯式傳入裝置參數並補上 IMAGE_NOT_FOUND 設計說明
