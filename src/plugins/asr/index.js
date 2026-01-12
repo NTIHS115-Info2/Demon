@@ -192,9 +192,17 @@ module.exports = {
     }
   },
 
-  // 選用函式，目前策略未提供
-  async send(data) {
+  // 選用函式，提供 action 路由與向下相容
+  async send(data = {}) {
     if (!strategy) await this.updateStrategy(mode);
+
+    // 段落說明：若收到 action 指令，優先對應至內建方法
+    if (data && typeof data === 'object' && data.action) {
+      if (data.action === 'transcribeFile') {
+        return this.transcribeFile(data.payload || {}, data.options || {});
+      }
+    }
+
     if (typeof strategy.send !== 'function') {
       return false;
     }
