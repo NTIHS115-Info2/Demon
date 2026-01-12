@@ -157,7 +157,13 @@ def extract_candidates(
 # ───────────────────────────────────────────────
 # 函式區塊用途：執行 YOLOv11 推論並輸出統一格式
 # ───────────────────────────────────────────────
-def infer(image_path, weights_path, target, conf=0.25, device="cpu"):
+def infer(
+    image_path: str,
+    weights_path: str,
+    target: str,
+    conf: float = 0.25,
+    device: str = "cpu",
+) -> Dict[str, Any]:
     """執行 YOLOv11 推論並回傳指定格式結果。"""
     # 基本檢查區塊用途：確認權重檔案存在
     if not os.path.isfile(weights_path):
@@ -166,9 +172,9 @@ def infer(image_path, weights_path, target, conf=0.25, device="cpu"):
     if not os.path.isfile(image_path):
         # 設計說明區塊用途：將影像缺失視為獨立錯誤碼，便於外部快速判斷
         return {"ok": False, "error": "IMAGE_NOT_FOUND"}
-    # 基本檢查區塊用途：確認 target 不為空字串
+    # 基本檢查區塊用途：確認 target 為非空字串
     if not isinstance(target, str) or not target.strip():
-        return {"ok": False, "error": "INFER_FAILED", "detail": "target 不可為空"}
+        return {"ok": False, "error": "INFER_FAILED", "detail": "target 必須為非空字串"}
 
     # 影像尺寸讀取區塊用途：先取得影像尺寸供成功或未命中時回傳
     try:
