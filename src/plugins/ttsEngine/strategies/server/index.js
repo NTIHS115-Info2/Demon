@@ -3,7 +3,8 @@ const info = require('./infor');
 const pluginsManager = require('../../../../core/pluginsManager');
 const Logger = require('../../../../utils/logger');
 
-const logger = new Logger('TTSServer');
+// 伺服器模式 logger，對外名稱統一為 ttsEngine
+const logger = new Logger('ttsEngineServer');
 const priority = 80;
 
 let registered = false;
@@ -19,14 +20,33 @@ module.exports = {
         try {
           const text = String(req.body.text || '');
           if (!text.trim()) {
-            logger.warn('TTS 遠端請求收到空白文字');
+            logger.warn('ttsEngine 遠端請求收到空白文字');
             return res.status(400).json({ error: 'Empty text provided' });
           }
-          await local.send(text);
-          return res.status(200).json({ success: true, message: 'TTS processed successfully' });
+          // 透過本地策略取得可讀 stream，並以串流方式回傳 PCM
+          const session = await local.send(text);
+          const metadata = await session.metadataPromise;
+          res.setHeader('Content-Type', 'application/octet-stream');
+          res.setHeader('X-Audio-Format', metadata.format);
+          res.setHeader('X-Audio-Sample-Rate', String(metadata.sample_rate));
+          res.setHeader('X-Audio-Channels', String(metadata.channels));
+
+          session.stream.on('error', (err) => {
+            logger.error('ttsEngine 串流輸出失敗: ' + err.message);
+            if (!res.headersSent) {
+              res.status(500).json({ error: 'ttsEngine streaming failed', details: err.message });
+            } else {
+              logger.error('ttsEngine 串流在回應已開始後發生錯誤，連線將被中斷，可能已送出部分音訊資料');
+              // res.destroy() is available in Node.js >= 8.0.0 which is well supported
+              res.destroy(err);
+            }
+          });
+
+          session.stream.pipe(res);
+          return;
         } catch (e) {
-          logger.error('處理 TTS 遠端請求失敗: ' + e.message);
-          return res.status(500).json({ error: 'TTS processing failed', details: e.message });
+          logger.error('處理 ttsEngine 遠端請求失敗: ' + e.message);
+          return res.status(500).json({ error: 'ttsEngine processing failed', details: e.message });
         }
       }
       return res.status(404).json({ error: 'Not found' });
