@@ -51,8 +51,8 @@ const traceLocks = new Map();
 const LOCK_CLEANUP_INTERVAL_MS = 60000; // 1 分鐘
 const LOCK_MAX_AGE_MS = 600000; // 10 分鐘
 
-// 定期清理過期鎖
-setInterval(() => {
+// 定期清理過期鎖，使用 unref 避免阻止程序退出
+const lockCleanupInterval = setInterval(() => {
   const now = Date.now();
   for (const [traceId, timestamp] of traceLocks.entries()) {
     if (now - timestamp > LOCK_MAX_AGE_MS) {
@@ -60,6 +60,9 @@ setInterval(() => {
     }
   }
 }, LOCK_CLEANUP_INTERVAL_MS);
+if (lockCleanupInterval.unref) {
+  lockCleanupInterval.unref();
+}
 
 // ───────────────────────────────────────────────
 // 區段：LLM 請求序列化
