@@ -85,11 +85,13 @@ if (lockCleanupInterval.unref) {
 // ───────────────────────────────────────────────
 let requestQueue = [];
 let isProcessing = false;
+let ttsFallbackWarningShown = false; // 避免重複警告造成日誌污染
 
 function enqueueTalkerRequest(payload) {
   return new Promise((resolve, reject) => {
     requestQueue.push({ ...payload, resolve, reject });
-    // JavaScript 單執行緒特性確保此檢查是原子性的
+    // 此檢查在同步執行，isProcessing 設為 true 後才會進入 async 區段
+    // 因此多個同步呼叫不會造成競態條件
     if (!isProcessing) {
       processNextTalkerRequest();
     }
@@ -636,7 +638,10 @@ class VoiceMessagePipeline {
     //       3) 若有併發 TTS 請求可能誤取檔案
     // 建議：請確保 TTS 插件實作 ttsArtifact action
     // ─────────────────────────────────────────
-    this.logger.warn('[appVoiceMessageService] TTS 插件未實作 ttsArtifact，使用不可靠的備援機制');
+    if (!ttsFallbackWarningShown) {
+      this.logger.warn('[appVoiceMessageService] TTS 插件未實作 ttsArtifact，使用不可靠的備援機制（此警告僅顯示一次）');
+      ttsFallbackWarningShown = true;
+    }
     try {
       await this.pluginsManager.send('tts', text);
       const fallbackPath = await this.waitForWavFile(targetDir, DEFAULT_TTS_WAIT_TIMEOUT_MS);
