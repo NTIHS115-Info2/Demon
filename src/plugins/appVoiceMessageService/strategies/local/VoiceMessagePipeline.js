@@ -194,6 +194,9 @@ class PipelineError extends Error {
 }
 
 class VoiceMessagePipeline {
+  // 靜態屬性：追蹤鎖定清理是否已初始化
+  static _lockCleanupInitialized = false;
+
   constructor({ logger } = {}) {
     // ─────────────────────────────────────────
     // 區段：初始化
@@ -418,7 +421,7 @@ class VoiceMessagePipeline {
         const trimmedUsername = rawUsername.trim();
         const normalizedUsername = trimmedUsername.toLowerCase();
         // 僅允許字母、數字與底線，防止路徑遍歷攻擊，並限制長度上限
-        const isValidUsername = /^[a-z0-9_]{1,64}$/i.test(normalizedUsername);
+        const isValidUsername = /^[a-z0-9_]{1,64}$/.test(normalizedUsername);
 
         if (isValidUsername) {
           username = normalizedUsername;
@@ -839,7 +842,7 @@ class VoiceMessagePipeline {
   async waitForWavFile(directory, timeoutMs) {
     // 減去 100ms 緩衝以處理檔案系統時間精度
     const startTime = Date.now() - 100;
-    const endTime = Date.now() + timeoutMs;
+    const endTime = startTime + timeoutMs;
     let delay = 100; // 初始延遲 100ms
     const maxDelay = 2000; // 最大延遲 2 秒
 
@@ -866,6 +869,7 @@ class VoiceMessagePipeline {
       }
 
       // 使用指數退避以減少檔案系統操作次數
+      // 採用 1.5 倍增長係數（而非典型的 2 倍），以在減少 I/O 與快速偵測間取得平衡
       await new Promise((resolve) => setTimeout(resolve, delay));
       delay = Math.min(delay * 1.5, maxDelay);
     }
