@@ -112,8 +112,9 @@ def run_training(config: TrainConfig) -> Path:
         project=config.project,
         name=config.name,
     )
-    save_dir = Path(getattr(results, "save_dir", "")) if results else None
-    best_path = build_expected_best_path(config, save_dir if save_dir and str(save_dir) else None)
+    raw_save_dir = getattr(results, "save_dir", "") if results else ""
+    save_dir = Path(raw_save_dir) if raw_save_dir else None
+    best_path = build_expected_best_path(config, save_dir)
     return best_path
 
 
