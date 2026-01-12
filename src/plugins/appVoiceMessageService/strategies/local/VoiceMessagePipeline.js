@@ -77,6 +77,11 @@ if (lockCleanupInterval.unref) {
 // 說明：以下狀態為模組層級共享，所有 VoiceMessagePipeline 實例會共用
 //       同一個 LLM 請求佇列，以「全域序列化」方式避免 talker 事件流互相干擾。
 //       若改為每個實例各自持有佇列，將失去這個全域排序保證。
+//       
+//       序列化處理說明：
+//       - 請求必須「依序執行」而非併發，因為 talker 是全域單例
+//       - 使用 while 迴圈確保在處理期間加入的新請求也會被處理
+//       - 使用 setImmediate 避免深度遞迴造成堆疊溢位
 // ───────────────────────────────────────────────
 let requestQueue = [];
 let isProcessing = false;
@@ -84,6 +89,7 @@ let isProcessing = false;
 function enqueueTalkerRequest(payload) {
   return new Promise((resolve, reject) => {
     requestQueue.push({ ...payload, resolve, reject });
+    // JavaScript 單執行緒特性確保此檢查是原子性的
     if (!isProcessing) {
       processNextTalkerRequest();
     }
@@ -95,6 +101,7 @@ async function processNextTalkerRequest() {
   isProcessing = true;
 
   try {
+    // 使用 while 迴圈而非單次處理，確保處理期間加入的請求也會被執行
     while (requestQueue.length > 0) {
       const task = requestQueue.shift();
       try {
@@ -106,10 +113,10 @@ async function processNextTalkerRequest() {
     }
   } finally {
     isProcessing = false;
-    // If new tasks arrived after we finished the loop but before we
-    // released the flag, ensure they get processed.
+    // 若在處理完畢後又有新請求進入，使用 setImmediate 避免深度遞迴
+    // setImmediate 將遞迴呼叫推遲到下一個事件循環，防止堆疊溢位
     if (requestQueue.length > 0) {
-      processNextTalkerRequest();
+      setImmediate(processNextTalkerRequest);
     }
   }
 }
