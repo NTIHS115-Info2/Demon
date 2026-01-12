@@ -32,3 +32,8 @@ config/*.js
 tokens/
 !tokens/README.md
 package-lock.json
+
+# Python cache files
+__pycache__/
+*.py[cod]
+*$py.class

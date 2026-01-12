@@ -2,6 +2,14 @@
 
 #### iotVisionTurret 插件更新紀錄
 
+### [v0.6]
+#### Fix
+- 修正 Python runner stdout 統一單行 JSON 且補上換行結尾，錯誤輸出維持固定格式
+
+### [v0.5]
+#### New
+- 新增本地策略 Python runner 的 stdin JSON 解析與 YOLOv11 推論封裝，統一 stdout 單行 JSON 格式與錯誤處理
+
 ### [v0.4]
 #### New
 - 新增 runYoloInfer 橋接流程，改以 stdin/stdout JSON 協議呼叫 Python YOLO 推理並補齊逾時與錯誤處理
