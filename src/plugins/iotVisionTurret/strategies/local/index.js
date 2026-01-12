@@ -310,8 +310,7 @@ function waitForImage(imageId, timeoutMs = 30000) {
 
     // 段落用途：建立逾時計時器，逾時必須 reject，避免流程永遠等待並確保資源可回收
     const timer = setTimeout(() => {
-      // 段落用途：逾時後清理 timer 與 Map，避免 memory leak
-      clearTimeout(timer);
+      // 段落用途：逾時後清理 Map，避免 memory leak
       imageWaiters.delete(imageId);
       logger.warn(`[iotVisionTurret] 影像等待逾時：${imageId}，timeout=${timeoutMs}ms`);
       const timeoutError = new Error(`UPLOAD_TIMEOUT: ${imageId} (${timeoutMs}ms)`);
@@ -511,6 +510,23 @@ function registerRoutes(app) {
       // 段落用途：允許重複 image_id 時覆蓋，符合裝置重送常態
       if (imageStore.has(imageId)) {
         logger.warn(`[iotVisionTurret] 重複 image_id，將覆蓋既有檔案：${imageId}`);
+
+        // 若先前已存在等待同一 imageId 的 waiter，先行拒絕並清理，避免覆蓋造成同步問題
+        const existingWaiter = imageWaiters.get(imageId);
+        if (existingWaiter) {
+          try {
+            existingWaiter.reject(
+              new Error(`image_id ${imageId} 被新的上傳請求覆蓋`)
+            );
+          } catch (waiterErr) {
+            logger.warn(
+              `[iotVisionTurret] 拒絕既有影像等待者時發生錯誤：${imageId} - ${waiterErr.message}`
+            );
+          }
+          clearTimeout(existingWaiter.timer);
+          imageWaiters.delete(imageId);
+          logger.warn(`[iotVisionTurret] 既有影像等待者已因覆蓋而取消：${imageId}`);
+        }
       }
 
       // 段落用途：檢查並解析上傳內容，必要時拋出錯誤以返回正確狀態碼
