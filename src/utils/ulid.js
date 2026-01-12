@@ -33,7 +33,7 @@ function encodeTime(time) {
 // ───────────────────────────────────────────────
 function encodeRandom(bytes) {
   if (!Buffer.isBuffer(bytes) || bytes.length !== 10) {
-    throw new Error('ULID 亂數長度錯誤');
+    throw new Error(`ULID 亂數長度錯誤：預期 10 bytes，實際收到 ${bytes && typeof bytes.length === 'number' ? bytes.length : '未知'} bytes`);
   }
 
   let randomValue = 0n;
@@ -41,10 +41,12 @@ function encodeRandom(bytes) {
     randomValue = (randomValue << 8n) + BigInt(byte);
   }
 
+  // 使用 base-32 編碼（2^5 = 32 個字元）
+  // 遮罩 31n（二進位 11111）用於提取 5-bit 區塊
   let output = '';
   for (let i = RANDOM_LENGTH - 1; i >= 0; i -= 1) {
     const shift = BigInt(i * 5);
-    const index = Number((randomValue >> shift) & 31n);
+    const index = Number((randomValue >> shift) & 31n); // 提取 5 bits，值域 0-31
     output += ENCODING[index];
   }
   return output;

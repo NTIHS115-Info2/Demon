@@ -10,14 +10,17 @@ curl -X POST "http://localhost:3000/app/voice/message" \
   -F "username=app"
 ```
 
-### Header 說明（F1 / F2 / F3）
-- **F1：`X-Trace-Id`**
-  - 伺服器產生的追蹤編號，方便 App 端追查單次請求。
-- **F2：`X-Turn-Id`**
-  - 單次對話回合識別碼，用於關聯後續紀錄。
-- **F3：流程耗時標頭**
-  - `X-ASR-Duration-Ms` / `X-LLM-Duration-Ms` / `X-TTS-Duration-Ms` / `X-Transcode-Duration-Ms`
-  - 各階段耗時（毫秒），用於效能監控與排查。
+### Header 說明
+
+#### Trace ID Header (`X-Trace-Id`)
+- 伺服器產生的追蹤編號，方便 App 端追查單次請求。
+
+#### Turn ID Header (`X-Turn-Id`)
+- 單次對話回合識別碼，用於關聯後續紀錄。
+
+#### Performance Timing Headers
+- `X-ASR-Duration-Ms` / `X-LLM-Duration-Ms` / `X-TTS-Duration-Ms` / `X-Transcode-Duration-Ms`
+- 各階段耗時（毫秒），用於效能監控與排查。
 
 ### 回傳行為
 - **成功**：
