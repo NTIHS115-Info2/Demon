@@ -1,0 +1,7 @@
+# 檔案用途：列出 YOLOv11 訓練與推論所需 Python 依賴
+# 狀態資料結構區塊：無（僅列出依賴清單）
+# 函式區塊用途：無（requirements 檔案不包含函式）
+
+ultralytics>=8.0.0,<9.0.0
+opencv-python>=4.8.0
+numpy>=1.24.0
