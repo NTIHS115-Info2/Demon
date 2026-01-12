@@ -2,6 +2,16 @@
 
 #### iotVisionTurret 插件更新紀錄
 
+### [v0.8]
+#### Fix
+- 調整 infer() 改為顯式傳入裝置參數並補上 IMAGE_NOT_FOUND 設計說明
+
+### [v0.7]
+#### New
+- 補齊 YOLOv11 依賴清單，改用 headless OpenCV 以符合無 GUI 環境
+- 完成 YOLOv11 推論封裝與錯誤代碼回傳，並補上目標篩選與最佳框選擇邏輯
+- 實作 YOLOv11 訓練 CLI 與 best.pt 複製輸出流程，輸出訓練結束資訊
+
 ### [v0.6]
 #### Fix
 - 修正 Python runner stdout 統一單行 JSON 且補上換行結尾，錯誤輸出維持固定格式
