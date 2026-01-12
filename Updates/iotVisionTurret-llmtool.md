@@ -2,6 +2,10 @@
 
 #### iotVisionTurret 插件更新紀錄
 
+### [v0.10]
+#### Fix
+- 補齊 /iot/upload 上傳存檔流程與 artifacts 目錄建立，並同步處理影像等待者、逾時清理與錯誤記錄
+
 ### [v0.9]
 #### New
 - 補充 YOLOv11 README 的資料集格式、訓練與推論說明，並加入常見錯誤排除指引
