@@ -296,24 +296,29 @@ function enqueueCommand(command) {
  */
 function waitForImage(imageId, timeoutMs = 30000) {
   return new Promise((resolve, reject) => {
-    // 若影像已存在則直接回傳
+    // 段落用途：若影像已存在則直接回傳，避免重複等待並讓 imageStore 作為後續讀檔索引
     if (imageStore.has(imageId)) {
       logger.info(`[iotVisionTurret] 影像已存在，立即回傳：${imageId}`);
       return resolve(imageStore.get(imageId));
     }
 
-    // 若已有等待者則拒絕重複等待
+    // 段落用途：若已有等待者則拒絕重複等待，避免同一 image_id 產生多個 Promise 造成同步混亂
     if (imageWaiters.has(imageId)) {
+      logger.warn(`[iotVisionTurret] 影像等待重複申請：${imageId}`);
       return reject(new Error(`影像 ${imageId} 已有等待者，拒絕重複等待`));
     }
 
-    // 建立逾時計時器，避免長時間等待
+    // 段落用途：建立逾時計時器，逾時必須 reject，避免流程永遠等待並確保資源可回收
     const timer = setTimeout(() => {
+      // 段落用途：逾時後清理 Map，避免 memory leak
       imageWaiters.delete(imageId);
-      logger.warn(`[iotVisionTurret] 影像等待逾時：${imageId}`);
-      reject(new Error(`影像等待逾時：${imageId}`));
+      logger.warn(`[iotVisionTurret] 影像等待逾時：${imageId}，timeout=${timeoutMs}ms`);
+      const timeoutError = new Error(`UPLOAD_TIMEOUT: ${imageId} (${timeoutMs}ms)`);
+      timeoutError.code = 'UPLOAD_TIMEOUT';
+      reject(timeoutError);
     }, timeoutMs);
 
+    // 段落用途：建立 imageWaiters，作為 capture → upload 的同步橋接
     imageWaiters.set(imageId, { resolve, reject, timer });
   });
 }
@@ -334,14 +339,17 @@ function extractUploadBuffer(req) {
     return bodyBuffer;
   }
 
-  throw new Error('不支援的 Content-Type，僅支援 application/octet-stream 或 image/*');
+  // 段落用途：統一拋出錯誤訊息供上層判斷，避免流程默默失敗
+  const error = new Error('不支援的 Content-Type，僅支援 application/octet-stream 或 image/*');
+  error.code = 'UNSUPPORTED_CONTENT_TYPE';
+  throw error;
 }
 
 /**
  * 確保上傳資料夾存在
  */
 async function ensureUploadDir() {
-  // 建立上傳目錄，避免寫入時出錯
+  // 段落用途：建立上傳目錄，避免寫入時出錯並確保部署差異不影響上傳流程
   await fs.promises.mkdir(UPLOAD_DIR, { recursive: true });
 }
 
@@ -497,40 +505,66 @@ function registerRoutes(app) {
       return sendError(res, 409, '目前有其他上傳作業進行中');
     }
 
-    if (imageStore.has(imageId)) {
-      logger.warn(`[iotVisionTurret] 重複 image_id：${imageId}`);
-      return sendError(res, 409, 'image_id 已存在，請使用新的 ID');
-    }
-
     jobLock = true;
     try {
+      // 段落用途：允許重複 image_id 時覆蓋，符合裝置重送常態
+      if (imageStore.has(imageId)) {
+        logger.warn(`[iotVisionTurret] 重複 image_id，將覆蓋既有檔案：${imageId}`);
+
+        // 若先前已存在等待同一 imageId 的 waiter，先行拒絕並清理，避免覆蓋造成同步問題
+        const existingWaiter = imageWaiters.get(imageId);
+        if (existingWaiter) {
+          try {
+            existingWaiter.reject(
+              new Error(`image_id ${imageId} 被新的上傳請求覆蓋`)
+            );
+          } catch (waiterErr) {
+            logger.warn(
+              `[iotVisionTurret] 拒絕既有影像等待者時發生錯誤：${imageId} - ${waiterErr.message}`
+            );
+          }
+          clearTimeout(existingWaiter.timer);
+          imageWaiters.delete(imageId);
+          logger.warn(`[iotVisionTurret] 既有影像等待者已因覆蓋而取消：${imageId}`);
+        }
+      }
+
+      // 段落用途：檢查並解析上傳內容，必要時拋出錯誤以返回正確狀態碼
       const imageBuffer = extractUploadBuffer(req);
       if (!imageBuffer || imageBuffer.length === 0) {
         logger.warn('[iotVisionTurret] 上傳內容為空');
         return sendError(res, 400, '上傳內容不可為空');
       }
 
+      // 段落用途：上傳前確保 artifacts 目錄存在，避免部署差異導致寫入失敗
       await ensureUploadDir();
       const filePath = path.join(UPLOAD_DIR, `${imageId}.jpg`);
       await fs.promises.writeFile(filePath, imageBuffer);
 
+      // 段落用途：更新 imageStore，提供後續推理或追蹤流程讀取檔案路徑
       imageStore.set(imageId, filePath);
       logger.info(`[iotVisionTurret] 影像已儲存：${filePath}`);
 
-      // 若有等待者則立即回傳
+      // 段落用途：若存在 imageWaiters，立即 resolve 並清理 timer 與 Map，避免 race condition 與記憶體洩漏
       const waiter = imageWaiters.get(imageId);
       if (waiter) {
-        clearTimeout(waiter.timer);
         waiter.resolve(filePath);
+        clearTimeout(waiter.timer);
         imageWaiters.delete(imageId);
         logger.info(`[iotVisionTurret] 影像等待者已解除：${imageId}`);
       }
 
       return res.status(200).json({ ok: true });
     } catch (err) {
+      // 段落用途：集中處理上傳錯誤，避免流程默默卡住並提供可追蹤 log
+      if (err && err.code === 'UNSUPPORTED_CONTENT_TYPE') {
+        logger.warn(`[iotVisionTurret] 上傳失敗：不支援的 Content-Type (${err.message})`);
+        return sendError(res, 415, '不支援的 Content-Type');
+      }
       logger.error(`[iotVisionTurret] 影像上傳失敗：${err.message}`);
       return sendError(res, 500, err.message);
     } finally {
+      // 段落用途：確保 jobLock 釋放，避免上傳流程被鎖死
       jobLock = false;
     }
   });
@@ -804,6 +838,15 @@ module.exports = {
     // 註冊 IoT 路由（僅一次）
     registerRoutes(options.expressApp);
 
+    // 段落用途：插件上線時先建立 artifacts 目錄，較早發現部署問題並確保上傳流程不被卡住
+    try {
+      await ensureUploadDir();
+      logger.info(`[iotVisionTurret] 已確認上傳目錄存在：${UPLOAD_DIR}`);
+    } catch (err) {
+      logger.error(`[iotVisionTurret] 建立上傳目錄失敗：${err.message}`);
+      throw err;
+    }
+
     const response = await runPython({ action: 'ping' }, state.config);
     state.online = true;
     state.lastError = null;
@@ -939,11 +982,14 @@ module.exports = {
           try {
             imagePath = await waitForImage(imageId, uploadTimeoutMs);
           } catch (err) {
+            // 段落用途：依據錯誤碼與訊息判斷是否為上傳逾時，確保可追蹤並回收資源
             const isTimeoutError =
               err &&
-              (err.code === 'ETIMEDOUT' ||
+              (err.code === 'UPLOAD_TIMEOUT' ||
+                err.code === 'ETIMEDOUT' ||
                 err.name === 'TimeoutError' ||
-                err.message?.toLowerCase().includes('timeout'));
+                err.message?.toLowerCase().includes('timeout') ||
+                err.message?.toLowerCase().includes('upload_timeout'));
             if (isTimeoutError) {
               logger.warn(`[iotVisionTurret] UPLOAD_TIMEOUT：影像 ${imageId} 等待逾時 (${err.message})`);
             } else {
@@ -1091,11 +1137,14 @@ module.exports = {
         try {
           trackImagePath = await waitForImage(trackImageId, trackUploadTimeout);
         } catch (err) {
+          // 段落用途：依據錯誤碼與訊息判斷是否為上傳逾時，確保可追蹤並回收資源
           const isTimeoutError =
             err &&
-            (err.code === 'ETIMEDOUT' ||
+            (err.code === 'UPLOAD_TIMEOUT' ||
+              err.code === 'ETIMEDOUT' ||
               err.name === 'TimeoutError' ||
-              err.message?.toLowerCase().includes('timeout'));
+              err.message?.toLowerCase().includes('timeout') ||
+              err.message?.toLowerCase().includes('upload_timeout'));
           if (isTimeoutError) {
             logger.warn(`[iotVisionTurret] UPLOAD_TIMEOUT：追蹤影像 ${trackImageId} 等待逾時 (${err.message})`);
           } else {
