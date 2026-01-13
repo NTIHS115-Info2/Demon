@@ -1,0 +1,8 @@
+{
+  "toolName": "iotVisionTurret",
+  "description": "This tool is used to control physical lights in the IoT system. Whenever the user's intent involves turning lights on or off, lighting control, or operating any smart light-related device, this tool must be used. The internal IoT logic, device selection, and execution details are handled by the system and are not exposed to the language model.",
+  "input": {},
+  "output": {
+    "ok": "Boolean. true if the light control operation succeeded, false if it failed."
+  }
+}

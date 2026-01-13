@@ -1,7 +1,7 @@
 // ───────────────────────────────────────────────
 // appChatService plugin (Cloudflare A record / reverse proxy friendly)
 // 外網入口： https://xiaoDemon.dev/ios-app/chat
-// 內部監聽： http://0.0.0.0:8080/ios-app/chat  (建議 8080，Cloudflare 允許)
+// 內部監聽：由主服務 Express app 統一管理
 // ───────────────────────────────────────────────
 
 const express = require('express');
@@ -21,14 +21,10 @@ const MAX_MESSAGE_LENGTH = 10000;
 
 const priority = 70;
 
-// Cloudflare 反代可連到的 HTTP 允許 port：80/8080/8880/...
-// 沒有 Nginx 的情況下，直接用 8080 最省事
-const DEFAULT_LISTEN_HOST = '0.0.0.0';
-const DEFAULT_LISTEN_PORT = 80;
-
+// 注入狀態：紀錄是否已完成路由註冊與線上狀態
 let registered = false;
-let app = null;
-let server = null;
+let isOnline = false;
+let expressApp = null;
 
 // ───────────────────────────────────────────────
 // 請求佇列：避免 talker 事件混淆（因為 talker 是事件匯流排風格）
@@ -164,17 +160,18 @@ function collectTalkerResponse(username, message, options = {}) {
   return enqueueRequest(username, message, timeoutMs);
 }
 
-function buildExpressApp() {
-  const _app = express();
+function buildRouter() {
+  // 建立 Router，避免直接操作主 Express app
+  const router = express.Router();
 
-  // 僅接受 JSON
-  _app.use(express.json({ limit: '256kb' }));
+  // 僅接受 JSON，限制 payload 大小避免濫用
+  router.use(express.json({ limit: '256kb' }));
 
   // 健康檢查（可選）
-  _app.get('/healthz', (req, res) => res.status(200).send('ok'));
+  router.get('/healthz', (req, res) => res.status(200).send('ok'));
 
   // 嚴格路由：POST /ios-app/chat
-  _app.post(FULL_ROUTE_PATH, async (req, res) => {
+  router.post(FULL_ROUTE_PATH, async (req, res) => {
     // Content-Type 檢查（express.json 已經會擋很多，但這裡做明確回應）
     if (!req.is('application/json')) {
       logger.warn('[appChatService] Content-Type 非 JSON');
@@ -205,66 +202,68 @@ function buildExpressApp() {
   });
 
   // 對其他方法給 405（比 404 更精準）
-  _app.all(FULL_ROUTE_PATH, (req, res) => sendErrorResponse(res, 405));
+  router.all(FULL_ROUTE_PATH, (req, res) => sendErrorResponse(res, 405));
 
-  return _app;
+  return router;
 }
 
 module.exports = {
   priority,
 
   /**
-   * 啟動插件：直接開一個 HTTP server
+   * 啟動插件：向主服務 Express app 註冊路由
    * options:
-   *  - host: 預設 0.0.0.0
-   *  - port: 預設 8080（Cloudflare 可連）
+   *  - expressApp: 由主服務注入的 Express app
+   * 
+   * 設計說明：
+   *  - registered: 標記路由是否已註冊到 Express（路由無法動態解除，故僅註冊一次）
+   *  - isOnline: 標記插件的運行狀態（允許 offline/online 切換）
+   *  - 當 registered=true 且 isOnline=false 時，online() 會跳過路由註冊但更新 isOnline 狀態
    */
   async online(options = {}) {
-    if (registered) {
-      logger.warn('[appChatService] 已啟動，跳過重複 online');
+    if (registered && isOnline) {
+      logger.warn('[appChatService] 已上線，跳過重複 online');
       return true;
     }
 
-    const host = options.host || DEFAULT_LISTEN_HOST;
-    const port = Number(options.port || process.env.APP_CHAT_SERVICE_PORT || DEFAULT_LISTEN_PORT);
+    // 由主服務注入 Express app，不允許插件自行建立 server
+    if (!options.expressApp) {
+      logger.error('[appChatService] 缺少 Express app，無法註冊路由');
+      return false;
+    }
+
+    expressApp = options.expressApp;
 
     try {
-      app = buildExpressApp();
-      server = app.listen(port, host, () => {
-        logger.info(`[appChatService] Listening on http://${host}:${port}${FULL_ROUTE_PATH}`);
-      });
+      // 註冊路由到主服務 Express app
+      if (!registered) {
+        const router = buildRouter();
+        expressApp.use(router);
+        registered = true;
+      }
 
-      registered = true;
+      isOnline = true;
+      logger.info('[appChatService] 已註冊路由並完成上線');
       return true;
     } catch (err) {
       logger.error(`[appChatService] 啟動失敗: ${err?.message || err}`);
-      registered = false;
-      app = null;
-      server = null;
+      isOnline = false;
       return false;
     }
   },
 
   /**
-   * 關閉插件：關閉 HTTP server
+   * 關閉插件：僅更新狀態（Express 路由無法動態解除）
+   * 注意：expressApp 引用保留以供重新上線時使用
    */
   async offline() {
     if (!registered) return true;
 
-    try {
-      await new Promise((resolve, reject) => {
-        if (!server) return resolve();
-        server.close((err) => (err ? reject(err) : resolve()));
-      });
-
-      registered = false;
-      app = null;
-      server = null;
-      return true;
-    } catch (err) {
-      logger.error(`[appChatService] 關閉失敗: ${err?.message || err}`);
-      return false;
-    }
+    // 無法解除路由，僅標記為離線，避免重複註冊
+    // expressApp 引用保留，因為 Express 路由一旦註冊無法移除
+    isOnline = false;
+    logger.warn('[appChatService] 已標記離線（Express 路由仍保留）');
+    return true;
   },
 
   async restart(options = {}) {
@@ -273,6 +272,6 @@ module.exports = {
   },
 
   async state() {
-    return registered ? 1 : 0;
+    return isOnline ? 1 : 0;
   }
 };

@@ -31,5 +31,9 @@ config/*.js
 !config/*.example.js
 tokens/
 !tokens/README.md
-__pycache__/
 package-lock.json
+
+# Python cache files
+__pycache__/
+*.py[cod]
+*$py.class
