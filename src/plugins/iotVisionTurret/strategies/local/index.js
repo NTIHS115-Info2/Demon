@@ -69,15 +69,15 @@ const priority = 50;
 // - 大多數情況下會在前幾個格點即找到目標，提前結束掃描
 // - 實際應用場景中，目標通常出現在預期區域附近
 // 若需完整掃描支援，請調整為 TASK_TIMEOUT_MS = 300000（5 分鐘）或更高
-const TASK_TIMEOUT_MS = 45000;
+const TASK_TIMEOUT_MS = 300000;
 // 單張影像上傳等待逾時（ms）
 const UPLOAD_TIMEOUT_MS = 5000;
 // 掃描 pitch 序列（外圈）
 // 注意：pitch 在本裝置上僅安全支援到約 120 度，因機械結構限制
 // 若未來機構/伺服馬達可支援完整 0–180 度，請一併調整此列表與相關參數
-const SCAN_PITCH_LIST = [0, 30, 60, 90, 120];
+const SCAN_PITCH_LIST = [0];
 // 掃描 yaw 序列（內圈，允許完整 0–180 度掃描）
-const SCAN_YAW_LIST = [0, 45, 90, 135, 180];
+const SCAN_YAW_LIST = [0, 45, 90, 135, 180 , 0];
 // 追蹤最大迭代次數
 const TRACK_MAX_ITERATIONS = 12;
 // LOCKED 連續達標次數
@@ -458,13 +458,20 @@ function registerRoutes(app) {
 
     logger.info(`[iotVisionTurret] 收到影像上傳，Content-Type=${req.headers['content-type'] || 'unknown'}`);
 
-    // 避免同時處理多筆上傳，確保寫入一致
-    if (jobLock) {
-      logger.warn(`[iotVisionTurret] 上傳被鎖定，拒絕影像 ${imageId}`);
-      return sendError(res, 409, '目前有其他上傳作業進行中');
+    // 段落用途：檢查是否有等待此影像的流程
+    // 注意：當 send() 執行掃描流程並持有 jobLock 時，裝置會上傳影像
+    // 此時不應拒絕上傳，而是檢查該 imageId 是否有對應的 waiter
+    // 若有 waiter 或 imageId 已在 imageStore 中，則允許上傳（可能是掃描流程要求的）
+    const hasWaiter = imageWaiters.has(imageId);
+    const hasExistingImage = imageStore.has(imageId);
+
+    // 僅在沒有任何等待者、也沒有既有影像、且 jobLock 被其他上傳持有時才拒絕
+    // 這樣可避免掃描流程發出 capture 後，裝置上傳卻被自己的 jobLock 擋住
+    if (!hasWaiter && !hasExistingImage && jobLock) {
+      logger.warn(`[iotVisionTurret] 上傳被鎖定，拒絕影像 ${imageId}（無對應等待者）`);
+      return sendError(res, 409, '目前有其他上傳作業進行中，且無此影像的等待者');
     }
 
-    jobLock = true;
     try {
       // 段落用途：允許重複 image_id 時覆蓋，符合裝置重送常態
       if (imageStore.has(imageId)) {
@@ -522,10 +529,9 @@ function registerRoutes(app) {
       }
       logger.error(`[iotVisionTurret] 影像上傳失敗：${err.message}`);
       return sendError(res, 500, err.message);
-    } finally {
-      // 段落用途：確保 jobLock 釋放，避免上傳流程被鎖死
-      jobLock = false;
     }
+    // 注意：此處移除原有的 finally { jobLock = false; }
+    // 因為 upload 路由不應控制 jobLock，jobLock 是 send() 掃描/追蹤流程的專屬鎖
   });
 
   routesRegistered = true;
@@ -556,11 +562,11 @@ function runPython(payload, config) {
     }, config.timeoutMs);
 
     child.stdout.on('data', (chunk) => {
-      stdout += chunk.toString();
+      stdout += chunk.toString('utf8');
     });
 
     child.stderr.on('data', (chunk) => {
-      stderr += chunk.toString();
+      stderr += chunk.toString('utf8');
     });
 
     child.on('error', (err) => {
@@ -676,7 +682,7 @@ async function runYoloInfer(imagePath, maxTimeoutMs) {
     // 段落用途：收集 stderr，供 exit code 非 0 或錯誤時記錄
     // ───────────────────────────────────────────────
     child.stderr.on('data', (chunk) => {
-      stderr += chunk.toString();
+      stderr += chunk.toString('utf8');
     });
 
     // ───────────────────────────────────────────────
@@ -778,6 +784,305 @@ async function runYoloInfer(imagePath, maxTimeoutMs) {
   });
 }
 
+// ───────────────────────────────────────────────
+// 演算法一：原本的批次處理方式（掃描找到目標後追蹤，最後發送IR）
+// @param {number} deadline - 任務截止時間
+// @param {string} irProfile - IR 指令類型（'LIGHT_ON' 或 'LIGHT_OFF'）
+// ───────────────────────────────────────────────
+async function algorithmBatchProcess(deadline, irProfile = 'LIGHT_ON') {
+  let currentYaw = 0;
+  let currentPitch = 0;
+  let lastYoloResult = null;
+
+  // ───────────────────────────────────────────────
+  // 段落用途：格點掃描流程（pitch 外圈、yaw 內圈）
+  // ───────────────────────────────────────────────
+  let foundInScan = false;
+  for (const pitch of SCAN_PITCH_LIST) {
+    for (const yaw of SCAN_YAW_LIST) {
+      const remainingBeforeScan = getRemainingMs(deadline);
+      if (remainingBeforeScan <= 0) {
+        logger.warn('[iotVisionTurret] TASK_TIMEOUT：掃描階段逾時');
+        return { ok: false };
+      }
+
+      currentYaw = clamp(yaw, 0, 180);
+      currentPitch = clamp(pitch, 0, 180);
+      enqueueCommand({
+        type: 'move',
+        yaw: currentYaw,
+        pitch: currentPitch
+      });
+
+      const imageId = buildImageId();
+      enqueueCommand({
+        type: 'capture',
+        image_id: imageId
+      });
+
+      const remainingForUpload = getRemainingMs(deadline);
+      if (remainingForUpload <= 0) {
+        logger.warn(`[iotVisionTurret] TASK_TIMEOUT：等待影像 ${imageId} 上傳逾時`);
+        return { ok: false };
+      }
+      const uploadTimeoutMs = Math.min(UPLOAD_TIMEOUT_MS, remainingForUpload);
+      let imagePath = '';
+      try {
+        imagePath = await waitForImage(imageId, uploadTimeoutMs);
+      } catch (err) {
+        const isTimeoutError =
+          err &&
+          (err.code === 'UPLOAD_TIMEOUT' ||
+            err.code === 'ETIMEDOUT' ||
+            err.name === 'TimeoutError' ||
+            err.message?.toLowerCase().includes('timeout') ||
+            err.message?.toLowerCase().includes('upload_timeout'));
+        if (isTimeoutError) {
+          logger.warn(`[iotVisionTurret] UPLOAD_TIMEOUT：影像 ${imageId} 等待逾時 (${err.message})`);
+        } else {
+          logger.warn(`[iotVisionTurret] UPLOAD_FAILED：影像 ${imageId} 等待失敗 (${err && err.message})`);
+        }
+        return { ok: false };
+      }
+
+      const remainingForInfer = getRemainingMs(deadline);
+      if (remainingForInfer <= 0) {
+        logger.warn('[iotVisionTurret] TASK_TIMEOUT：YOLO 推理（掃描）逾時');
+        return { ok: false };
+      }
+
+      const inferResult = await runYoloInfer(imagePath, remainingForInfer);
+      if (!inferResult || inferResult.ok !== true) {
+        logger.error('[iotVisionTurret] YOLO 推理失敗（掃描）：runYoloInfer 回傳 ok=false');
+        return { ok: false };
+      }
+
+      const normalized = normalizeYoloResult(inferResult);
+      lastYoloResult = normalized;
+      if (normalized.found) {
+        logger.info(`[iotVisionTurret] 掃描找到目標：yaw=${currentYaw}, pitch=${currentPitch}, result=${JSON.stringify(normalized.raw)}`);
+        foundInScan = true;
+        break;
+      }
+    }
+    if (foundInScan) {
+      break;
+    }
+  }
+
+  if (!foundInScan) {
+    logger.warn('[iotVisionTurret] 掃描完成仍未找到目標');
+    return { ok: false };
+  }
+
+  // ───────────────────────────────────────────────
+  // 段落用途：粗追蹤流程（最多 12 次）
+  // ───────────────────────────────────────────────
+  let lockStreak = 0;
+  for (let iteration = 0; iteration < TRACK_MAX_ITERATIONS; iteration++) {
+    const remainingBeforeTrack = getRemainingMs(deadline);
+    if (remainingBeforeTrack <= 0) {
+      logger.warn('[iotVisionTurret] TASK_TIMEOUT：追蹤階段逾時');
+      return { ok: false };
+    }
+
+    const { center, imageSize, found } = lastYoloResult || {};
+    if (!found) {
+      logger.warn('[iotVisionTurret] 追蹤中斷：上一輪推理 found=false');
+      return { ok: false };
+    }
+    if (!center || !imageSize) {
+      logger.warn('[iotVisionTurret] 追蹤中斷：缺少 center 或 image_size');
+      return { ok: false };
+    }
+
+    const width = Number(imageSize?.width ?? imageSize?.w ?? imageSize?.[0] ?? 0);
+    const height = Number(imageSize?.height ?? imageSize?.h ?? imageSize?.[1] ?? 0);
+    const cx = Number(center?.x ?? center?.[0] ?? 0);
+    const cy = Number(center?.y ?? center?.[1] ?? 0);
+    if (!width || !height) {
+      logger.warn('[iotVisionTurret] 追蹤中斷：影像尺寸無效');
+      return { ok: false };
+    }
+
+    const ex = cx - width / 2;
+    const ey = cy - height / 2;
+
+    if (Math.abs(ex) < LOCKED_CONVERGENCE_THRESHOLD && Math.abs(ey) < LOCKED_CONVERGENCE_THRESHOLD) {
+      lockStreak += 1;
+      logger.info(`[iotVisionTurret] LOCKED 判定命中：streak=${lockStreak}`);
+      
+      if (lockStreak >= LOCK_STREAK) {
+        enqueueCommand({
+          type: 'ir_send',
+          profile: irProfile
+        });
+        logger.info(`[iotVisionTurret] LOCKED 成功，IR 指令 (${irProfile}) 已排入佇列`);
+        return { ok: true, irProfile };
+      }
+    } else {
+      lockStreak = 0;
+      logger.info('[iotVisionTurret] LOCKED 判定未命中，streak 重置為 0');
+    }
+
+    const yawStep = clamp((ex / width) * YAW_GAIN_DEG, -YAW_MAX_STEP, YAW_MAX_STEP);
+    const pitchStep = clamp((ey / height) * PITCH_GAIN_DEG, -PITCH_MAX_STEP, PITCH_MAX_STEP);
+    currentYaw = clamp(currentYaw + yawStep, 0, 180);
+    currentPitch = clamp(currentPitch + pitchStep, 0, 180);
+
+    enqueueCommand({
+      type: 'move',
+      yaw: currentYaw,
+      pitch: currentPitch
+    });
+
+    const trackImageId = buildImageId();
+    enqueueCommand({
+      type: 'capture',
+      image_id: trackImageId
+    });
+
+    const remainingForTrackUpload = getRemainingMs(deadline);
+    if (remainingForTrackUpload <= 0) {
+      logger.warn(`[iotVisionTurret] TASK_TIMEOUT：追蹤影像 ${trackImageId} 上傳逾時`);
+      return { ok: false };
+    }
+    const trackUploadTimeout = Math.min(UPLOAD_TIMEOUT_MS, remainingForTrackUpload);
+    let trackImagePath = '';
+    try {
+      trackImagePath = await waitForImage(trackImageId, trackUploadTimeout);
+    } catch (err) {
+      const isTimeoutError =
+        err &&
+        (err.code === 'UPLOAD_TIMEOUT' ||
+          err.code === 'ETIMEDOUT' ||
+          err.name === 'TimeoutError' ||
+          err.message?.toLowerCase().includes('timeout') ||
+          err.message?.toLowerCase().includes('upload_timeout'));
+      if (isTimeoutError) {
+        logger.warn(`[iotVisionTurret] UPLOAD_TIMEOUT：追蹤影像 ${trackImageId} 等待逾時 (${err.message})`);
+      } else {
+        logger.warn(`[iotVisionTurret] UPLOAD_FAILED：追蹤影像 ${trackImageId} 等待失敗 (${err && err.message})`);
+      }
+      return { ok: false };
+    }
+
+    const remainingForTrackInfer = getRemainingMs(deadline);
+    if (remainingForTrackInfer <= 0) {
+      logger.warn('[iotVisionTurret] TASK_TIMEOUT：YOLO 推理（追蹤）逾時');
+      return { ok: false };
+    }
+
+    const trackInferResult = await runYoloInfer(trackImagePath, remainingForTrackInfer);
+    if (!trackInferResult || trackInferResult.ok !== true) {
+      logger.error('[iotVisionTurret] YOLO 推理失敗（追蹤）：runYoloInfer 回傳 ok=false');
+      return { ok: false };
+    }
+
+    const trackNormalized = normalizeYoloResult(trackInferResult);
+    lastYoloResult = trackNormalized;
+    if (!trackNormalized.found) {
+      logger.warn('[iotVisionTurret] 追蹤推理 found=false，立即中止');
+      return { ok: false };
+    }
+  }
+
+  logger.warn('[iotVisionTurret] 追蹤完成仍未達成 LOCKED');
+  return { ok: false };
+}
+
+// ───────────────────────────────────────────────
+// 演算法二：逐步發送方式（每轉一次就發送一次 IR 並拍照）
+// 假設轉 N 次，就會發送 N 次 IR 並拍 N 張照
+// @param {number} deadline - 任務截止時間
+// @param {string} irProfile - IR 指令類型（'LIGHT_ON' 或 'LIGHT_OFF'）
+// ───────────────────────────────────────────────
+async function algorithmStepByStepIR(deadline, irProfile = 'LIGHT_ON') {
+  let currentYaw = 0;
+  let currentPitch = 0;
+  let totalIRSent = 0;
+  let totalCaptured = 0;
+
+  // ───────────────────────────────────────────────
+  // 段落用途：格點掃描流程，每個格點都執行：移動 -> 發送IR -> 拍照
+  // ───────────────────────────────────────────────
+
+  for (const pitch of SCAN_PITCH_LIST) {
+    for (const yaw of SCAN_YAW_LIST) {
+      const remainingBeforeScan = getRemainingMs(deadline);
+      if (remainingBeforeScan <= 0) {
+        logger.warn(`[iotVisionTurret] TASK_TIMEOUT：逐步掃描階段逾時，已發送 ${totalIRSent} 次 IR，已拍 ${totalCaptured} 張照`);
+        return { ok: false, totalIRSent, totalCaptured };
+      }
+
+      // ───────────────────────────────────────────────
+      // 步驟 1：移動到目標位置
+      // ───────────────────────────────────────────────
+      currentYaw = clamp(yaw, 0, 180);
+      currentPitch = clamp(pitch, 0, 180);
+      enqueueCommand({
+        type: 'move',
+        yaw: currentYaw,
+        pitch: currentPitch
+      });
+      logger.info(`[iotVisionTurret] 逐步模式：移動到 yaw=${currentYaw}, pitch=${currentPitch}`);
+
+      // ───────────────────────────────────────────────
+      // 步驟 2：發送 IR 指令
+      // ───────────────────────────────────────────────
+      enqueueCommand({
+        type: 'ir_send',
+        profile: irProfile
+      });
+      totalIRSent++;
+      logger.info(`[iotVisionTurret] 逐步模式：第 ${totalIRSent} 次 IR (${irProfile}) 已排入佇列`);
+
+      // ───────────────────────────────────────────────
+      // 步驟 3：拍照並等待上傳
+      // ───────────────────────────────────────────────
+      const imageId = buildImageId();
+      enqueueCommand({
+        type: 'capture',
+        image_id: imageId
+      });
+
+      const remainingForUpload = getRemainingMs(deadline);
+      if (remainingForUpload <= 0) {
+        logger.warn(`[iotVisionTurret] TASK_TIMEOUT：等待影像 ${imageId} 上傳逾時`);
+        return { ok: false, totalIRSent, totalCaptured };
+      }
+      const uploadTimeoutMs = Math.min(UPLOAD_TIMEOUT_MS, remainingForUpload);
+      
+      try {
+        const imagePath = await waitForImage(imageId, uploadTimeoutMs);
+        totalCaptured++;
+        logger.info(`[iotVisionTurret] 逐步模式：第 ${totalCaptured} 張照片已儲存：${imagePath}`);
+      } catch (err) {
+        const isTimeoutError =
+          err &&
+          (err.code === 'UPLOAD_TIMEOUT' ||
+            err.code === 'ETIMEDOUT' ||
+            err.name === 'TimeoutError' ||
+            err.message?.toLowerCase().includes('timeout') ||
+            err.message?.toLowerCase().includes('upload_timeout'));
+        if (isTimeoutError) {
+          logger.warn(`[iotVisionTurret] UPLOAD_TIMEOUT：影像 ${imageId} 等待逾時 (${err.message})`);
+        } else {
+          logger.warn(`[iotVisionTurret] UPLOAD_FAILED：影像 ${imageId} 等待失敗 (${err && err.message})`);
+        }
+        // 拍照失敗不中斷流程，繼續下一個格點
+        logger.info(`[iotVisionTurret] 逐步模式：拍照失敗，繼續下一個格點`);
+      }
+
+      // 可選：加入短暫延遲讓裝置有時間執行（避免指令堆積過快）
+      // await new Promise(resolve => setTimeout(resolve, 500));
+    }
+  }
+
+  logger.info(`[iotVisionTurret] 逐步模式完成：總共發送 ${totalIRSent} 次 IR (${irProfile})，拍攝 ${totalCaptured} 張照片`);
+  return { ok: true, totalIRSent, totalCaptured, irProfile };
+}
+
 module.exports = {
   priority,
   /**
@@ -806,12 +1111,11 @@ module.exports = {
       throw err;
     }
 
-    const response = await runPython({ action: 'ping' }, state.config);
+    // 註：移除 ping 測試，Python runner 僅支援 infer 操作
     state.online = true;
     state.lastError = null;
-    state.lastResult = response;
+    state.lastResult = null;
     state.metrics.lastRunAt = new Date().toISOString();
-    state.metrics.totalRuns += 1;
     logger.info('iotVisionTurret 本地策略已上線');
   },
 
@@ -851,6 +1155,7 @@ module.exports = {
    * @returns {Promise<Object>} 僅回傳 { ok:true } 或 { ok:false }
    */
   async send(data = {}) {
+    let acquiredLock = false;
     // ───────────────────────────────────────────────
     // 段落用途：包覆完整流程，統一處理錯誤並回傳固定格式
     // ───────────────────────────────────────────────
@@ -883,265 +1188,38 @@ module.exports = {
       // 段落用途：取得 jobLock，確保單一時刻僅一個任務執行
       // ───────────────────────────────────────────────
       jobLock = true;
+      acquiredLock = true;
       logger.info('[iotVisionTurret] jobLock 已取得，開始執行掃描/追蹤流程');
 
       // ───────────────────────────────────────────────
-      // 段落用途：初始化全域逾時與追蹤變數
+      // 段落用途：初始化全域逾時
       // ───────────────────────────────────────────────
       const deadline = Date.now() + TASK_TIMEOUT_MS;
-      let currentYaw = 0;
-      let currentPitch = 0;
-      let lastYoloResult = null;
 
       // ───────────────────────────────────────────────
-      // 段落用途：格點掃描流程（pitch 外圈、yaw 內圈）
+      // 段落用途：從 LLM input 判斷開燈或關燈
+      // 支援的指令：
+      // - 開燈：'on', 'open', '開燈', '開', '打開' 等
+      // - 關燈：'off', 'close', '關燈', '關', '關閉' 等
+      // 預設為開燈 (LIGHT_ON)
       // ───────────────────────────────────────────────
-      let foundInScan = false;
-      for (const pitch of SCAN_PITCH_LIST) {
-        for (const yaw of SCAN_YAW_LIST) {
-          // ───────────────────────────────────────────────
-          // 段落用途：檢查全域逾時（掃描階段）
-          // ───────────────────────────────────────────────
-          const remainingBeforeScan = getRemainingMs(deadline);
-          if (remainingBeforeScan <= 0) {
-            logger.warn('[iotVisionTurret] TASK_TIMEOUT：掃描階段逾時');
-            return { ok: false };
-          }
-
-          // ───────────────────────────────────────────────
-          // 段落用途：依序 enqueue move 指令並確保角度在 0~180
-          // ───────────────────────────────────────────────
-          currentYaw = clamp(yaw, 0, 180);
-          currentPitch = clamp(pitch, 0, 180);
-          enqueueCommand({
-            type: 'move',
-            yaw: currentYaw,
-            pitch: currentPitch
-          });
-
-          // ───────────────────────────────────────────────
-          // 段落用途：產生影像 ID 並 enqueue capture 指令
-          // ───────────────────────────────────────────────
-          const imageId = buildImageId();
-          enqueueCommand({
-            type: 'capture',
-            image_id: imageId
-          });
-
-          // ───────────────────────────────────────────────
-          // 段落用途：等待影像上傳完成（含 UPLOAD_TIMEOUT）
-          // ───────────────────────────────────────────────
-          const remainingForUpload = getRemainingMs(deadline);
-          if (remainingForUpload <= 0) {
-            logger.warn(`[iotVisionTurret] TASK_TIMEOUT：等待影像 ${imageId} 上傳逾時`);
-            return { ok: false };
-          }
-          const uploadTimeoutMs = Math.min(UPLOAD_TIMEOUT_MS, remainingForUpload);
-          let imagePath = '';
-          try {
-            imagePath = await waitForImage(imageId, uploadTimeoutMs);
-          } catch (err) {
-            // 段落用途：依據錯誤碼與訊息判斷是否為上傳逾時，確保可追蹤並回收資源
-            const isTimeoutError =
-              err &&
-              (err.code === 'UPLOAD_TIMEOUT' ||
-                err.code === 'ETIMEDOUT' ||
-                err.name === 'TimeoutError' ||
-                err.message?.toLowerCase().includes('timeout') ||
-                err.message?.toLowerCase().includes('upload_timeout'));
-            if (isTimeoutError) {
-              logger.warn(`[iotVisionTurret] UPLOAD_TIMEOUT：影像 ${imageId} 等待逾時 (${err.message})`);
-            } else {
-              logger.warn(`[iotVisionTurret] UPLOAD_FAILED：影像 ${imageId} 等待失敗 (${err && err.message})`);
-            }
-            return { ok: false };
-          }
-
-          // ───────────────────────────────────────────────
-          // 段落用途：呼叫 YOLO 推理（掃描階段）
-          // ───────────────────────────────────────────────
-          const remainingForInfer = getRemainingMs(deadline);
-          if (remainingForInfer <= 0) {
-            logger.warn('[iotVisionTurret] TASK_TIMEOUT：YOLO 推理（掃描）逾時');
-            return { ok: false };
-          }
-
-          // ───────────────────────────────────────────────
-          // 段落用途：呼叫 runYoloInfer（由內部處理逾時與錯誤）
-          // ───────────────────────────────────────────────
-          const inferResult = await runYoloInfer(imagePath, remainingForInfer);
-          if (!inferResult || inferResult.ok !== true) {
-            logger.error('[iotVisionTurret] YOLO 推理失敗（掃描）：runYoloInfer 回傳 ok=false');
-            return { ok: false };
-          }
-
-          // ───────────────────────────────────────────────
-          // 段落用途：解析推理結果並判斷是否找到目標
-          // ───────────────────────────────────────────────
-          const normalized = normalizeYoloResult(inferResult);
-          lastYoloResult = normalized;
-          if (normalized.found) {
-            logger.info(`[iotVisionTurret] 掃描找到目標：yaw=${currentYaw}, pitch=${currentPitch}, result=${JSON.stringify(normalized.raw)}`);
-            foundInScan = true;
-            break;
-          }
-        }
-        if (foundInScan) {
-          break;
-        }
-      }
+      const inputRaw = typeof data.input === 'string' ? data.input.toLowerCase().trim() : '';
+      const offKeywords = ['off', 'close', '關燈', '關', '關閉', '熄燈', '關掉', '熄滅'];
+      const isOff = offKeywords.some(keyword => inputRaw.includes(keyword));
+      const irProfile = isOff ? 'LIGHT_OFF' : 'LIGHT_ON';
+      logger.info(`[iotVisionTurret] LLM 輸入："${data.input || '(無)'}"，判定 IR 指令：${irProfile}`);
 
       // ───────────────────────────────────────────────
-      // 段落用途：掃描結束仍未找到目標
+      // 演算法選擇：
+      // 第一種：原本的批次處理方式（掃描找到目標後追蹤，最後發送IR）
+      // 第二種：逐步發送方式（每轉一次就發送一次 IR）
       // ───────────────────────────────────────────────
-      if (!foundInScan) {
-        logger.warn('[iotVisionTurret] 掃描完成仍未找到目標');
-        return { ok: false };
-      }
 
-      // ───────────────────────────────────────────────
-      // 段落用途：粗追蹤流程（最多 12 次）
-      // ───────────────────────────────────────────────
-      let lockStreak = 0;
-      for (let iteration = 0; iteration < TRACK_MAX_ITERATIONS; iteration++) {
-        // ───────────────────────────────────────────────
-        // 段落用途：檢查全域逾時（追蹤階段）
-        // ───────────────────────────────────────────────
-        const remainingBeforeTrack = getRemainingMs(deadline);
-        if (remainingBeforeTrack <= 0) {
-          logger.warn('[iotVisionTurret] TASK_TIMEOUT：追蹤階段逾時');
-          return { ok: false };
-        }
+      // 演算法一：批次處理方式（已註解）
+      // return await algorithmBatchProcess(deadline, irProfile);
 
-        // ───────────────────────────────────────────────
-        // 段落用途：取出最新 YOLO 結果並驗證有效性
-        // ───────────────────────────────────────────────
-        const { center, imageSize, found } = lastYoloResult || {};
-        if (!found) {
-          logger.warn('[iotVisionTurret] 追蹤中斷：上一輪推理 found=false');
-          return { ok: false };
-        }
-        if (!center || !imageSize) {
-          logger.warn('[iotVisionTurret] 追蹤中斷：缺少 center 或 image_size');
-          return { ok: false };
-        }
-
-        const width = Number(imageSize?.width ?? imageSize?.w ?? imageSize?.[0] ?? 0);
-        const height = Number(imageSize?.height ?? imageSize?.h ?? imageSize?.[1] ?? 0);
-        const cx = Number(center?.x ?? center?.[0] ?? 0);
-        const cy = Number(center?.y ?? center?.[1] ?? 0);
-        if (!width || !height) {
-          logger.warn('[iotVisionTurret] 追蹤中斷：影像尺寸無效');
-          return { ok: false };
-        }
-
-        // ───────────────────────────────────────────────
-        // 段落用途：計算目標偏移量（ex/ey）
-        // ex > 0 表示目標在畫面右側；ey > 0 表示目標在畫面下方
-        // ───────────────────────────────────────────────
-        const ex = cx - width / 2;
-        const ey = cy - height / 2;
-
-        // ───────────────────────────────────────────────
-        // 段落用途：檢查 LOCKED 收斂條件
-        // ───────────────────────────────────────────────
-        if (Math.abs(ex) < LOCKED_CONVERGENCE_THRESHOLD && Math.abs(ey) < LOCKED_CONVERGENCE_THRESHOLD) {
-          lockStreak += 1;
-          logger.info(`[iotVisionTurret] LOCKED 判定命中：streak=${lockStreak}`);
-          
-          if (lockStreak >= LOCK_STREAK) {
-            // ───────────────────────────────────────────────
-            // 段落用途：LOCKED 後只負責將 IR 指令排入佇列，並立即返回
-            // 注意：此處回傳 ok=true 代表指令已成功佇列，並不保證實際已在裝置上執行完成
-            // ───────────────────────────────────────────────
-            enqueueCommand({
-              type: 'ir_send',
-              profile: 'LIGHT_ON'
-            });
-            logger.info('[iotVisionTurret] LOCKED 成功，IR 指令已排入佇列（不保證已於裝置端執行完成）');
-            return { ok: true };
-          }
-        } else {
-          lockStreak = 0;
-          logger.info('[iotVisionTurret] LOCKED 判定未命中，streak 重置為 0');
-        }
-
-        // ───────────────────────────────────────────────
-        // 段落用途：未達 LOCKED，計算步進並執行下一次移動/捕獲
-        // ───────────────────────────────────────────────
-        const yawStep = clamp((ex / width) * YAW_GAIN_DEG, -YAW_MAX_STEP, YAW_MAX_STEP);
-        const pitchStep = clamp((ey / height) * PITCH_GAIN_DEG, -PITCH_MAX_STEP, PITCH_MAX_STEP);
-        currentYaw = clamp(currentYaw + yawStep, 0, 180);
-        currentPitch = clamp(currentPitch + pitchStep, 0, 180);
-
-        enqueueCommand({
-          type: 'move',
-          yaw: currentYaw,
-          pitch: currentPitch
-        });
-
-        const trackImageId = buildImageId();
-        enqueueCommand({
-          type: 'capture',
-          image_id: trackImageId
-        });
-
-        const remainingForTrackUpload = getRemainingMs(deadline);
-        if (remainingForTrackUpload <= 0) {
-          logger.warn(`[iotVisionTurret] TASK_TIMEOUT：追蹤影像 ${trackImageId} 上傳逾時`);
-          return { ok: false };
-        }
-        const trackUploadTimeout = Math.min(UPLOAD_TIMEOUT_MS, remainingForTrackUpload);
-        let trackImagePath = '';
-        try {
-          trackImagePath = await waitForImage(trackImageId, trackUploadTimeout);
-        } catch (err) {
-          // 段落用途：依據錯誤碼與訊息判斷是否為上傳逾時，確保可追蹤並回收資源
-          const isTimeoutError =
-            err &&
-            (err.code === 'UPLOAD_TIMEOUT' ||
-              err.code === 'ETIMEDOUT' ||
-              err.name === 'TimeoutError' ||
-              err.message?.toLowerCase().includes('timeout') ||
-              err.message?.toLowerCase().includes('upload_timeout'));
-          if (isTimeoutError) {
-            logger.warn(`[iotVisionTurret] UPLOAD_TIMEOUT：追蹤影像 ${trackImageId} 等待逾時 (${err.message})`);
-          } else {
-            logger.warn(`[iotVisionTurret] UPLOAD_FAILED：追蹤影像 ${trackImageId} 等待失敗 (${err && err.message})`);
-          }
-          return { ok: false };
-        }
-
-        const remainingForTrackInfer = getRemainingMs(deadline);
-        if (remainingForTrackInfer <= 0) {
-          logger.warn('[iotVisionTurret] TASK_TIMEOUT：YOLO 推理（追蹤）逾時');
-          return { ok: false };
-        }
-        // ───────────────────────────────────────────────
-        // 段落用途：呼叫 runYoloInfer（追蹤階段）
-        // ───────────────────────────────────────────────
-        const trackInferResult = await runYoloInfer(trackImagePath, remainingForTrackInfer);
-        if (!trackInferResult || trackInferResult.ok !== true) {
-          logger.error('[iotVisionTurret] YOLO 推理失敗（追蹤）：runYoloInfer 回傳 ok=false');
-          return { ok: false };
-        }
-
-        // ───────────────────────────────────────────────
-        // 段落用途：更新 lastYoloResult 供下一迭代使用
-        // ───────────────────────────────────────────────
-        const trackNormalized = normalizeYoloResult(trackInferResult);
-        lastYoloResult = trackNormalized;
-        if (!trackNormalized.found) {
-          logger.warn('[iotVisionTurret] 追蹤推理 found=false，立即中止');
-          return { ok: false };
-        }
-      }
-
-      // ───────────────────────────────────────────────
-      // 段落用途：追蹤迭代結束仍未 LOCKED
-      // ───────────────────────────────────────────────
-      logger.warn('[iotVisionTurret] 追蹤完成仍未達成 LOCKED');
-      return { ok: false };
+      // 演算法二：逐步發送方式（目前啟用）
+      return await algorithmStepByStepIR(deadline, irProfile);
     } catch (err) {
       // ───────────────────────────────────────────────
       // 段落用途：捕捉未預期錯誤並回傳固定格式
@@ -1152,7 +1230,7 @@ module.exports = {
       // ───────────────────────────────────────────────
       // 段落用途：無論成功或失敗，確保 jobLock 被釋放
       // ───────────────────────────────────────────────
-      if (jobLock) {
+      if (acquiredLock && jobLock) {
         jobLock = false;
         logger.info('[iotVisionTurret] jobLock 已釋放');
       }
