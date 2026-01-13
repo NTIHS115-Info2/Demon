@@ -11,7 +11,7 @@ import os
 import sys
 import traceback
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Tuple
 
 # ───────────────────────────────────────────────
 # 狀態資料結構區塊：定義推論所需的核心設定
