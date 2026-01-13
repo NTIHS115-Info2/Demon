@@ -9,9 +9,6 @@ const Logger = require('../../../../utils/logger');
 // 建立記錄器（對外顯示名稱統一為 iotVisionTurret）
 const logger = new Logger('iotVisionTurret');
 
-// 併發控制：保存正在執行的 Promise 與佇列
-let activeRequest = null;
-
 // 狀態資料結構區塊：保存服務狀態、設定與最近執行結果
 const state = {
   online: false,
@@ -140,44 +137,6 @@ function normalizeYoloResult(result) {
   const center = payload?.center ?? payload?.target?.center ?? null;
   const imageSize = payload?.image_size ?? payload?.imageSize ?? payload?.image?.size ?? null;
   return { found, center, imageSize, raw: payload };
-}
-
-/**
- * 處理佇列中的請求，確保一次只有一個請求執行
- * @param {Object} data - 請求資料
- * @returns {Promise<boolean>}
- */
-async function executeRequest(data) {
-  // 等待前一個請求完成
-  while (activeRequest) {
-    try {
-      await activeRequest;
-    } catch (e) {
-      // 忽略前一個請求的錯誤
-      logger.warn('前一個請求失敗: ' + e.message);
-    }
-  }
-  
-  // 建立當前請求的 Promise
-  const requestPromise = (async () => {
-    try {
-      const response = await runPython({ action: 'infer', payload: data }, state.config);
-      state.lastResult = response;
-      state.lastError = null;
-      state.metrics.lastRunAt = new Date().toISOString();
-      state.metrics.totalRuns += 1;
-      return true;
-    } finally {
-      // 完成後清空 active request（僅當前請求）
-      if (activeRequest === requestPromise) {
-        activeRequest = null;
-      }
-    }
-  })();
-  
-  // 立即設定為活動請求
-  activeRequest = requestPromise;
-  return await requestPromise;
 }
 
 /**

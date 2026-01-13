@@ -1,4 +1,3 @@
-const { spawn } = require('child_process');
 const { EventEmitter } = require('events');
 
 // 模擬 logger，避免測試時輸出大量日誌
