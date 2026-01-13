@@ -40,6 +40,8 @@ module.exports = {
     // ───────────────────────────────────────────
     // 區段：重複上線檢查
     // 用途：避免重複上線時重複註冊路由
+    // 說明：僅檢查 onlineState 以允許 offline 後重新 online 的流程。
+    //       即使 registered 為 true，路由也不會重複註冊（見下方 !registered 檢查）。
     // ───────────────────────────────────────────
     if (onlineState) {
       logger.warn('[appVoiceMessageService] 已上線，跳過重複 online');
