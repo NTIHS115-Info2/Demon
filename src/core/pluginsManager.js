@@ -799,6 +799,12 @@ class PluginsManager {
     // 確保已載入所有 LLM 插件
     await this.loadAllLLMPlugins(options.mode);
 
+    // 輸出例外插件清單資訊
+    if (this.exceptionLLM.size > 0) {
+      Logger.info(
+        `[StartLLMTool] 例外插件清單: ${Array.from(this.exceptionLLM).join(', ')}`
+      );
+    }
 
     const list = this.getAllLLMPlugin();
     if (!Array.isArray(list)) {
