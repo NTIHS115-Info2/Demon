@@ -25,6 +25,19 @@ const DEFAULT_TTS_WAIT_TIMEOUT_MS = 45000;
 const DEFAULT_FFMPEG_TIMEOUT_MS = 30000;
 
 // ───────────────────────────────────────────────
+// 區段：TTS 重試設定
+// 用途：確保 TTS 請求一定會完成，不會因為 ttsEngine 忙碌而失敗
+// 說明：使用指數退避策略，逐漸增加等待時間
+// ───────────────────────────────────────────────
+const TTS_RETRY_CONFIG = {
+  maxRetries: 30,           // 最多重試 30 次
+  baseDelayMs: 500,         // 初始等待時間 500ms
+  maxDelayMs: 5000,         // 最大等待時間 5 秒
+  totalTimeoutMs: 120000,   // 總超時時間 2 分鐘
+  backoffMultiplier: 1.5    // 指數退避倍數
+};
+
+// ───────────────────────────────────────────────
 // 區段：驗證模式
 // 用途：統一輸入驗證規則
 // ───────────────────────────────────────────────
@@ -128,16 +141,18 @@ function collectTalkerResponse({ username, message, timeoutMs, logger }) {
     let buffer = '';
     let finished = false;
     let timeoutId = null;
+    let toolInProgress = false;  // 追蹤是否有工具正在執行
 
     // ───────────────────────────────────────────
     // 區段：清理事件
-    // 用途：避免事件監聽器洩漏
+    // 用途：避免事件監聯器洩漏
     // ───────────────────────────────────────────
     const cleanup = () => {
       if (timeoutId) clearTimeout(timeoutId);
       talker.off('data', onData);
       talker.off('end', onEnd);
       talker.off('error', onError);
+      talker.off('status', onStatus);
     };
 
     const onData = (chunk) => {
@@ -145,10 +160,49 @@ function collectTalkerResponse({ username, message, timeoutMs, logger }) {
       buffer += chunk || '';
     };
 
-    const onEnd = () => {
+    // ───────────────────────────────────────────
+    // 區段：狀態追蹤
+    // 用途：偵測工具呼叫狀態，避免在工具執行中結束
+    // 說明：當 waiting=true 且 reason='tool_busy' 時表示工具正在執行
+    // ───────────────────────────────────────────
+    const onStatus = (status) => {
+      if (status?.waiting && status?.reason === 'tool_busy') {
+        toolInProgress = true;
+        logger.info(`[appVoiceMessageService] 偵測到工具呼叫中，等待工具完成...`);
+      } else if (!status?.waiting && toolInProgress) {
+        toolInProgress = false;
+        logger.info(`[appVoiceMessageService] 工具呼叫完成，繼續等待 LLM 回覆...`);
+      }
+    };
+
+    const onEnd = (endPayload) => {
       if (finished) return;
+      
+      // ───────────────────────────────────────────
+      // 區段：工具呼叫處理
+      // 用途：若 LLM 觸發了工具呼叫，不要結束，等待下一輪回覆
+      // 說明：toolTriggered=true 表示 LLM 正在調用工具，
+      //       會自動啟動第二輪，我們需要繼續等待最終回覆
+      // ───────────────────────────────────────────
+      const { toolTriggered } = endPayload || {};
+      
+      if (toolTriggered) {
+        logger.info(`[appVoiceMessageService] LLM 調用工具中 (toolTriggered=true)，等待工具執行完成後的回覆...`);
+        // 清空 buffer，因為工具呼叫前的內容通常是「請稍等」之類的訊息
+        buffer = '';
+        // 重置逾時計時器，給予工具執行的額外時間
+        if (timeoutId) {
+          clearTimeout(timeoutId);
+          timeoutId = setTimeout(handleTimeout, timeoutMs);
+        }
+        // 不結束，繼續監聽下一輪的 data 和 end
+        return;
+      }
+      
+      // 工具已完成或沒有工具呼叫，正常結束
       finished = true;
       cleanup();
+      logger.info(`[appVoiceMessageService] LLM 回覆完成 (無待處理工具)，buffer長度=${buffer.length}`);
       resolve(buffer);
     };
 
@@ -159,16 +213,7 @@ function collectTalkerResponse({ username, message, timeoutMs, logger }) {
       reject(err || new Error('LLM 串流錯誤'));
     };
 
-    // ───────────────────────────────────────────
-    // 區段：綁定事件
-    // 用途：確保 talker 回應能被完整收集
-    // 說明：使用 once 避免事件監聽器累積
-    // ───────────────────────────────────────────
-    talker.on('data', onData);
-    talker.once('end', onEnd);
-    talker.once('error', onError);
-
-    timeoutId = setTimeout(() => {
+    const handleTimeout = () => {
       if (finished) return;
       finished = true;
 
@@ -193,7 +238,19 @@ function collectTalkerResponse({ username, message, timeoutMs, logger }) {
 
       cleanup();
       reject(new Error('LLM 回應逾時'));
-    }, timeoutMs);
+    };
+
+    // ───────────────────────────────────────────
+    // 區段：綁定事件
+    // 用途：確保 talker 回應能被完整收集
+    // 說明：監聽 status 事件以追蹤工具呼叫狀態
+    // ───────────────────────────────────────────
+    talker.on('data', onData);
+    talker.on('end', onEnd);
+    talker.once('error', onError);
+    talker.on('status', onStatus);
+
+    timeoutId = setTimeout(handleTimeout, timeoutMs);
 
     try {
       talker.talk(username, message);
@@ -301,6 +358,7 @@ class VoiceMessagePipeline {
   // ───────────────────────────────────────────
   // 區段：前置處理
   // 用途：建立 trace_id / turn_id 並確保暫存目錄存在
+  // 說明：記錄完整的 HTTP 請求資訊以利除錯
   // ───────────────────────────────────────────
   prepareRequestMiddleware() {
     return async (req, res, next) => {
@@ -313,6 +371,37 @@ class VoiceMessagePipeline {
           turnId,
           receivedAt: Date.now()
         };
+
+        // ─────────────────────────────────────────
+        // 區段：HTTP 請求日誌
+        // 用途：記錄完整的連線資訊以利除錯
+        // ─────────────────────────────────────────
+        const clientIp = req.headers['x-forwarded-for'] || req.socket?.remoteAddress || 'unknown';
+        const protocol = req.protocol || (req.secure ? 'https' : 'http');
+        const host = req.headers['host'] || 'unknown';
+        const userAgent = req.headers['user-agent'] || 'unknown';
+        const contentType = req.headers['content-type'] || 'unknown';
+        const contentLength = req.headers['content-length'] || '0';
+        
+        this.logger.info(`[appVoiceMessageService] ────────────────────────────────────────`);
+        this.logger.info(`[appVoiceMessageService] 收到新請求 trace_id=${traceId}`);
+        this.logger.info(`[appVoiceMessageService] 連線資訊: ${protocol}://${host}${req.originalUrl || req.url}`);
+        this.logger.info(`[appVoiceMessageService] 客戶端 IP: ${clientIp}`);
+        this.logger.info(`[appVoiceMessageService] User-Agent: ${userAgent}`);
+        this.logger.info(`[appVoiceMessageService] Content-Type: ${contentType}`);
+        this.logger.info(`[appVoiceMessageService] Content-Length: ${contentLength} bytes`);
+        this.logger.info(`[appVoiceMessageService] 請求方法: ${req.method}`);
+        
+        // 記錄自訂 Headers（可能包含 App 版本等資訊）
+        const customHeaders = {};
+        for (const [key, value] of Object.entries(req.headers)) {
+          if (key.startsWith('x-') && key !== 'x-forwarded-for') {
+            customHeaders[key] = value;
+          }
+        }
+        if (Object.keys(customHeaders).length > 0) {
+          this.logger.info(`[appVoiceMessageService] 自訂 Headers: ${JSON.stringify(customHeaders)}`);
+        }
 
         await this.ensureDirectories();
         next();
@@ -365,12 +454,15 @@ class VoiceMessagePipeline {
     }).single('file');
 
     return (req, res, next) => {
+      const uploadStartTime = Date.now();
       upload(req, res, (error) => {
+        const uploadDuration = Date.now() - uploadStartTime;
+        
         if (error) {
           const message = error.message === 'VOICE_FILE_UNSUPPORTED'
             ? '不支援的音訊格式'
             : '檔案上傳失敗';
-          this.logger.error('[appVoiceMessageService] 檔案上傳失敗: ' + (error.message || error));
+          this.logger.error(`[appVoiceMessageService] 檔案上傳失敗 (耗時=${uploadDuration}ms): ` + (error.message || error));
           return this.sendErrorResponse(res, {
             traceId: req.voiceContext?.traceId,
             code: 'VOICE_UPLOAD_FAILED',
@@ -379,6 +471,19 @@ class VoiceMessagePipeline {
             status: 400
           });
         }
+        
+        // ─────────────────────────────────────────
+        // 區段：上傳完成日誌
+        // 用途：記錄上傳的檔案資訊
+        // ─────────────────────────────────────────
+        if (req.file) {
+          this.logger.info(`[appVoiceMessageService] 檔案上傳完成 (耗時=${uploadDuration}ms)`);
+          this.logger.info(`[appVoiceMessageService] 檔案名稱: ${req.file.originalname || 'unknown'}`);
+          this.logger.info(`[appVoiceMessageService] 檔案大小: ${req.file.size} bytes`);
+          this.logger.info(`[appVoiceMessageService] MIME 類型: ${req.file.mimetype}`);
+          this.logger.info(`[appVoiceMessageService] 儲存路徑: ${req.file.path}`);
+        }
+        
         return next();
       });
     };
@@ -436,6 +541,7 @@ class VoiceMessagePipeline {
       // 區段：ASR 轉寫
       // 用途：呼叫 ASR 插件取得文字內容
       // ───────────────────────────────────────
+      this.logger.info(`[appVoiceMessageService] 開始 ASR 轉寫 trace_id=${traceId}`);
       timers.asrStart = Date.now();
       const asrResult = await this.callAsr({
         filePath: req.file.path,
@@ -443,8 +549,10 @@ class VoiceMessagePipeline {
         traceId
       });
       timers.asrDuration = Date.now() - timers.asrStart;
+      this.logger.info(`[appVoiceMessageService] ASR 完成 耗時=${timers.asrDuration}ms`);
 
       const transcript = this.extractTranscript(asrResult);
+      this.logger.info(`[appVoiceMessageService] ASR 轉寫結果: "${transcript?.substring(0, 100) || '(空)'}..."`);
       if (!transcript) {
         throw new PipelineError('ASR_FAILED', '語音轉文字失敗', asrResult?.error?.message || '無法取得轉寫結果');
       }
@@ -471,6 +579,7 @@ class VoiceMessagePipeline {
       // 區段：LLM 回覆
       // 用途：將轉寫文字送入 LLM 取得回應
       // ───────────────────────────────────────
+      this.logger.info(`[appVoiceMessageService] 開始 LLM 回覆 username=${username}`);
       timers.llmStart = Date.now();
       const replyText = await enqueueTalkerRequest({
         username,
@@ -479,6 +588,8 @@ class VoiceMessagePipeline {
         logger: this.logger
       });
       timers.llmDuration = Date.now() - timers.llmStart;
+      this.logger.info(`[appVoiceMessageService] LLM 完成 耗時=${timers.llmDuration}ms`);
+      this.logger.info(`[appVoiceMessageService] LLM 回覆: "${replyText?.substring(0, 100) || '(空)'}..."`);
 
       if (!replyText || !replyText.trim()) {
         throw new PipelineError('LLM_FAILED', 'LLM 回覆失敗', 'LLM 未回傳有效文字');
@@ -601,51 +712,109 @@ class VoiceMessagePipeline {
   // ───────────────────────────────────────────
   // 區段：TTS 產生
   // 用途：使用 TTS 插件取得 wav 檔案
-  // 說明：優先使用 ttsArtifact action 以取得明確檔案路徑；
-  //       若不支援，則退回使用資料夾輪詢（但有競態風險）
+  // 說明：直接傳送 text 給 ttsArtifact，包含強健的重試機制
+  //       確保一定會等到 TTS 完成，不會因為引擎忙碌而失敗
   // ───────────────────────────────────────────
   async generateTtsArtifact({ text, traceId, turnId }) {
+    this.logger.info(`[appVoiceMessageService] 開始 TTS 產生 trace_id=${traceId}`);
+    this.logger.info(`[appVoiceMessageService] TTS 文字長度: ${text?.length || 0} 字元`);
+    
     const targetDir = path.join(this.voiceOutboxDir, traceId);
     await fs.promises.mkdir(targetDir, { recursive: true });
 
-    const requestPayload = {
-      action: 'ttsArtifact',
-      payload: {
-        text,
-        trace_id: traceId,
-        turn_id: turnId,
-        output_dir: targetDir
+    // 直接傳送 text，ttsArtifact 期望的格式是 { text: '...' } 或純字串
+    const requestPayload = { text };
+
+    // TTS 重試設定：使用指數退避策略確保一定會完成
+    const { maxRetries, baseDelayMs, maxDelayMs, totalTimeoutMs, backoffMultiplier } = TTS_RETRY_CONFIG;
+    
+    let lastError = null;
+    let currentDelay = baseDelayMs;
+    const startTime = Date.now();
+    
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      // 檢查是否已超過總超時時間
+      const elapsed = Date.now() - startTime;
+      if (elapsed >= totalTimeoutMs) {
+        this.logger.error(`[appVoiceMessageService] TTS 總超時 (${elapsed}ms >= ${totalTimeoutMs}ms)`);
+        throw new PipelineError('TTS_TIMEOUT', 'TTS 產生逾時', `已等待超過 ${totalTimeoutMs}ms`);
       }
-    };
+      
+      this.logger.info(`[appVoiceMessageService] 呼叫 ttsArtifact (嘗試 ${attempt}/${maxRetries}, 已耗時 ${elapsed}ms)...`);
+      
+      let result = null;
+      try {
+        result = await this.pluginsManager.send('ttsArtifact', requestPayload);
+        this.logger.info(`[appVoiceMessageService] ttsArtifact 回傳: ${JSON.stringify(result)}`);
+      } catch (error) {
+        this.logger.error('[appVoiceMessageService] TTS 插件呼叫失敗: ' + (error?.message || error));
+        lastError = error;
+        
+        // 使用指數退避等待後重試
+        this.logger.info(`[appVoiceMessageService] 等待 ${currentDelay}ms 後重試...`);
+        await new Promise(resolve => setTimeout(resolve, currentDelay));
+        currentDelay = Math.min(currentDelay * backoffMultiplier, maxDelayMs);
+        continue;
+      }
 
-    let result = null;
-    try {
-      result = await this.pluginsManager.send('tts', requestPayload);
-    } catch (error) {
-      this.logger.error('[appVoiceMessageService] TTS 插件呼叫失敗: ' + (error?.message || error));
-    }
+      // 檢查是否有錯誤回傳
+      if (result?.error) {
+        this.logger.error(`[appVoiceMessageService] ttsArtifact 回傳錯誤: ${result.error}`);
+        lastError = new Error(result.error);
+        
+        // 如果是 "session 處理中" 或 "忙碌" 類型錯誤，繼續重試
+        const isBusyError = result.error.includes('session') || 
+                           result.error.includes('處理') || 
+                           result.error.includes('busy') ||
+                           result.error.includes('BUSY');
+        
+        if (isBusyError) {
+          this.logger.info(`[appVoiceMessageService] TTS 引擎忙碌中，等待 ${currentDelay}ms 後重試...`);
+          await new Promise(resolve => setTimeout(resolve, currentDelay));
+          currentDelay = Math.min(currentDelay * backoffMultiplier, maxDelayMs);
+          continue;
+        }
+        
+        // 非忙碌類型的錯誤，直接拋出
+        throw new PipelineError('TTS_FAILED', 'TTS 產生失敗', result.error);
+      }
 
-    const wavPath = this.extractTtsPath(result);
-    if (wavPath) {
-      return wavPath;
+      const wavPath = this.extractTtsPath(result);
+      this.logger.info(`[appVoiceMessageService] 解析 WAV 路徑: ${wavPath || '(空)'}`);
+    
+      if (wavPath) {
+        // 確認檔案存在
+        if (fs.existsSync(wavPath)) {
+          const stats = fs.statSync(wavPath);
+          this.logger.info(`[appVoiceMessageService] WAV 檔案確認存在, 大小: ${stats.size} bytes`);
+          const totalElapsed = Date.now() - startTime;
+          this.logger.info(`[appVoiceMessageService] TTS 成功完成，共嘗試 ${attempt} 次，總耗時 ${totalElapsed}ms`);
+          return wavPath;
+        } else {
+          this.logger.error(`[appVoiceMessageService] WAV 路徑存在但檔案不存在: ${wavPath}`);
+        }
+      }
+      
+      // 沒有得到有效的 WAV 路徑，繼續重試
+      this.logger.warn(`[appVoiceMessageService] 未取得有效 WAV 路徑，等待 ${currentDelay}ms 後重試...`);
+      await new Promise(resolve => setTimeout(resolve, currentDelay));
+      currentDelay = Math.min(currentDelay * backoffMultiplier, maxDelayMs);
     }
 
     // ─────────────────────────────────────────
     // 區段：相容性備援（已知限制）
-    // 用途：若 TTS 未實作 ttsArtifact，嘗試從輸出資料夾偵測
-    // 限制：1) 無 trace_id/turn_id 追蹤
-    //       2) 輪詢效能不佳（每 500ms 掃描一次）
-    //       3) 若有併發 TTS 請求可能誤取檔案
-    // 建議：請確保 TTS 插件實作 ttsArtifact action
+    // 用途：若 TTS 未回傳有效路徑，嘗試從輸出資料夾偵測
     // ─────────────────────────────────────────
+    this.logger.warn('[appVoiceMessageService] 主要 TTS 路徑解析失敗，嘗試備援機制...');
     if (!ttsFallbackWarningShown) {
       this.logger.warn('[appVoiceMessageService] TTS 插件未實作 ttsArtifact，使用不可靠的備援機制（此警告僅顯示一次）');
       ttsFallbackWarningShown = true;
     }
     try {
-      await this.pluginsManager.send('tts', text);
+      await this.pluginsManager.send('ttsArtifact', text);
       const fallbackPath = await this.waitForWavFile(targetDir, DEFAULT_TTS_WAIT_TIMEOUT_MS);
       if (fallbackPath) {
+        this.logger.info(`[appVoiceMessageService] 備援機制找到 WAV: ${fallbackPath}`);
         return fallbackPath;
       }
     } catch (error) {
@@ -714,6 +883,9 @@ class VoiceMessagePipeline {
   // ───────────────────────────────────────────
   async streamAudioResponse(res, { traceId, turnId, m4aPath, timers }) {
     const stat = await fs.promises.stat(m4aPath);
+    const totalProcessingTime = (timers.asrDuration || 0) + (timers.llmDuration || 0) + 
+                                (timers.ttsDuration || 0) + (timers.transcodeDuration || 0);
+    
     const headers = {
       'Content-Type': 'audio/m4a',
       'Content-Length': stat.size,
@@ -729,6 +901,16 @@ class VoiceMessagePipeline {
     res.set(headers);
     res.set('Access-Control-Expose-Headers', exposeHeaders);
     res.status(200);
+
+    // ─────────────────────────────────────────
+    // 區段：回應日誌
+    // 用途：記錄回應資訊以利除錯
+    // ─────────────────────────────────────────
+    this.logger.info(`[appVoiceMessageService] 開始回傳音訊 trace_id=${traceId}`);
+    this.logger.info(`[appVoiceMessageService] 回應大小: ${stat.size} bytes`);
+    this.logger.info(`[appVoiceMessageService] 回應 Headers: ${JSON.stringify(headers)}`);
+
+    const streamStartTime = Date.now();
 
     return new Promise((resolve, reject) => {
       // 使用較大的 highWaterMark 以改善大型音訊檔串流效能
@@ -762,7 +944,14 @@ class VoiceMessagePipeline {
         reject(error);
       });
 
-      stream.on('end', resolve);
+      stream.on('end', () => {
+        const streamDuration = Date.now() - streamStartTime;
+        this.logger.info(`[appVoiceMessageService] 音訊串流完成 trace_id=${traceId} 串流耗時=${streamDuration}ms`);
+        this.logger.info(`[appVoiceMessageService] 請求處理完成 trace_id=${traceId} 總處理時間=${totalProcessingTime}ms`);
+        this.logger.info(`[appVoiceMessageService] ────────────────────────────────────────`);
+        resolve();
+      });
+      
       stream.pipe(res);
     });
   }
@@ -774,7 +963,15 @@ class VoiceMessagePipeline {
   //       與 HTTP 標頭 X-Trace-Id 保持一致性
   // ───────────────────────────────────────────
   sendErrorResponse(res, { traceId, code, message, details, status }) {
-    if (res.headersSent) return;
+    if (res.headersSent) {
+      this.logger.warn(`[appVoiceMessageService] 無法發送錯誤回應 (headers已發送) trace_id=${traceId}`);
+      return;
+    }
+    
+    this.logger.info(`[appVoiceMessageService] 發送錯誤回應 trace_id=${traceId} status=${status || 500}`);
+    this.logger.info(`[appVoiceMessageService] 錯誤內容: code=${code}, message=${message}`);
+    this.logger.info(`[appVoiceMessageService] ────────────────────────────────────────`);
+    
     res.status(status || 500).json({
       trace_id: traceId,
       error: {
@@ -842,16 +1039,47 @@ class VoiceMessagePipeline {
   // ───────────────────────────────────────────
   // 區段：TTS 回傳解析
   // 用途：從 TTS 插件回傳中取得檔案路徑
+  // 說明：ttsArtifact 回傳格式為 { artifact_id, url, format, duration_ms }
+  //       需要透過 artifact_id 查找實際檔案路徑
   // ───────────────────────────────────────────
   extractTtsPath(result) {
     if (!result || typeof result !== 'object') return '';
-    return (
-      result.wav_path ||
-      result.file_path ||
-      result.artifact_path ||
-      result.path ||
-      ''
-    );
+    
+    // 檢查是否有錯誤
+    if (result.error) {
+      this.logger.error(`[appVoiceMessageService] TTS 回傳錯誤: ${result.error}`);
+      return '';
+    }
+    
+    // 優先使用直接提供的檔案路徑
+    const directPath = result.wav_path || result.file_path || result.artifact_path || result.path || '';
+    if (directPath) return directPath;
+    
+    // 若有 artifact_id，嘗試從標準路徑取得檔案
+    if (result.artifact_id) {
+      const path = require('path');
+      const fs = require('fs');
+      const artifactId = result.artifact_id;
+      const now = new Date();
+      const year = String(now.getFullYear());
+      const month = String(now.getMonth() + 1).padStart(2, '0');
+      const day = String(now.getDate()).padStart(2, '0');
+      
+      // ttsArtifact 標準路徑格式: data/artifacts/tts/{year}/{month}/{day}/{artifact_id}/audio.wav
+      const standardPath = path.resolve(
+        process.cwd(),
+        'data', 'artifacts', 'tts', year, month, day, artifactId, 'audio.wav'
+      );
+      
+      if (fs.existsSync(standardPath)) {
+        this.logger.info(`[appVoiceMessageService] 透過 artifact_id 找到 WAV: ${standardPath}`);
+        return standardPath;
+      }
+      
+      this.logger.warn(`[appVoiceMessageService] artifact_id=${artifactId} 但找不到檔案: ${standardPath}`);
+    }
+    
+    return '';
   }
 
   // ───────────────────────────────────────────

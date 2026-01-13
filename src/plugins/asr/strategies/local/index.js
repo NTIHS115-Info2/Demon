@@ -7,8 +7,8 @@ const { PythonShell } = require("python-shell");
 const logger = require("../../../../utils/logger.js");
 const Logger = new logger("asr.log");
 
-// 段落說明：定義策略優先度，供插件選擇器排序使用
-const priority = 80;
+// 段落說明：此策略的啟動優先度
+const priority = 70;
 
 // 段落說明：支援的 MIME 類型清單，避免不支援格式導致轉寫失敗
 const SUPPORTED_MIME_TYPES = new Set([
@@ -226,9 +226,10 @@ module.exports = {
     const model = options.model || process.env.ASR_MODEL || "large-v3";
     const logPath = options.logPath || process.env.ASR_LOG_PATH || `${Logger.getLogPath()}/asr.log`;
     const pythonPath = resolvePythonPath(options);
-    const useCpu = options.useCpu || false;
+    // 預設使用 GPU，除非明確指定 useCpu=true
+    const useCpu = options.useCpu === true;
 
-    Logger.info(`[ASR] 開始檔案轉寫，trace_id=${traceId}`);
+    Logger.info(`[ASR] 開始檔案轉寫，trace_id=${traceId}, useCpu=${useCpu}, model=${model}`);
 
     try {
       // 段落說明：呼叫 Python 腳本取得轉寫結果

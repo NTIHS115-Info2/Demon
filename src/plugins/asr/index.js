@@ -11,6 +11,9 @@ let mode = 'local';
 const defaultWeights = { remote: 3, server: 2, local: 1 };
 let weights = { ...defaultWeights };
 
+// 保存 online 時的選項，供後續 transcribeFile 使用
+let savedOptions = {};
+
 
 module.exports = {
   /**
@@ -24,7 +27,6 @@ module.exports = {
     if (newMode !== 'auto') {
       mode = newMode;
       strategy = strategies[newMode] || strategies.local;
-      this.priority = strategy.priority;
       logger.info(`ASR 插件策略已切換為 ${mode}`);
       return;
     }
@@ -41,7 +43,6 @@ module.exports = {
             });
             mode = 'remote';
             strategy = strategies.remote;
-            this.priority = strategy.priority;
             logger.info('ASR 自動選擇 remote 策略');
             return;
           } catch (e) {
@@ -59,7 +60,6 @@ module.exports = {
           if (ok) {
             mode = 'server';
             strategy = strategies.server;
-            this.priority = strategy.priority;
             logger.info('ASR 自動選擇 server 策略');
             return;
           }
@@ -69,7 +69,6 @@ module.exports = {
       } else if (m === 'local') {
         mode = 'local';
         strategy = strategies.local;
-        this.priority = strategy.priority;
         logger.info('ASR 自動選擇 local 策略');
         return;
       }
@@ -77,7 +76,6 @@ module.exports = {
 
     mode = 'local';
     strategy = strategies.local;
-    this.priority = strategy.priority;
     logger.info('ASR 自動選擇預設 local 策略');
   },
 
@@ -85,6 +83,10 @@ module.exports = {
   async online(options = {}) {
     const useMode = options.mode || mode;
     if (!strategy || useMode !== mode) await this.updateStrategy(useMode, options);
+    
+    // 保存選項供後續 transcribeFile 使用
+    savedOptions = { ...options };
+    logger.info(`[ASR] 保存選項: pythonPath=${options.pythonPath || '(預設)'}`);
     
     const startTime = Date.now();
     try {
@@ -150,9 +152,12 @@ module.exports = {
 
   // 檔案轉寫，僅回傳轉寫結果資料
   async transcribeFile(input = {}, options = {}) {
+    // 段落說明：合併 online 時保存的選項與呼叫時傳入的選項
+    const mergedOptions = { ...savedOptions, ...options };
+    
     // 段落說明：確保策略已就緒，並交由策略執行檔案轉寫
-    const useMode = options.mode || mode;
-    if (!strategy || useMode !== mode) await this.updateStrategy(useMode, options);
+    const useMode = mergedOptions.mode || mode;
+    if (!strategy || useMode !== mode) await this.updateStrategy(useMode, mergedOptions);
 
     // 段落說明：策略能力檢查，避免呼叫未實作的行為
     if (typeof strategy.transcribeFile !== 'function') {
@@ -168,8 +173,8 @@ module.exports = {
     // 段落說明：執行轉寫並記錄耗時與結果
     const startTime = Date.now();
     try {
-      logger.info(`[ASR] 開始檔案轉寫，模式=${useMode}`);
-      const result = await strategy.transcribeFile(input, options);
+      logger.info(`[ASR] 開始檔案轉寫，模式=${useMode}, pythonPath=${mergedOptions.pythonPath || '(預設)'}`);
+      const result = await strategy.transcribeFile(input, mergedOptions);
       const duration = Date.now() - startTime;
 
       // 段落說明：依照策略回傳內容記錄成功或錯誤狀態

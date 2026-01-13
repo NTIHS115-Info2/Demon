@@ -82,7 +82,27 @@ except Exception as e:
     sys.exit(1)
 
 # 段落說明：選擇運算裝置，確保模型能在適當硬體執行
-device = "cpu" if args.use_cpu else ("cuda" if torch.cuda.is_available() else "cpu")
+# 診斷：顯示 CUDA 環境狀態，幫助排查 GPU 未啟用問題
+cuda_available = torch.cuda.is_available()
+logger.info(f"CUDA 診斷: available={cuda_available}")
+if cuda_available:
+    logger.info(f"CUDA 診斷: device_count={torch.cuda.device_count()}, device_name={torch.cuda.get_device_name(0)}")
+else:
+    # 嘗試取得 CUDA 不可用的原因
+    try:
+        import subprocess
+        nvidia_smi = subprocess.run(['nvidia-smi'], capture_output=True, text=True, timeout=5)
+        if nvidia_smi.returncode == 0:
+            logger.warning("CUDA 診斷: nvidia-smi 可用但 torch.cuda 不可用，可能是 PyTorch 未安裝 CUDA 版本")
+        else:
+            logger.warning(f"CUDA 診斷: nvidia-smi 執行失敗 (exit code {nvidia_smi.returncode})")
+    except Exception as cuda_diag_err:
+        logger.warning(f"CUDA 診斷: 無法執行 nvidia-smi ({cuda_diag_err})")
+
+device = "cpu" if args.use_cpu else ("cuda" if cuda_available else "cpu")
+
+if not args.use_cpu and not cuda_available:
+    logger.warning("警告：請求使用 GPU 但 CUDA 不可用，將使用 CPU（速度會較慢）")
 
 # 段落說明：載入 Whisper 模型，失敗時回報明確錯誤
 try:

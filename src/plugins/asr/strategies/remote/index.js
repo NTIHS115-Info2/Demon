@@ -4,12 +4,10 @@ const Logger = require('../../../../utils/logger');
 const info = require('../server/infor');
 
 const logger = new Logger('ASRRemote');
-const priority = 90;
 
 let baseUrl = '';
 
 module.exports = {
-  priority,
   /**
    * 啟動遠端策略，設定伺服器 baseUrl
    * @param {{baseUrl:string}} options

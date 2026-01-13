@@ -3,11 +3,10 @@ const VoiceMessagePipeline = require('./VoiceMessagePipeline');
 
 // ───────────────────────────────────────────────
 // 區段：基本設定
-// 用途：定義路由與優先度等固定配置
+// 用途：定義路由配置（priority 由 setting.json 管理）
 // ───────────────────────────────────────────────
-const priority = 75;
-const ROUTE_VOICE_MESSAGE = '/app/voice/message';
-const ROUTE_HEALTH = '/app/voice/health';
+const ROUTE_VOICE_MESSAGE = '/ios/BubbleChat';
+const ROUTE_HEALTH = '/ios/HealthCheck';
 
 // ───────────────────────────────────────────────
 // 區段：狀態管理
@@ -30,8 +29,6 @@ let expressApp = null;
 const logger = new Logger('appVoiceMessageService-local');
 
 module.exports = {
-  priority,
-
   /**
    * 啟動插件（掛載路由）
    * @param {Object} options

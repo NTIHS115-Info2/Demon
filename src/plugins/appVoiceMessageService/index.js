@@ -27,7 +27,7 @@ module.exports = {
   async updateStrategy(newMode = 'local', options = {}) {
     // ───────────────────────────────────────────
     // 區段：策略切換邏輯
-    // 用途：設定可用策略並同步 priority
+    // 用途：設定可用策略（priority 由 setting.json 統一管理）
     // ───────────────────────────────────────────
     logger.info('[appVoiceMessageService] 策略更新中...');
     if (!strategies[newMode]) {
@@ -36,7 +36,6 @@ module.exports = {
     }
     mode = newMode;
     strategy = strategies[newMode];
-    this.priority = strategy.priority;
     logger.info(`[appVoiceMessageService] 策略已切換為 ${mode}`);
   },
 
