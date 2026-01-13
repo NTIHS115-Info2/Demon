@@ -18,6 +18,12 @@ let onlineState = false;
 let pipeline = null;
 
 // ───────────────────────────────────────────────
+// 區段：Express app 參考
+// 用途：保留主服務注入的 Express app 實例，便於重啟判斷
+// ───────────────────────────────────────────────
+let expressApp = null;
+
+// ───────────────────────────────────────────────
 // 區段：記錄器
 // 用途：統一輸出插件日誌
 // ───────────────────────────────────────────────
@@ -32,14 +38,37 @@ module.exports = {
    */
   async online(options = {}) {
     // ───────────────────────────────────────────
+    // 區段：重複上線檢查
+    // 用途：避免重複上線時重複註冊路由
+    // ───────────────────────────────────────────
+    if (registered && onlineState) {
+      logger.warn('[appVoiceMessageService] 已上線，跳過重複 online');
+      return true;
+    }
+
+    // ───────────────────────────────────────────
     // 區段：輸入檢查
     // 用途：確保已注入 Express app，避免無法掛載路由
     // ───────────────────────────────────────────
-    const app = options.app;
-    if (!app || typeof app.post !== 'function') {
+    const injectedApp = options.expressApp;
+    if (!injectedApp || typeof injectedApp.post !== 'function') {
       logger.error('[appVoiceMessageService] 缺少有效的 Express app，無法掛載路由');
       return false;
     }
+
+    // ───────────────────────────────────────────
+    // 區段：app 實例檢查
+    // 用途：提示若已註冊路由卻注入不同 app，避免誤以為會重新掛載
+    // ───────────────────────────────────────────
+    if (registered && expressApp && expressApp !== injectedApp) {
+      logger.warn('[appVoiceMessageService] 已註冊路由但收到不同 Express app，將維持既有路由');
+    }
+
+    // ───────────────────────────────────────────
+    // 區段：保存 app 參考
+    // 用途：記錄目前注入的 Express app 以供後續判斷
+    // ───────────────────────────────────────────
+    expressApp = injectedApp;
 
     // ───────────────────────────────────────────
     // 區段：建立處理管線
@@ -55,23 +84,43 @@ module.exports = {
     // 說明：若插件以不同 Express app 實例重啟，路由不會重新註冊到新實例。
     //       此為預期行為，因通常整個應用共用同一個 app 實例。
     // ───────────────────────────────────────────
-    if (!registered) {
-      app.post(
-        ROUTE_VOICE_MESSAGE,
-        pipeline.prepareRequestMiddleware(),
-        pipeline.uploadMiddleware(),
-        pipeline.handleVoiceMessage.bind(pipeline)
-      );
+    try {
+      // ─────────────────────────────────────────
+      // 區段：掛載路由
+      // 用途：僅註冊一次路由，避免重複掛載
+      // 說明：若插件以不同 Express app 實例重啟，路由不會重新註冊到新實例。
+      //       此為預期行為，因通常整個應用共用同一個 app 實例。
+      // ─────────────────────────────────────────
+      if (!registered) {
+        expressApp.post(
+          ROUTE_VOICE_MESSAGE,
+          pipeline.prepareRequestMiddleware(),
+          pipeline.uploadMiddleware(),
+          pipeline.handleVoiceMessage.bind(pipeline)
+        );
 
-      app.get(ROUTE_HEALTH, pipeline.handleHealth.bind(pipeline));
+        expressApp.get(ROUTE_HEALTH, pipeline.handleHealth.bind(pipeline));
 
-      registered = true;
-      logger.info('[appVoiceMessageService] 路由已掛載完成');
+        registered = true;
+        logger.info('[appVoiceMessageService] 路由已掛載完成');
+      }
+
+      // ─────────────────────────────────────────
+      // 區段：上線狀態更新
+      // 用途：標記插件已成功上線
+      // ─────────────────────────────────────────
+      onlineState = true;
+      logger.info('[appVoiceMessageService] local 策略已上線');
+      return true;
+    } catch (error) {
+      // ─────────────────────────────────────────
+      // 區段：錯誤處理
+      // 用途：記錄掛載失敗原因並回報結果
+      // ─────────────────────────────────────────
+      onlineState = false;
+      logger.error(`[appVoiceMessageService] 路由掛載失敗: ${error?.message || error}`);
+      return false;
     }
-
-    onlineState = true;
-    logger.info('[appVoiceMessageService] local 策略已上線');
-    return true;
   },
 
   /**

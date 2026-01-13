@@ -50,9 +50,20 @@ module.exports = {
     // 用途：確保策略可用並啟動服務
     // ───────────────────────────────────────────
     const useMode = options.mode || mode;
-    if (!strategy || useMode !== mode) await this.updateStrategy(useMode, options);
+
+    // ───────────────────────────────────────────
+    // 區段：參數正規化
+    // 用途：統一使用 expressApp 參數以註冊路由
+    // ───────────────────────────────────────────
+    const normalizedOptions = { ...options };
+    if (!normalizedOptions.expressApp && normalizedOptions.app) {
+      logger.warn('[appVoiceMessageService] 偵測到 app 參數，已改用 expressApp 注入');
+      normalizedOptions.expressApp = normalizedOptions.app;
+    }
+
+    if (!strategy || useMode !== mode) await this.updateStrategy(useMode, normalizedOptions);
     try {
-      return await strategy.online(options);
+      return await strategy.online(normalizedOptions);
     } catch (err) {
       logger.error(`[appVoiceMessageService] online 失敗: ${err.message || err}`);
       throw err;
