@@ -1,5 +1,6 @@
 const fs = require("fs");
 const path = require("path");
+const expressAppManager = require("./expressAppManager");
 
 // 內部引用
 const logger = require("../utils/logger");
@@ -34,6 +35,8 @@ class PluginsManager {
     this.maxConcurrent = 1;            // 每次僅啟動一個插件
     this.queuedPlugins = new Set();    // 追蹤目前在佇列中的插件，防止重複加入
     this.exceptionLLM = new Set();     // LLM 插件啟動例外清單
+    // Express app 注入機制：主服務持有唯一實例，提供插件註冊路由使用
+    this.expressApp = expressAppManager.getExpressApp();
   }
 
   /**
@@ -43,6 +46,27 @@ class PluginsManager {
    */
   normalizeName(name) {
     return typeof name === "string" ? name.toLowerCase() : name;
+  }
+
+  /**
+   * 注入主服務建立的 Express app
+   * @param {Object} app - Express app 實例
+   */
+  setExpressApp(app) {
+    // 將 Express app 注入到管理器，供插件啟動時共用
+    this.expressApp = expressAppManager.setExpressApp(app);
+  }
+
+  /**
+   * 取得目前可用的 Express app
+   * @returns {Object} Express app 實例
+   */
+  getExpressApp() {
+    // 若尚未注入則建立預設實例，確保插件可取得同一份 app
+    if (!this.expressApp) {
+      this.expressApp = expressAppManager.getExpressApp();
+    }
+    return this.expressApp;
   }
 
   // 根據插件名稱或目錄名稱解析出插件在註冊表中的唯一識別碼
@@ -537,7 +561,12 @@ class PluginsManager {
       this.queue.push(async () => {
         Logger.info(`[Queue] 開始啟動插件：${label}`);
         try {
-          await plugin.online(options);  // 這裡的 online 是真實啟動流程
+          // 將主服務 Express app 注入到插件啟動選項，避免插件自行開 server
+          const mergedOptions = {
+            ...options,
+            expressApp: ('expressApp' in options) ? options.expressApp : this.getExpressApp()
+          };
+          await plugin.online(mergedOptions);  // 這裡的 online 是真實啟動流程
           Logger.info(`[Queue] 插件 ${label} 啟動完成`);
           resolve(true); // 👈 當 queue 執行這件事完畢，才 resolve
         } catch (err) {
@@ -770,6 +799,12 @@ class PluginsManager {
     // 確保已載入所有 LLM 插件
     await this.loadAllLLMPlugins(options.mode);
 
+    // 輸出例外插件清單資訊
+    if (this.exceptionLLM.size > 0) {
+      Logger.info(
+        `[StartLLMTool] 例外插件清單: ${Array.from(this.exceptionLLM).join(', ')}`
+      );
+    }
 
     const list = this.getAllLLMPlugin();
     if (!Array.isArray(list)) {
