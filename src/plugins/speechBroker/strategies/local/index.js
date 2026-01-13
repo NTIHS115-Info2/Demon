@@ -7,6 +7,7 @@ let isOnline = false;
 let activeMode = 'artifact';
 let artifactSession = null;
 let artifactQueue = Promise.resolve();
+let ignoreData = false; // 用於忽略 end 後再發出的完整 data
 // 儲存事件處理函式，便於 offline 時移除
 const handlers = {};
 
@@ -153,13 +154,19 @@ async function sendArtifactSentence(sentence, traceInfo) {
 }
 
 async function finalizeArtifactSession(traceInfo) {
-  if (!artifactSession) return false;
+  if (!artifactSession) {
+    logger.info('[SpeechBroker] finalizeArtifactSession 跳過：沒有活躍的 session');
+    return false;
+  }
+  // 立即清空 session，防止重複 finalize
+  const sessionToFinalize = artifactSession;
+  artifactSession = null;
+  
   const result = await sendToTtsArtifact(null, traceInfo, {
     stream: true,
     action: ARTIFACT_ACTIONS.FINALIZE,
-    artifactId: artifactSession.artifactId
+    artifactId: sessionToFinalize.artifactId
   });
-  artifactSession = null;
   return result;
 }
 
@@ -386,77 +393,74 @@ module.exports = {
     buffer = '';
     artifactSession = null;
     artifactQueue = Promise.resolve();
+    ignoreData = false;
     // 解析並儲存模式設定，確保後續串流處理一致
     activeMode = resolveMode(options);
     logger.info(`[SpeechBroker] 已設定 TTS 模式為 ${activeMode}`);
 
-    handlers.onData = async (chunk) => {
-      try {
-        if (SENTENCE_ENDINGS.test(chunk)) {
-          const sentence = (buffer + chunk).trim();
-          const sanitized = sanitizeChunk(sentence);
-          
-          if (sanitized.length > 0) {
-            // 產生追蹤資訊，便於統一記錄與錯誤追蹤
-            const traceInfo = buildTraceInfo();
-            logger.info(
-              `[SpeechBroker] 偵測到句尾，準備送出語音 (mode=${activeMode}, trace_id=${traceInfo.traceId}) ` +
-              `"${sentence}" → "${sanitized}"`
-            );
-            // 根據模式選擇 ttsArtifact 或 ttsEngine，避免隱式 fallback
-            if (activeMode === TTS_MODES.ENGINE) {
-              const engineResult = await sendToTtsEngine(sanitized, traceInfo);
-              consumeEngineStream(engineResult);
-            } else {
-              await enqueueArtifactTask(() => sendArtifactSentence(sanitized, traceInfo));
-            }
-          }
-          buffer = '';
-        } else {
-          buffer += chunk;
-        }
-      } catch (e) {
-        logger.error(`[SpeechBroker] 處理資料時發生錯誤: ${e.message || e}`);
+    // onData 只累積內容到 buffer，不即時發送
+    handlers.onData = (chunk) => {
+      // 忽略 end 之後再發出的完整 data（TalkToDemon 在 end 後會再發一次完整文字）
+      if (ignoreData) {
+        logger.info(`[SpeechBroker] 忽略 end 後的 data (長度=${chunk?.length || 0})`);
+        return;
       }
+      buffer += chunk;
     };
     talker.on('data', handlers.onData);
 
     handlers.onEnd = async (endInfo = {}) => {
       try {
-        const shouldFinalize = !endInfo?.toolTriggered;
-        if (activeMode === TTS_MODES.ENGINE) {
-          if (buffer.trim().length > 0) {
-            const remainingSentence = sanitizeChunk(buffer.trim() + '.');
-            // 產生追蹤資訊，補播殘句並維持模式一致
-            const traceInfo = buildTraceInfo();
-            logger.info(
-              `[SpeechBroker] 串流結束，補播殘句 (mode=${activeMode}, trace_id=${traceInfo.traceId}): ` +
-              `"${buffer.trim()}" → "${remainingSentence}"`
-            );
-            const engineResult = await sendToTtsEngine(remainingSentence, traceInfo);
-            consumeEngineStream(engineResult);
-            buffer = '';
+        const fullText = buffer.trim();
+        buffer = '';
+        // 設定忽略標記，防止 end 後再發出的完整 data 被累積
+        ignoreData = true;
+        
+        // 使用 setImmediate 在下一個事件循環重置 ignoreData
+        // 這樣可以忽略 end 後同步發出的 data，但允許下一輪對話的 data
+        setImmediate(() => {
+          ignoreData = false;
+        });
+        
+        if (fullText.length === 0) {
+          // 沒有內容，直接 finalize
+          if (activeMode !== TTS_MODES.ENGINE) {
+            await enqueueArtifactTask(async () => {
+              const traceInfo = buildTraceInfo();
+              await finalizeArtifactSession(traceInfo);
+            });
           }
           return;
         }
-
-        await enqueueArtifactTask(async () => {
-          if (buffer.trim().length > 0) {
-            const remainingSentence = sanitizeChunk(buffer.trim() + '.');
-            const traceInfo = buildTraceInfo();
-            logger.info(
-              `[SpeechBroker] 串流結束，補播殘句 (mode=${activeMode}, trace_id=${traceInfo.traceId}): ` +
-              `"${buffer.trim()}" → "${remainingSentence}"`
-            );
-            await sendArtifactSentence(remainingSentence, traceInfo);
-            buffer = '';
+        
+        const sanitized = sanitizeChunk(fullText);
+        if (sanitized.length === 0) {
+          if (activeMode !== TTS_MODES.ENGINE) {
+            await enqueueArtifactTask(async () => {
+              const traceInfo = buildTraceInfo();
+              await finalizeArtifactSession(traceInfo);
+            });
           }
-
-          if (shouldFinalize) {
-            const traceInfo = buildTraceInfo();
-            await finalizeArtifactSession(traceInfo);
-          }
-        });
+          return;
+        }
+        
+        const traceInfo = buildTraceInfo();
+        logger.info(
+          `[SpeechBroker] 串流結束，送出完整語音 (mode=${activeMode}, trace_id=${traceInfo.traceId}): ` +
+          `"${fullText.slice(0, 100)}${fullText.length > 100 ? '...' : ''}" → "${sanitized.slice(0, 100)}${sanitized.length > 100 ? '...' : ''}"`
+        );
+        
+        if (activeMode === TTS_MODES.ENGINE) {
+          const engineResult = await sendToTtsEngine(sanitized, traceInfo);
+          consumeEngineStream(engineResult);
+        } else {
+          // 每次 end 都建立新的 session 並 finalize，確保每段對話獨立
+          await enqueueArtifactTask(async () => {
+            await sendArtifactSentence(sanitized, traceInfo);
+            const finalizeTraceInfo = buildTraceInfo();
+            await finalizeArtifactSession(finalizeTraceInfo);
+          });
+        }
       } catch (e) {
         logger.error(`[SpeechBroker] end事件處理錯誤: ${e.message || e}`);
       }
@@ -465,37 +469,46 @@ module.exports = {
 
     handlers.onAbort = async () => {
       try {
-        if (activeMode === TTS_MODES.ENGINE) {
-          if (buffer.trim().length > 0) {
-            const remainingSentence = sanitizeChunk(buffer.trim() + '.');
-            // 產生追蹤資訊，補播殘句並維持模式一致
-            const traceInfo = buildTraceInfo();
-            logger.info(
-              `[SpeechBroker] 串流中止，補播殘句 (mode=${activeMode}, trace_id=${traceInfo.traceId}): ` +
-              `"${buffer.trim()}" → "${remainingSentence}"`
-            );
-            const engineResult = await sendToTtsEngine(remainingSentence, traceInfo);
-            consumeEngineStream(engineResult);
-            buffer = '';
+        const fullText = buffer.trim();
+        buffer = '';
+        
+        if (fullText.length === 0) {
+          if (activeMode !== TTS_MODES.ENGINE) {
+            await enqueueArtifactTask(async () => {
+              const traceInfo = buildTraceInfo();
+              await finalizeArtifactSession(traceInfo);
+            });
           }
           return;
         }
-
-        await enqueueArtifactTask(async () => {
-          if (buffer.trim().length > 0) {
-            const remainingSentence = sanitizeChunk(buffer.trim() + '.');
-            // 產生追蹤資訊，補播殘句並維持模式一致
-            const traceInfo = buildTraceInfo();
-            logger.info(
-              `[SpeechBroker] 串流中止，補播殘句 (mode=${activeMode}, trace_id=${traceInfo.traceId}): ` +
-              `"${buffer.trim()}" → "${remainingSentence}"`
-            );
-            await sendArtifactSentence(remainingSentence, traceInfo);
-            buffer = '';
+        
+        const sanitized = sanitizeChunk(fullText);
+        if (sanitized.length === 0) {
+          if (activeMode !== TTS_MODES.ENGINE) {
+            await enqueueArtifactTask(async () => {
+              const traceInfo = buildTraceInfo();
+              await finalizeArtifactSession(traceInfo);
+            });
           }
-          const traceInfo = buildTraceInfo();
-          await finalizeArtifactSession(traceInfo);
-        });
+          return;
+        }
+        
+        const traceInfo = buildTraceInfo();
+        logger.info(
+          `[SpeechBroker] 串流中止，送出完整語音 (mode=${activeMode}, trace_id=${traceInfo.traceId}): ` +
+          `"${fullText.slice(0, 100)}${fullText.length > 100 ? '...' : ''}" → "${sanitized.slice(0, 100)}${sanitized.length > 100 ? '...' : ''}"`
+        );
+        
+        if (activeMode === TTS_MODES.ENGINE) {
+          const engineResult = await sendToTtsEngine(sanitized, traceInfo);
+          consumeEngineStream(engineResult);
+        } else {
+          await enqueueArtifactTask(async () => {
+            await sendArtifactSentence(sanitized, traceInfo);
+            const finalizeTraceInfo = buildTraceInfo();
+            await finalizeArtifactSession(finalizeTraceInfo);
+          });
+        }
       } catch (e) {
         logger.error(`[SpeechBroker] abort事件處理錯誤: ${e.message || e}`);
       }
@@ -523,6 +536,7 @@ module.exports = {
     activeMode = TTS_MODES.ARTIFACT;
     artifactSession = null;
     artifactQueue = Promise.resolve();
+    ignoreData = false;
     
     try {
       // 移除所有事件監聽，避免離線後仍接收資料

@@ -1,8 +1,23 @@
 {
   "toolName": "iotVisionTurret",
-  "description": "This tool is used to control physical lights in the IoT system. Whenever the user's intent involves turning lights on or off, lighting control, or operating any smart light-related device, this tool must be used. The internal IoT logic, device selection, and execution details are handled by the system and are not exposed to the language model.",
-  "input": {},
+  "description": "Controls physical lights in the IoT system using an IR turret device. Whenever the user's intent involves turning lights on or off, lighting control, or operating any smart light-related device, this tool must be used. The turret will scan and send IR commands to control the lights. The internal IoT logic, device selection, and execution details are handled by the system.",
+  "input": {
+    "input": "String – Required. The lighting control command from the user. Supported commands: 'on'/'open'/'開燈'/'開'/'打開' for turning lights ON; 'off'/'close'/'關燈'/'關'/'關閉'/'熄燈'/'關掉'/'熄滅' for turning lights OFF. The system will parse this input to determine whether to send LIGHT_ON or LIGHT_OFF IR signal."
+  },
+  "inputExamples": {
+    "turnOn": { "input": "開燈" },
+    "turnOff": { "input": "關燈" },
+    "turnOnEnglish": { "input": "turn on the lights" },
+    "turnOffEnglish": { "input": "turn off" }
+  },
   "output": {
-    "ok": "Boolean. true if the light control operation succeeded, false if it failed."
-  }
+    "ok": "Boolean. true if the light control operation succeeded, false if it failed.",
+    "irProfile": "String. The IR command type that was sent: 'LIGHT_ON' or 'LIGHT_OFF'.",
+    "totalIRSent": "Number, optional. In step-by-step mode, indicates how many IR signals were sent during the scan."
+  },
+  "notes": [
+    "The device must be registered and online before this tool can be used.",
+    "If the input does not contain any OFF-related keywords, the default action is to turn ON the lights.",
+    "The turret scans multiple positions and sends IR commands at each position to maximize coverage."
+  ]
 }
