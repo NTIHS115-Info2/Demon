@@ -258,8 +258,6 @@ describe('iotVisionTurret 本地策略', () => {
   });
 
   test('Python 逾時時應終止進程並拋出錯誤', async () => {
-    jest.useFakeTimers();
-
     const timeoutSpawnMock = jest.fn(() => {
       const mockChild = new EventEmitter();
       mockChild.stdin = { write: jest.fn(), end: jest.fn() };
@@ -278,15 +276,10 @@ describe('iotVisionTurret 本地策略', () => {
 
     const strategy = require('../src/plugins/iotVisionTurret/strategies/local');
 
-    const onlinePromise = strategy.online({ timeoutMs: 5000, expressApp: createMockExpressApp() });
-
-    // 快進超時時間
-    jest.advanceTimersByTime(5000);
-
-    await expect(onlinePromise).rejects.toThrow('Python runner 執行逾時');
-
-    jest.useRealTimers();
-  });
+    // 使用較短的逾時時間來快速測試逾時行為
+    await expect(strategy.online({ timeoutMs: 100, expressApp: createMockExpressApp() }))
+      .rejects.toThrow('Python runner 執行逾時');
+  }, 10000);
 });
 
 describe('iotVisionTurret 插件整合', () => {
