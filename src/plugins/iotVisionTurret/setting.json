@@ -1,7 +1,5 @@
 {
-  "_comment": "此設定檔描述 iotVisionTurret 插件的基本資訊與可用策略",
   "name": "iotVisionTurret",
-  "pluginType": "Tool",
-  "priority": 50,
-  "strategies": ["local"]
+  "priority": 0,
+  "pluginType": "LLM"
 }
