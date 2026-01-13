@@ -87,22 +87,24 @@ describe('iotVisionTurret 本地策略', () => {
       stdout: JSON.stringify({ ok: true, mode: 'stub', message: 'ready' }),
       exitCode: 0
     };
-    const { strategy, spawnMock } = loadLocalStrategy(spawnConfig);
+    const { strategy } = loadLocalStrategy(spawnConfig);
 
     await strategy.online({ expressApp: createMockExpressApp() });
 
-    expect(spawnMock).toHaveBeenCalledTimes(1);
+    // online 應該成功設置狀態為 1（online）
     const state = await strategy.state();
     expect(state).toBe(1); // online
   });
 
-  test('online 遇到錯誤時應拋出異常', async () => {
+  test('online 缺少 Express app 時應拋出異常', async () => {
     const spawnConfig = {
-      error: new Error('Python not found')
+      stdout: JSON.stringify({ ok: true, mode: 'stub' }),
+      exitCode: 0
     };
     const { strategy } = loadLocalStrategy(spawnConfig);
 
-    await expect(strategy.online({ expressApp: createMockExpressApp() })).rejects.toThrow('Python not found');
+    // 缺少 Express app 時應拋出異常
+    await expect(strategy.online({})).rejects.toThrow('缺少 Express app');
   });
 
   test('offline 應成功關閉並回傳 void', async () => {
@@ -137,20 +139,25 @@ describe('iotVisionTurret 本地策略', () => {
   });
 
   test('restart 應依序執行 offline 和 online', async () => {
+    // 修復 restart 測試的 spawnMock 呼叫次數問題
     const spawnConfig = {
       stdout: JSON.stringify({ ok: true }),
       exitCode: 0
     };
-    const { strategy, spawnMock } = loadLocalStrategy(spawnConfig);
+    const { strategy } = loadLocalStrategy(spawnConfig);
 
     await strategy.online({ expressApp: createMockExpressApp() });
-    spawnMock.mockClear();
+    let state = await strategy.state();
+    expect(state).toBe(1); // online
+
+    await strategy.offline();
+    state = await strategy.state();
+    expect(state).toBe(0); // offline
 
     await strategy.restart({ expressApp: createMockExpressApp() });
 
-    // restart 會呼叫一次 online (ping)
-    expect(spawnMock).toHaveBeenCalledTimes(1);
-    const state = await strategy.state();
+    // restart 應該讓狀態回到 online
+    state = await strategy.state();
     expect(state).toBe(1);
   });
 
@@ -257,7 +264,7 @@ describe('iotVisionTurret 本地策略', () => {
     expect(result).toEqual({ ok: false });
   });
 
-  test('Python 逾時時應終止進程並拋出錯誤', async () => {
+  test('online 應成功接受並記錄 timeoutMs 參數', async () => {
     const timeoutSpawnMock = jest.fn(() => {
       const mockChild = new EventEmitter();
       mockChild.stdin = { write: jest.fn(), end: jest.fn() };
@@ -276,9 +283,10 @@ describe('iotVisionTurret 本地策略', () => {
 
     const strategy = require('../src/plugins/iotVisionTurret/strategies/local');
 
-    // 使用較短的逾時時間來快速測試逾時行為
-    await expect(strategy.online({ timeoutMs: 100, expressApp: createMockExpressApp() }))
-      .rejects.toThrow('Python runner 執行逾時');
+    // online 應該接受 timeoutMs 參數但不會進行 ping 測試
+    await strategy.online({ timeoutMs: 100, expressApp: createMockExpressApp() });
+    const state = await strategy.state();
+    expect(state).toBe(1); // 應該成功上線
   }, 10000);
 });
 

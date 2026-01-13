@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 # 檔案用途：提供 iotVisionTurret 本地策略的 Python runner 入口（stdin/stdout JSON 協議）
 
 # ───────────────────────────────────────────────
@@ -9,6 +10,12 @@ import os
 import sys
 import traceback
 from typing import Any, Dict, Tuple
+
+# 確保在 Windows 環境下使用 UTF-8 編碼輸出
+if sys.platform == 'win32':
+    import io
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8')
 
 from YOLOv11.infer import infer
 
