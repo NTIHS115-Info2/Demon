@@ -61,7 +61,7 @@ module.exports = {
       normalizedOptions.expressApp = normalizedOptions.app;
     }
 
-    if (!strategy || useMode !== mode) await this.updateStrategy(useMode, normalizedOptions);
+    if (!strategy || useMode !== mode) await this.updateStrategy(useMode);
     try {
       return await strategy.online(normalizedOptions);
     } catch (err) {
