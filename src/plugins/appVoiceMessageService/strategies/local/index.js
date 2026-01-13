@@ -40,8 +40,10 @@ module.exports = {
     // ───────────────────────────────────────────
     // 區段：重複上線檢查
     // 用途：避免重複上線時重複註冊路由
+    // 說明：僅檢查 onlineState 以允許 offline 後重新 online 的流程。
+    //       即使 registered 為 true，路由也不會重複註冊（見下方 !registered 檢查）。
     // ───────────────────────────────────────────
-    if (registered && onlineState) {
+    if (onlineState) {
       logger.warn('[appVoiceMessageService] 已上線，跳過重複 online');
       return true;
     }
@@ -61,14 +63,15 @@ module.exports = {
     // 用途：提示若已註冊路由卻注入不同 app，避免誤以為會重新掛載
     // ───────────────────────────────────────────
     if (registered && expressApp && expressApp !== injectedApp) {
-      logger.warn('[appVoiceMessageService] 已註冊路由但收到不同 Express app，將維持既有路由');
+      logger.warn('[appVoiceMessageService] 已註冊路由但收到不同 Express app，將維持既有路由於原 app 實例');
+      // 不更新 expressApp 參考，保持指向原有的 app 實例
+    } else {
+      // ─────────────────────────────────────────
+      // 區段：保存 app 參考
+      // 用途：記錄目前注入的 Express app 以供後續判斷
+      // ─────────────────────────────────────────
+      expressApp = injectedApp;
     }
-
-    // ───────────────────────────────────────────
-    // 區段：保存 app 參考
-    // 用途：記錄目前注入的 Express app 以供後續判斷
-    // ───────────────────────────────────────────
-    expressApp = injectedApp;
 
     // ───────────────────────────────────────────
     // 區段：建立處理管線
@@ -118,6 +121,7 @@ module.exports = {
       // 用途：記錄掛載失敗原因並回報結果
       // ─────────────────────────────────────────
       onlineState = false;
+      registered = false;
       logger.error(`[appVoiceMessageService] 路由掛載失敗: ${error?.message || error}`);
       return false;
     }
