@@ -8,6 +8,8 @@ beautifulsoup4
 lxml
 playwright
 fake-useragent
+tavily-python
+filelock
 
 # AI & Vector Search
 sentence-transformers

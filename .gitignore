@@ -16,6 +16,9 @@ logs
 __pycache__/
 *.py[cod]
 *$py.class
+*.pyc
+*.pyo
+*.pyd
 
 src/plugins/discord/config.js
 
@@ -37,20 +40,13 @@ tokens/
 # --- news_scraper_plugin additions ---
 # Python Virtual Environment
 .venv/
-# Python Cache (PR 審查修正)
-__pycache__/
-*.pyc
-*.pyo
-*.pyd
 
-# macOS metadata files (新增)
+# macOS metadata files
 ._*
 
-# News Scraper Cache
-src/plugins/news_scraper/strategies/local/cache/
-package-lock.json
+# News Scraper Cache & Local Settings (Updated Path)
+src/plugins/newsScraper/strategies/local/cache/
+src/plugins/newsScraper/setting.local.json
 
-# Python cache files
-__pycache__/
-*.py[cod]
-*$py.class
+# Node.js lock file
+package-lock.json

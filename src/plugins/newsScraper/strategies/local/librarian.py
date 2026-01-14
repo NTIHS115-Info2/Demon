@@ -1,10 +1,46 @@
-# src/plugins/news_scraper/strategies/local/librarian.py
+# src/plugins/newsScraper/strategies/local/librarian.py
 import faiss
 from sentence_transformers import SentenceTransformer
 import asyncio
 import re
 import sys
 import json
+from pydantic import BaseModel, ValidationError, field_validator, ConfigDict
+
+
+class LibrarianInput(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    text_content: str
+    query: str
+    top_k: int = 3
+    device: str = "cpu"
+
+    @field_validator("text_content", "query", mode="before")
+    @classmethod
+    def validate_required_text(cls, value):
+        if value is None:
+            raise ValueError("Text content and query cannot be empty")
+        if isinstance(value, str):
+            stripped = value.strip()
+            if not stripped:
+                raise ValueError("Text content and query cannot be empty")
+            return stripped
+        return value
+
+    @field_validator("top_k", mode="before")
+    @classmethod
+    def sanitize_top_k(cls, value):
+        return _sanitize_positive_int(value, fallback=3)
+
+    @field_validator("device", mode="before")
+    @classmethod
+    def normalize_device(cls, value):
+        if value is None:
+            return "cpu"
+        if isinstance(value, str):
+            stripped = value.strip()
+            return stripped if stripped else "cpu"
+        return value
 
 def _sanitize_positive_int(value, fallback=3):
     try:
@@ -86,19 +122,27 @@ class LibrarianStrategy:
             return {"success": False, "error": error_message}
 
 async def main():
-    if len(sys.argv) > 2:
-        text_content = sys.argv[1]
-        query = sys.argv[2]
-        top_k = _sanitize_positive_int(sys.argv[3]) if len(sys.argv) > 3 else 3
-        device = sys.argv[4] if len(sys.argv) > 4 else 'cpu'
-        
-        librarian = LibrarianStrategy()
-        result = await librarian.filter_content(text_content=text_content, query=query, top_k=top_k, device=device)
-        sys.stdout.buffer.write(json.dumps(result, ensure_ascii=False).encode('utf-8'))
+    if len(sys.argv) == 2:
+        try:
+            payload = json.loads(sys.argv[1])
+            input_model = LibrarianInput.model_validate(payload)
+            librarian = LibrarianStrategy()
+            result = await librarian.filter_content(
+                text_content=input_model.text_content,
+                query=input_model.query,
+                top_k=input_model.top_k,
+                device=input_model.device,
+            )
+            sys.stdout.buffer.write(json.dumps(result, ensure_ascii=False).encode("utf-8"))
+        except (json.JSONDecodeError, ValidationError) as exc:
+            error_result = {"success": False, "error": f"Invalid input: {exc}"}
+            sys.stdout.buffer.write(json.dumps(error_result, ensure_ascii=False).encode("utf-8"))
+        except Exception as exc:
+            error_result = {"success": False, "error": f"LibrarianStrategy failed: {exc}"}
+            sys.stdout.buffer.write(json.dumps(error_result, ensure_ascii=False).encode("utf-8"))
     else:
-        # [Copilot 審查修正] 為不正確的 CLI 使用提供清晰的錯誤提示
-        print("Usage: python librarian.py <text_content> <query> [top_k] [device]", file=sys.stderr)
-        sys.exit(1)
+        error_result = {"success": False, "error": "No JSON payload provided to librarian.py"}
+        sys.stdout.buffer.write(json.dumps(error_result, ensure_ascii=False).encode("utf-8"))
 
 if __name__ == '__main__':
     asyncio.run(main())

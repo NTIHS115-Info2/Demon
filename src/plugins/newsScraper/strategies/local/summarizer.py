@@ -1,4 +1,4 @@
-# src/plugins/news_scraper/strategies/local/summarizer.py
+# src/plugins/newsScraper/strategies/local/summarizer.py
 import sys
 import asyncio
 from transformers import pipeline
