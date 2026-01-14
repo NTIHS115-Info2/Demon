@@ -4,12 +4,10 @@ const pluginsManager = require('../../../../core/pluginsManager');
 const Logger = require('../../../../utils/logger');
 
 const logger = new Logger('ASRServer');
-const priority = 80;
 
 let registered = false;
 
 module.exports = {
-  priority,
   /** 啟動伺服器模式：註冊 ngrok 子網域並轉發指令至本地 ASR */
   async online(options = {}) {
     await local.online(options);
