@@ -9,6 +9,8 @@ src/plugins/ttsEngine/strategies/local/f5_tts
 src/plugins/iotVisionTurret/strategies/local/YOLOv11/dataset
 src/plugins/iotVisionTurret/strategies/local/YOLOv11/pretrained
 
+__test__/human/output
+
 logs
 /index.js
 
