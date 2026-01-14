@@ -6,6 +6,8 @@ Server/llama/llama_cpp_bin
 Server/llama/model
 
 src/plugins/ttsEngine/strategies/local/f5_tts
+src/plugins/iotVisionTurret/strategies/local/YOLOv11/dataset
+src/plugins/iotVisionTurret/strategies/local/YOLOv11/pretrained
 
 logs
 /index.js
@@ -46,3 +48,9 @@ __pycache__/
 
 # News Scraper Cache
 src/plugins/news_scraper/strategies/local/cache/
+package-lock.json
+
+# Python cache files
+__pycache__/
+*.py[cod]
+*$py.class
