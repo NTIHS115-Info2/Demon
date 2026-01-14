@@ -77,7 +77,7 @@ const UPLOAD_TIMEOUT_MS = 5000;
 // 若未來機構/伺服馬達可支援完整 0–180 度，請一併調整此列表與相關參數
 const SCAN_PITCH_LIST = [0];
 // 掃描 yaw 序列（內圈，允許完整 0–180 度掃描）
-const SCAN_YAW_LIST = [0, 45, 90, 135, 180 , 0];
+const SCAN_YAW_LIST = [0, 45, 90, 0];
 // 追蹤最大迭代次數
 const TRACK_MAX_ITERATIONS = 12;
 // LOCKED 連續達標次數

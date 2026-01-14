@@ -400,3 +400,7 @@
 # [v.1.5.3.9]
 ### Fix
 - 修復appVoiceMessageService/asr上機的一些問題
+
+# [v.1.5.3.10]
+### Fix
+- 修復 newsScraper 上機的一些問題

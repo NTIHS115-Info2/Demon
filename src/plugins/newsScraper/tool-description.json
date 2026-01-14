@@ -1,22 +1,22 @@
 {
-  "toolName": "newsScraper.autonomous_researcher",
-  "description": "接收一個研究主題和一個具體問題，自主上網搜尋、抓取、並過濾多個來源的資訊，最終回傳與具體問題最相關的文本片段。適用於需要對特定時事或主題進行快速、深度情報蒐集的場景。",
+  "toolName": "newsScraper",
+  "description": "Accepts a research topic and a specific question, autonomously searches the web, crawls and filters information from multiple sources, and finally returns the text segments most relevant to the specific question. Suitable for scenarios requiring rapid and in-depth intelligence gathering on specific current events or topics.",
   "input": {
-    "topic": "String – 需要進行廣泛搜尋的研究主題，例如 'NVIDIA Blackwell architecture'。",
-    "query": "String – 需要從搜尋結果中回答的具體問題，例如 'What are the performance improvements of Blackwell over Hopper?'。",
-    "keywords": "Array[String] – 可選的關鍵字陣列，若提供會優先用於搜尋。",
-    "detail_level": "Enum('concise','normal','deep_dive') – 搜尋與整理深度，預設為 normal。"
+    "topic": "String – The research topic that requires broad searching, for example 'NVIDIA Blackwell architecture'.",
+    "query": "String – The specific question to be answered from the search results, for example 'What are the performance improvements of Blackwell over Hopper?'.",
+    "keywords": "Array[String] – Optional keyword array; if provided, these will be prioritized during searching.",
+    "detail_level": "Enum('concise','normal','deep_dive') – The depth of searching and summarization; defaults to 'normal'."
   },
   "output": {
-    "success": "Boolean – 操作成功時為 true，失敗時為 false。",
+    "success": "Boolean – True if the operation succeeds, false if it fails.",
     "result": {
       "relevant_sections": [
         {
-          "chunk": "String – 與查詢最相關的文本片段。",
-          "score": "Number – 代表該段文本與查詢語意的相似度分數，通常介於 0.0 至 1.0 之間。"
+          "chunk": "String – A text segment most relevant to the query.",
+          "score": "Number – Represents the semantic similarity score between this text segment and the query, typically ranging from 0.0 to 1.0."
         }
       ]
     },
-    "resultType": "String – 固定為 'json'。"
+    "resultType": "String – Fixed value: 'json'."
   }
 }

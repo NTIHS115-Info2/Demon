@@ -198,13 +198,13 @@ function findMarkdownTool(buffer) {
 class ToolStreamRouter extends EventEmitter {
   /**
    * @param {Object} options
-   * @param {number} [options.timeout=1500] - 工具執行超時（毫秒）
+   * @param {number} [options.timeout=80000] - 工具執行超時（毫秒）
    * @param {string} [options.source='content'] - 來源標記（'content' 或 'reasoning'）
    */
   constructor(options = {}) {
     super();
     this.buffer  = '';
-    this.timeout = options.timeout || 1500;
+    this.timeout = options.timeout || 80_000;
     this.source  = options.source || 'content';  // ★ 標記來源
     this.processing = Promise.resolve();
   }
@@ -330,7 +330,7 @@ async function routeOutput(text, options = {}) {
  * @param {object} toolData
  * @param {{emitWaiting:Function,timeout:number}} param1
  */
-async function handleTool(toolData, { emitWaiting = () => {}, timeout = 10000 } = {}) {
+async function handleTool(toolData, { emitWaiting = () => {}, timeout = 80_000 } = {}) {
   logger.info(`開始處理工具呼叫: ${toolData.toolName}`);
   
   const plugin = PM.getLLMPlugin(toolData.toolName) || PM.plugins.get(toolData.toolName);
@@ -365,8 +365,8 @@ async function handleTool(toolData, { emitWaiting = () => {}, timeout = 10000 } 
     });
     const result = await Promise.race([toolPromise, timeoutPromise]);
 
-    // 若插件回傳包含 error 或 success 為 false，視為失敗並回傳錯誤
-    if (result && (result.error !== undefined || result.success === false)) {
+    // 若插件回傳包含 error (非 null/undefined) 或 success 為 false，視為失敗並回傳錯誤
+    if (result && (result.error || result.success === false)) {
       const errMsg = result.error || '未知錯誤';
       logger.warn(`工具 ${toolData.toolName} 回傳錯誤: ${errMsg}`);
       return await PromptComposer.createToolMessage({

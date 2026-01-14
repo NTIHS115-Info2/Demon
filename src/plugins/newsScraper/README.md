@@ -67,8 +67,8 @@ pip install -r src/plugins/newsScraper/requirements.txt
 
 1. 複製設定檔：
 
-```bash
-cp src/plugins/newsScraper/setting.json src/plugins/newsScraper/setting.local.json
+```powershell
+copy src/plugins/newsScraper/setting.json src/plugins/newsScraper/setting.local.json
 ```
 
 2. 編輯 `setting.local.json`，欄位說明如下：
