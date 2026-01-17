@@ -23,6 +23,7 @@ const VOICE_OUTBOX_DIR = path.resolve(process.cwd(), 'artifacts', 'tmp', 'voice_
 const DEFAULT_LLM_TIMEOUT_MS = 60000;
 const DEFAULT_TTS_WAIT_TIMEOUT_MS = 45000;
 const DEFAULT_FFMPEG_TIMEOUT_MS = 30000;
+const MIN_M4A_BYTES = 1024;
 
 // ───────────────────────────────────────────────
 // 區段：TTS 重試設定
@@ -510,6 +511,25 @@ class VoiceMessagePipeline {
     const turnId = req.voiceContext?.turnId || generateUlid();
     const timers = {};
     const cleanupTargets = new Set();
+    let cleanupTriggered = false;
+    let responseDone = false;
+    let pipelineDone = false;
+
+    const attemptCleanup = () => {
+      if (cleanupTriggered || !responseDone || !pipelineDone) return;
+      cleanupTriggered = true;
+      this.cleanupFiles(cleanupTargets).catch((cleanupError) => {
+        this.logger.error('[appVoiceMessageService] 清理暫存檔案失敗: ' + (cleanupError?.message || cleanupError));
+      });
+    };
+
+    const markResponseDone = () => {
+      responseDone = true;
+      attemptCleanup();
+    };
+
+    res.on('finish', markResponseDone);
+    res.on('close', markResponseDone);
 
     // ─────────────────────────────────────────
     // 區段：流程鎖定
@@ -633,16 +653,6 @@ class VoiceMessagePipeline {
       );
 
       // ───────────────────────────────────────
-      // 區段：延後清理註冊
-      // 用途：確保回應完成後清理暫存檔案
-      // ───────────────────────────────────────
-      res.on('finish', () => {
-        this.cleanupFiles(cleanupTargets).catch((cleanupError) => {
-          this.logger.error('[appVoiceMessageService] 清理暫存檔案失敗: ' + (cleanupError?.message || cleanupError));
-        });
-      });
-
-      // ───────────────────────────────────────
       // 區段：回傳結果
       // 用途：串流 m4a 檔案並附上追蹤標頭
       // ───────────────────────────────────────
@@ -669,15 +679,11 @@ class VoiceMessagePipeline {
         status
       });
 
-      // 非同步清理暫存檔案，不阻塞錯誤回應，並獨立處理清理錯誤
-      this.cleanupFiles(cleanupTargets).catch((cleanupError) => {
-        this.logger.warn(
-          `[appVoiceMessageService] 清理暫存檔案失敗: ${cleanupError?.message || cleanupError}`
-        );
-      });
-
       return response;
     } finally {
+      pipelineDone = true;
+      attemptCleanup();
+
       // ───────────────────────────────────────
       // 區段：釋放鎖
       // 用途：確保流程結束後解除鎖定
@@ -883,6 +889,14 @@ class VoiceMessagePipeline {
   // ───────────────────────────────────────────
   async streamAudioResponse(res, { traceId, turnId, m4aPath, timers }) {
     const stat = await fs.promises.stat(m4aPath);
+    if (stat.size < MIN_M4A_BYTES) {
+      throw new PipelineError(
+        'VOICE_AUDIO_EMPTY',
+        '音訊檔案異常',
+        `m4a 檔案大小 ${stat.size} bytes`,
+        500
+      );
+    }
     const totalProcessingTime = (timers.asrDuration || 0) + (timers.llmDuration || 0) + 
                                 (timers.ttsDuration || 0) + (timers.transcodeDuration || 0);
     
@@ -913,17 +927,60 @@ class VoiceMessagePipeline {
     const streamStartTime = Date.now();
 
     return new Promise((resolve, reject) => {
+      let settled = false;
+      let responseFinished = false;
+      let pendingError = null;
+
       // 使用較大的 highWaterMark 以改善大型音訊檔串流效能
       // 預設為 64KB，這裡改為 256KB 以在記憶體與吞吐量間取得平衡
       const stream = fs.createReadStream(m4aPath, {
         highWaterMark: 256 * 1024
       });
 
+      const finalize = (error) => {
+        if (settled) return;
+        settled = true;
+        res.off('finish', onFinish);
+        res.off('close', onClose);
+        stream.off('error', onStreamError);
+        if (error) {
+          return reject(error);
+        }
+        return resolve();
+      };
+
+      const onFinish = () => {
+        responseFinished = true;
+        if (!pendingError) {
+          const streamDuration = Date.now() - streamStartTime;
+          this.logger.info(`[appVoiceMessageService] 音訊回應完成 trace_id=${traceId} 回應耗時=${streamDuration}ms`);
+          this.logger.info(`[appVoiceMessageService] 請求處理完成 trace_id=${traceId} 總處理時間=${totalProcessingTime}ms`);
+          this.logger.info(`[appVoiceMessageService] ────────────────────────────────────────`);
+        }
+        finalize(pendingError);
+      };
+
+      const onClose = () => {
+        if (responseFinished) return;
+        const streamDuration = Date.now() - streamStartTime;
+        this.logger.warn(`[appVoiceMessageService] 用戶端中斷連線 trace_id=${traceId} 回應耗時=${streamDuration}ms`);
+        stream.destroy();
+        const abortError = new PipelineError(
+          'VOICE_STREAM_ABORTED',
+          '用戶端中斷連線',
+          'response closed before finish',
+          499
+        );
+        finalize(pendingError || abortError);
+      };
+
       // ───────────────────────────────────────
       // 區段：串流錯誤處理
       // 用途：避免回傳過程中斷造成無回應
       // ───────────────────────────────────────
-      stream.on('error', (error) => {
+      const onStreamError = (error) => {
+        if (responseFinished) return;
+        pendingError = error;
         this.logger.error('[appVoiceMessageService] 音訊串流失敗: ' + (error?.message || error));
         
         // 明確終止串流以釋放資源
@@ -941,17 +998,12 @@ class VoiceMessagePipeline {
           // 標頭已發送，無法回傳錯誤，但至少關閉回應
           res.end();
         }
-        reject(error);
-      });
-
-      stream.on('end', () => {
-        const streamDuration = Date.now() - streamStartTime;
-        this.logger.info(`[appVoiceMessageService] 音訊串流完成 trace_id=${traceId} 串流耗時=${streamDuration}ms`);
-        this.logger.info(`[appVoiceMessageService] 請求處理完成 trace_id=${traceId} 總處理時間=${totalProcessingTime}ms`);
-        this.logger.info(`[appVoiceMessageService] ────────────────────────────────────────`);
-        resolve();
-      });
+      };
       
+      res.on('finish', onFinish);
+      res.on('close', onClose);
+      stream.on('error', onStreamError);
+
       stream.pipe(res);
     });
   }
@@ -963,8 +1015,8 @@ class VoiceMessagePipeline {
   //       與 HTTP 標頭 X-Trace-Id 保持一致性
   // ───────────────────────────────────────────
   sendErrorResponse(res, { traceId, code, message, details, status }) {
-    if (res.headersSent) {
-      this.logger.warn(`[appVoiceMessageService] 無法發送錯誤回應 (headers已發送) trace_id=${traceId}`);
+    if (res.headersSent || res.writableEnded || res.destroyed) {
+      this.logger.warn(`[appVoiceMessageService] 無法發送錯誤回應 (response已結束或headers已發送) trace_id=${traceId}`);
       return;
     }
     

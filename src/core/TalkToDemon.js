@@ -28,6 +28,9 @@ class LlamaStreamHandler extends EventEmitter {
     this.logger       = new Logger('LlamaStream.log');
     this.reasoningBuffer = '';
     this.responseId   = null;   // ★ 儲存 response ID（用於 multi-turn）
+    this._onData = null;
+    this._onEnd = null;
+    this._onError = null;
   }
 
   /**
@@ -70,7 +73,7 @@ class LlamaStreamHandler extends EventEmitter {
 
       this.llamaEmitter = emitter;
 
-      emitter.on('data', (chunk, raw, reasoning) => {
+      this._onData = (chunk, raw, reasoning) => {
         if (this.stopped) return;
         const text = chunk == null ? '' : String(chunk);
         const reasoningText = reasoning
@@ -88,25 +91,31 @@ class LlamaStreamHandler extends EventEmitter {
         if (text) {
           this.logger.info(`[Llama] 回應: ${text}`);
         }
-      });
+      };
+      emitter.on('data', this._onData);
 
       // ★ 已移除 tool_calls 事件監聽（不使用原生 tool_calls）
       // 工具呼叫改用「偽協議」：由 ToolStreamRouter 偵測文字輸出
 
       // ★ 已移除 response_done 事件監聽（改回 chat/completions，無此事件）
 
-      emitter.on('end', () => {
+      this._onEnd = () => {
         if (!this.stopped) {
           this.stopped = true;
+          this._detachEmitter();
           this.emit('end');
         }
-      });
+      };
+      emitter.on('end', this._onEnd);
 
-      emitter.on('error', err => {
+      this._onError = err => {
         if (!this.stopped) {
+          this.stopped = true;
+          this._detachEmitter();
           this.emit('error', err);
         }
-      });
+      };
+      emitter.on('error', this._onError);
 
     } catch (err) {
       this.emit('error', err);
@@ -128,6 +137,7 @@ class LlamaStreamHandler extends EventEmitter {
         } catch (err) {
           this.logger.warn(`[中止失敗] 無法 abort: ${err.message}`);
         }
+        this._detachEmitter();
       } else {
         // 不支援 abort() 時，採取溫和 fallback
         this.llamaEmitter.removeAllListeners();
@@ -135,6 +145,13 @@ class LlamaStreamHandler extends EventEmitter {
     }
 
     this.emit('abort');
+  }
+
+  _detachEmitter() {
+    if (!this.llamaEmitter) return;
+    if (this._onData) this.llamaEmitter.off('data', this._onData);
+    if (this._onEnd) this.llamaEmitter.off('end', this._onEnd);
+    if (this._onError) this.llamaEmitter.off('error', this._onError);
   }
 }
 
@@ -156,9 +173,12 @@ class TalkToDemonManager extends EventEmitter {
     this.waitingForTool   = false;    // 是否正等待工具完成
     this._needCleanup     = false;    // 工具結果是否待清除
     this.phaseId       = 0;   // 同一任務（工具前/後）同一 phase
+    this._phaseRound   = 0;   // 同一 phase 下的 round 計數
     this._waitingHold  = false; // 鎖住 waiting=true 直到該輪 end
     this._toolBusy     = false; // 工具執行中（由 Router waiting 事件驅動）
     this._endDeferred  = false; // end-latch：忙碌時先到的 end 會延後處理
+    // ★ 目前正在執行的工具（給前端狀態顯示用）
+    this._activeTool   = null; // { name, source, detection }
     
     // ★ 工具執行狀態
     this._toolRoundCount = 0;        // 當前任務的工具執行輪數
@@ -231,8 +251,14 @@ class TalkToDemonManager extends EventEmitter {
     if (!task._keepPhase) {
       this.phaseId++;
       this._toolRoundCount = 0;  // ★ 新任務重置工具輪數
+      this._phaseRound = 1;
+    } else {
+      this._phaseRound = Math.max(1, this._phaseRound + 1);
     }
     this.currentTask  = task;
+
+    // ★ 進入新一輪：預設先視為 thinking（直到第一個 delta 進來）
+    this._setWaiting(false, { state: 'thinking', usingTool: false, reason: task._keepPhase ? 'post_tool_round_start' : 'round_start' });
 
     // 讀取持久化歷史，失敗時以空陣列處理
     let persistHistory = [];
@@ -255,35 +281,92 @@ class TalkToDemonManager extends EventEmitter {
       messages = await composeMessages(this.history, this.toolResultBuffer);
     } catch (err) {
       this.logger.error('[錯誤] 組合訊息失敗: ' + err.message);
-      this.emit('error', err);
-      this.processing = false;
+      this._finalizeWithError(err, { reason: 'compose_failed' });
       return;
     }
 
     const handler = new LlamaStreamHandler(this.model);
     this.currentHandler = handler;
-    const router = new toolOutputRouter.ToolStreamRouter({ source: 'content' });
-    // reasoning 只用來偵測工具與記錄，不輸出給使用者
-    const reasoningRouter = new toolOutputRouter.ToolStreamRouter({ source: 'reasoning' });
+    let toolExecutionLocked = false;
+    const shouldExecuteTool = () => {
+      if (toolExecutionLocked) return false;
+      toolExecutionLocked = true;
+      return true;
+    };
+    const router = new toolOutputRouter.ToolStreamRouter({
+      source: 'content',
+      maxTools: 1,
+      dropUnfinishedToolJson: true,
+      shouldExecuteTool
+    });
+    // reasoning 會被視為「思考」，會額外串流給前端（但不會混入 talk）
+    const reasoningRouter = new toolOutputRouter.ToolStreamRouter({
+      source: 'reasoning',
+      maxTools: 1,
+      dropUnfinishedToolJson: true,
+      shouldExecuteTool
+    });
     let assistantBuf = '';
     let reasoningBuf = '';
     let toolTriggered = false;
     let postToolAbort = false;
+    let roundEndEmitted = false;
+    const emitRoundEnd = () => {
+      if (roundEndEmitted) return;
+      roundEndEmitted = true;
+      this.emit('round_end', {
+        phaseId: this.phaseId,
+        round: this._phaseRound,
+        toolTriggered: true
+      });
+    };
 
-    const handleWaiting = s => {
+    const handleWaiting = (s, meta = {}) => {
       this._toolBusy = !!s;
       if (s) {
-        this._setWaiting(true, { reason: 'tool_busy' });
+        if (meta.tool && !this._activeTool) {
+          this._activeTool = {
+            name: meta.tool.name || 'unknown',
+            source: meta.tool.source || 'unknown',
+            detection: meta.detection || null
+          };
+        }
+        this._setWaiting(true, {
+          reason: 'tool_busy',
+          state: 'using_tool',
+          usingTool: true,
+          tool: this._activeTool
+            ? { name: this._activeTool.name, source: this._activeTool.source }
+            : (meta.tool ? { name: meta.tool.name, source: meta.tool.source } : null)
+        });
         this.closeGate(); // 擋住第一輪「請等一下」之類的雜訊
       } else {
-        this._setWaiting(false, { reason: 'tool_idle' });
+        this._setWaiting(false, {
+          reason: 'tool_idle',
+          state: 'thinking',
+          usingTool: false,
+          tool: this._activeTool
+            ? { name: this._activeTool.name, source: this._activeTool.source, stage: 'done' }
+            : (meta.tool ? { name: meta.tool.name, source: meta.tool.source, stage: 'done' } : null)
+        });
+        // 工具忙碌解除後就清掉 active tool（避免下一輪誤顯示）
+        this._activeTool = null;
         this.openGate();  // 第二輪再正常輸出
       }
     };
 
     const handleTool = (msg, meta = {}) => {
+      if (!this.processing) return;
+      if (this._toolRoundCount >= MAX_TOOL_ROUNDS) {
+        const err = new Error(`Max tool rounds exceeded (${MAX_TOOL_ROUNDS})`);
+        this.logger.error(`[tool-limit] ${err.message}`);
+        this._finalizeWithError(err, { reason: 'max_tool_rounds' });
+        try { this.currentHandler?.stop(); } catch {}
+        return;
+      }
       if (toolTriggered) return; // 避免重複觸發相同工具
       toolTriggered = true;
+      this._toolRoundCount += 1;
       this._waitingHold = false;     // 不再強制 waiting
       this.toolResultBuffer.push(msg);
       this._needCleanup = true;
@@ -291,6 +374,14 @@ class TalkToDemonManager extends EventEmitter {
       // ★ 記錄工具觸發來源與詳細資訊
       const source = meta.source || 'unknown';
       const detection = meta.detection || {};
+      // ★ 保存當前工具資訊（供前端狀態顯示）
+      if (!this._activeTool && this._toolBusy) {
+        this._activeTool = {
+          name: detection.toolName || msg?.toolName || 'unknown',
+          source,
+          detection
+        };
+      }
       this.logger.info(`[tool-triggered] 來源=${source}, 工具=${detection.toolName || 'unknown'}`);
       if (source === 'reasoning') {
         this.logger.info(`[tool-from-reasoning] 工具呼叫來自 reasoning_content，非使用者可見輸出`);
@@ -299,6 +390,7 @@ class TalkToDemonManager extends EventEmitter {
       // 若 end 早一步來過 → 延後鎖已被設起，這裡直接開同一 phase 的第二輪
       if (this._endDeferred) {
         this._endDeferred = false;
+        emitRoundEnd();
         this._processNext({ message: this.currentTask.message, _keepPhase: true });
         return;
       }
@@ -307,16 +399,21 @@ class TalkToDemonManager extends EventEmitter {
       try { this.currentHandler?.stop(); } catch {}
     };
 
-    const bindRouter = (r, { silentData = false } = {}) => {
+    const bindRouter = (r, { channel = 'talk', silentData = false } = {}) => {
       r.on('waiting', handleWaiting);
       r.on('data', chunk => {
         if (!chunk) return;
-        if (silentData) {
+        if (silentData) return;
+
+        if (channel === 'think') {
           reasoningBuf += chunk;
-          this.logger.info(`[reasoning-buffer] ${chunk}`);
-          return; // 不輸出給 UI
+          this.logger.info(`[reasoning-chunk] 長度=${chunk.length}`);
+          // ★ 新增：將 reasoning 視作思考，直接送給前端
+          this.emit('stream', { channel: 'think', content: chunk, phaseId: this.phaseId });
+          return;
         }
-        // ★ 新增：追蹤 content 累積
+
+        // talk
         this.logger.info(`[content-chunk] 長度=${chunk.length}`);
         assistantBuf += chunk;
         this._pushChunk(chunk);
@@ -325,8 +422,9 @@ class TalkToDemonManager extends EventEmitter {
       r.on('tool', (msg, meta) => handleTool(msg, meta));
     };
 
-    bindRouter(router, { silentData: false });
-    bindRouter(reasoningRouter, { silentData: true });
+    bindRouter(router, { channel: 'talk', silentData: false });
+    // ★ 修改：reasoning 也要輸出給前端（視為 think）
+    bindRouter(reasoningRouter, { channel: 'think', silentData: false });
 
     handler.on('data', (chunk, raw, reasoning) => {
       if (chunk) router.feed(chunk);
@@ -342,7 +440,7 @@ class TalkToDemonManager extends EventEmitter {
     handler.on('end', async () => {
       await Promise.all([
         router.flush(),
-        reasoningRouter.flush({ force: true })
+        reasoningRouter.flush({ force: true, dropUnfinishedToolJson: true })
       ]);
       // end-latch：若工具仍在忙（或結果尚未回來），延後收尾
       if (this._toolBusy) {
@@ -352,7 +450,19 @@ class TalkToDemonManager extends EventEmitter {
       }
 
       // ★ 傳遞 toolTriggered 讓監聽者知道是否還有後續回合
-      this.emit('end', { toolTriggered });
+      if (toolTriggered) {
+        emitRoundEnd();
+        this.logger.info(`[round_end] phaseId=${this.phaseId} round=${this._phaseRound}`);
+        this._processNext({ message: this.currentTask.message, _keepPhase: true });
+        return;
+      }
+
+      this.emit('end', {
+        phaseId: this.phaseId,
+        round: this._phaseRound,
+        toolTriggered: false,
+        final: true
+      });
       this.processing = false;
       this.logger.info('[完成] 對話回應完成');
 
@@ -372,27 +482,29 @@ class TalkToDemonManager extends EventEmitter {
       } else {
         this.logger.warn('[完成-warning] assistantBuf 為空，無內容可輸出');
       }
-      if (!toolTriggered) this._cleanupToolBuffer();
-      // 工具已完成且本輪自然 end（或被 stop 觸發 end）→ 啟動同一 phase 的第二輪
-      if (toolTriggered) {
-        this._processNext({ message: this.currentTask.message, _keepPhase: true });
-        return;
-      }
+      this._cleanupToolBuffer();
       if (this.pendingQueue.length > 0) {
         const nextTask = this.pendingQueue.shift();
         this._processNext(nextTask);
       }
     });
 
-    handler.on('error',  err => this.emit('error', err));
+    handler.on('error', err => {
+      this.logger.error(`[串流錯誤] ${err?.message || err}`);
+      this._finalizeWithError(err, { reason: 'stream_error' });
+    });
     handler.on('abort', () => {
       this.emit('abort');
       if (postToolAbort) {
         postToolAbort = false;
         this.processing = false;
+        emitRoundEnd();
+        this.logger.info(`[round_end] phaseId=${this.phaseId} round=${this._phaseRound} (abort)`);
         this.logger.info('[中止] 工具結果到達，重新啟動回合');
         this._processNext({ message: this.currentTask.message, _keepPhase: true });
+        return;
       }
+      this._finalizeWithError(new Error('aborted'), { reason: 'aborted' });
     });
 
     // 確認插件服務狀態
@@ -425,13 +537,15 @@ class TalkToDemonManager extends EventEmitter {
   /*─── 其餘 API（與 Angel 寫法一致） ───────────────────*/
   getState()            { return this.processing ? 'processing' : 'idle'; }
   clearHistory()        { this.history = []; }
-  manualAbort() {
+  abort(reason = 'aborted') { this.manualAbort(reason); }
+  stop(reason = 'aborted') { this.manualAbort(reason); }
+  manualAbort(reason = 'aborted') {
     if (this.processing && !this.currentTask?.uninterruptible) {
       this.logger.info('[手動中斷] 當前輸出被中止');
       this.currentHandler?.stop();
       this.gateBuffer = '';
       this._waitingHold = false;
-      this._setWaiting(false, { reason: 'aborted' });
+      this._finalizeWithError(new Error(reason), { reason });
     } else {
       this.logger.info('[手動中斷失敗] 任務不可中斷');
     }
@@ -447,6 +561,8 @@ class TalkToDemonManager extends EventEmitter {
   }
 
   _pushChunk(chunk) {
+    // ★ 向前端提供可區分通道的串流事件（不影響既有 data 事件）
+    this.emit('stream', { channel: 'talk', content: chunk, phaseId: this.phaseId });
     if (this.gateOpen) this.emit('data', chunk);
     else               this.gateBuffer += chunk;
   }
@@ -456,6 +572,22 @@ class TalkToDemonManager extends EventEmitter {
       this.toolResultBuffer = [];
       this._needCleanup = false;
     }
+  }
+
+  _finalizeWithError(err, { reason = 'error' } = {}) {
+    if (!this.processing) return;
+    this.processing = false;
+    this.currentHandler = null;
+    this.waitingForTool = false;
+    this._toolBusy = false;
+    this._endDeferred = false;
+    this._waitingHold = false;
+    this._activeTool = null;
+    this._phaseRound = 0;
+    this.gateBuffer = '';
+    this._cleanupToolBuffer();
+    this._setWaiting(false, { reason, state: 'thinking', usingTool: false });
+    this.emit('error', err);
   }
 }
 

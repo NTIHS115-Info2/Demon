@@ -5,6 +5,7 @@
 // ───────────────────────────────────────────────
 
 const express = require('express');
+const { WebSocketServer, WebSocket } = require('ws');
 
 const talker = require('../../../../core/TalkToDemon.js');
 const Logger = require('../../../../utils/logger');
@@ -14,6 +15,7 @@ const logger = new Logger('appChatService');
 const ROUTE_PREFIX = '/ios-app';
 const ROUTE_PATH = '/chat';
 const FULL_ROUTE_PATH = `${ROUTE_PREFIX}${ROUTE_PATH}`;
+const WS_ROUTE_PATH = `${FULL_ROUTE_PATH}/ws`;
 
 const DEFAULT_TIMEOUT_MS = 60000;
 const MAX_USERNAME_LENGTH = 100;
@@ -25,6 +27,12 @@ const priority = 70;
 let registered = false;
 let isOnline = false;
 let expressApp = null;
+let httpServer = null;
+
+// WS：僅註冊一次 upgrade handler
+let wsRegistered = false;
+let wss = null;
+let wsActiveRequest = false; // MVP：同一時間只跑一個 request（避免 talker 事件混線）
 
 // ───────────────────────────────────────────────
 // 請求佇列：避免 talker 事件混淆（因為 talker 是事件匯流排風格）
@@ -37,6 +45,7 @@ const ERROR_MESSAGES = {
   404: '找不到該路徑。',
   405: '不支援的 HTTP 方法。',
   415: '不支援的 Content-Type，請使用 application/json。',
+  409: '目前有進行中的 WebSocket 對話，請稍後再試。',
   500: '系統暫時無法處理，請稍後再試。'
 };
 
@@ -68,6 +77,10 @@ function sendErrorResponse(res, statusCode, overrideMessage) {
 
 async function processNextRequest() {
   if (isProcessing || requestQueue.length === 0) return;
+  if (wsActiveRequest) {
+    setImmediate(() => processNextRequest());
+    return;
+  }
 
   isProcessing = true;
   const { username, message, timeoutMs, resolve, reject } = requestQueue.shift();
@@ -177,6 +190,10 @@ function buildRouter() {
       logger.warn('[appChatService] Content-Type 非 JSON');
       return sendErrorResponse(res, 415);
     }
+    if (wsActiveRequest) {
+      logger.warn('[appChatService] WS 進行中，拒絕 HTTP 請求');
+      return sendErrorResponse(res, 409);
+    }
 
     const username = normalizeString(req.body?.username);
     const message = normalizeString(req.body?.message);
@@ -207,6 +224,177 @@ function buildRouter() {
   return router;
 }
 
+// ───────────────────────────────────────────────
+// WebSocket：/ios-app/chat/ws
+// 需求：
+//  1) 將 LLM 的 reasoning 視為「思考」並串流給前端
+//  2) 前端可收到推理/工具狀態（thinking / using_tool）
+//  3) 工具偽協議 JSON 內容不應出現在前端串流（已由 TalkToDemon + ToolStreamRouter 於伺服端切除）
+// 注意：talker 是單例 EventEmitter，為避免事件混線，MVP 先限制同時一個 WS request。
+// ───────────────────────────────────────────────
+function registerWebSocket(server) {
+  if (wsRegistered) return;
+  wsRegistered = true;
+
+  wss = new WebSocketServer({ noServer: true });
+
+  server.on('upgrade', (req, socket, head) => {
+    try {
+      const url = req.url || '';
+      // 只處理指定路徑，其他交回預設處理
+      if (!url.startsWith(WS_ROUTE_PATH)) return;
+
+      wss.handleUpgrade(req, socket, head, (ws) => {
+        wss.emit('connection', ws, req);
+      });
+    } catch (err) {
+      try { socket.destroy(); } catch {}
+    }
+  });
+
+  wss.on('connection', (ws) => {
+    const send = (obj) => {
+      if (ws.readyState !== WebSocket.OPEN) return;
+      ws.send(JSON.stringify(obj));
+    };
+
+    let bound = false;
+    let requestId = null;
+    let phaseId = null;
+    let round = null;
+
+    const cleanup = () => {
+      if (!bound) return;
+      bound = false;
+      talker.off('stream', onStream);
+      talker.off('status', onStatus);
+      talker.off('round_end', onRoundEnd);
+      talker.off('end', onEnd);
+      talker.off('error', onError);
+      wsActiveRequest = false;
+    };
+
+    const onStream = (pkt) => {
+      // pkt: { channel:'talk'|'think', content, phaseId }
+      phaseId = pkt?.phaseId ?? phaseId;
+      send({
+        type: 'delta',
+        requestId,
+        phaseId,
+        channel: pkt?.channel || 'talk',
+        content: pkt?.content || ''
+      });
+    };
+
+    const onStatus = (st) => {
+      phaseId = st?.phaseId ?? phaseId;
+      send({
+        type: 'status',
+        requestId,
+        phaseId,
+        state: st?.state || (st?.waiting ? 'using_tool' : 'thinking'),
+        usingTool: !!st?.usingTool || !!st?.waiting,
+        tool: st?.tool || null
+      });
+    };
+
+    const onRoundEnd = (info = {}) => {
+      phaseId = info?.phaseId ?? phaseId;
+      round = info?.round ?? round;
+      send({
+        type: 'round_end',
+        requestId,
+        phaseId,
+        round,
+        toolTriggered: info?.toolTriggered !== false
+      });
+    };
+
+    const onEnd = (info = {}) => {
+      phaseId = info?.phaseId ?? phaseId;
+      round = info?.round ?? round;
+      send({
+        type: 'end',
+        requestId,
+        phaseId,
+        round,
+        toolTriggered: !!info.toolTriggered,
+        final: info?.final === true
+      });
+      cleanup();
+    };
+
+    const onError = (err) => {
+      send({ type: 'error', requestId, message: err?.message || String(err || 'unknown error') });
+      cleanup();
+    };
+
+    ws.on('message', (raw) => {
+      let payload;
+      try {
+        payload = JSON.parse(String(raw || ''));
+      } catch {
+        send({ type: 'error', requestId: null, message: 'Invalid JSON payload' });
+        return;
+      }
+
+      // 只接受一次「start」訊息
+      if (bound) {
+        send({ type: 'error', requestId, message: 'Request already started on this connection' });
+        return;
+      }
+
+      if (wsActiveRequest || isProcessing || requestQueue.length > 0 || talker.getState?.() === 'processing') {
+        send({ type: 'error', requestId: payload?.requestId || null, message: 'Server busy' });
+        return;
+      }
+
+      requestId = typeof payload.requestId === 'string' && payload.requestId ? payload.requestId : `req_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+      const username = normalizeString(payload?.username);
+      const message = normalizeString(payload?.message);
+
+      const validation = validateInput(username, message);
+      if (!validation.valid) {
+        send({ type: 'error', requestId, message: validation.error });
+        return;
+      }
+
+      wsActiveRequest = true;
+      bound = true;
+      talker.on('stream', onStream);
+      talker.on('status', onStatus);
+      talker.on('round_end', onRoundEnd);
+      talker.on('end', onEnd);
+      talker.on('error', onError);
+
+      send({ type: 'ack', requestId });
+
+      try {
+        talker.talk(username, message);
+      } catch (err) {
+        onError(err);
+      }
+    });
+
+    const abortActive = () => {
+      if (!bound) return;
+      if (wsActiveRequest && talker.getState?.() === 'processing') {
+        try { talker.manualAbort?.('ws_closed'); } catch {}
+        try { talker.abort?.('ws_closed'); } catch {}
+      }
+    };
+
+    ws.on('close', () => {
+      abortActive();
+      cleanup();
+    });
+    ws.on('error', () => {
+      abortActive();
+      cleanup();
+    });
+  });
+}
+
 module.exports = {
   priority,
 
@@ -233,6 +421,7 @@ module.exports = {
     }
 
     expressApp = options.expressApp;
+    httpServer = options.httpServer || httpServer;
 
     try {
       // 註冊路由到主服務 Express app
@@ -240,6 +429,13 @@ module.exports = {
         const router = buildRouter();
         expressApp.use(router);
         registered = true;
+      }
+
+      // WS 需要 httpServer 才能掛 upgrade
+      if (httpServer) {
+        registerWebSocket(httpServer);
+      } else {
+        logger.warn('[appChatService] 未提供 httpServer，WebSocket 端點將不會啟用（僅保留 HTTP）。');
       }
 
       isOnline = true;
