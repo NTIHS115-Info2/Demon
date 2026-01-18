@@ -214,7 +214,7 @@ class TalkToDemonManager extends EventEmitter {
    */
   talk(talker = '其他', content = '', options = {}) {
     const { uninterruptible=false, important=false } = options;
-    const userMsg = { role:'user', content:`${talker}： ${content}`, talker, timestamp:Date.now() };
+    const userMsg = { role:'user', content:`<sender=${talker}>： ${content}`, talker, timestamp:Date.now() };
 
     // 寫入持久化歷史
     historyManager.appendMessage(talker, 'user', userMsg.content).catch(e => {

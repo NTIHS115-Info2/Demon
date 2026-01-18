@@ -414,3 +414,7 @@
 # [v.1.5.4.1]
 ### New
 - 令Iot的YoLo是可以用的
+
+# [v.1.5.4.2]
+### Change
+- 修改TalkToDemon中 User的注入方式，以適配v3的系統提示詞
