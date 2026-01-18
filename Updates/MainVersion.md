@@ -410,3 +410,7 @@
 - 將appChatService改成webSocket的形式，讓其可以持續對話
 ### Fix
 - 修復了第一次專題報告時遇到的問題
+
+# [v.1.5.4.1]
+### New
+- 令Iot的YoLo是可以用的

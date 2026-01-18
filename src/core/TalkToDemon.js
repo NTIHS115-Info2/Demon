@@ -438,8 +438,10 @@ class TalkToDemonManager extends EventEmitter {
     // ★ 已移除 response_done 事件監聽（改回 chat/completions，無此事件）
 
     handler.on('end', async () => {
+      // ★ B 路線：end 時必須 force flush，避免未完結片段卡在 buffer
+      // 仍維持 dropUnfinishedToolJson=true，避免把殘缺 JSON（工具呼叫殘片）輸出到前端。
       await Promise.all([
-        router.flush(),
+        router.flush({ force: true, dropUnfinishedToolJson: true }),
         reasoningRouter.flush({ force: true, dropUnfinishedToolJson: true })
       ]);
       // end-latch：若工具仍在忙（或結果尚未回來），延後收尾

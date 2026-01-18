@@ -6,6 +6,8 @@
 
 iotVisionTurret 插件透過主服務注入的 Express app 註冊 IoT 裝置通訊路由，**禁止自行 listen 或啟動新 Server**。主服務需建立唯一的 Express 實例，並在插件 `online()` 時注入至 `options.expressApp`。
 
+同一個 Express app 多次 `online()`/`offline()` 不會重複安裝路由；若傳入新的 app 實例，才會重新註冊路由。
+
 ## 路由與流程
 
 ### 1. 裝置註冊 `POST /iot/register`

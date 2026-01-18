@@ -60,6 +60,22 @@ function createMockExpressApp() {
   return app;
 }
 
+// 測試用 Roboflow 假配置（不會真的打到網路，只用來通過 online() 的 config gate）
+const TEST_ROBOFLOW_CONFIG = {
+  baseUrl: 'http://127.0.0.1:1',
+  workspace: 'test',
+  workflowId: 'wf',
+  apiKey: 'test'
+};
+
+function withOnlineOptions(baseOptions, overrides = {}) {
+  return {
+    ...baseOptions,
+    roboflow: TEST_ROBOFLOW_CONFIG,
+    ...overrides
+  };
+}
+
 /**
  * 依照需求載入 iotVisionTurret 本地策略
  * @param {Object} spawnConfig spawn 模擬配置
@@ -82,6 +98,12 @@ afterEach(() => {
 });
 
 describe('iotVisionTurret 本地策略', () => {
+  let expressApp;
+
+  beforeEach(() => {
+    expressApp = createMockExpressApp();
+  });
+
   test('online 應成功啟動並回傳 void', async () => {
     const spawnConfig = {
       stdout: JSON.stringify({ ok: true, mode: 'stub', message: 'ready' }),
@@ -89,7 +111,7 @@ describe('iotVisionTurret 本地策略', () => {
     };
     const { strategy } = loadLocalStrategy(spawnConfig);
 
-    await strategy.online({ expressApp: createMockExpressApp() });
+    await strategy.online(withOnlineOptions({ expressApp }));
 
     // online 應該成功設置狀態為 1（online）
     const state = await strategy.state();
@@ -104,7 +126,7 @@ describe('iotVisionTurret 本地策略', () => {
     const { strategy } = loadLocalStrategy(spawnConfig);
 
     // 缺少 Express app 時應拋出異常
-    await expect(strategy.online({})).rejects.toThrow('缺少 Express app');
+    await expect(strategy.online({})).rejects.toThrow(/expressApp/i);
   });
 
   test('offline 應成功關閉並回傳 void', async () => {
@@ -114,7 +136,7 @@ describe('iotVisionTurret 本地策略', () => {
     };
     const { strategy } = loadLocalStrategy(spawnConfig);
 
-    await strategy.online({ expressApp: createMockExpressApp() });
+    await strategy.online(withOnlineOptions({ expressApp }));
     await strategy.offline();
 
     const state = await strategy.state();
@@ -133,7 +155,7 @@ describe('iotVisionTurret 本地策略', () => {
     expect(state).toBe(0);
 
     // 上線後應回傳 1
-    await strategy.online({ expressApp: createMockExpressApp() });
+    await strategy.online(withOnlineOptions({ expressApp }));
     state = await strategy.state();
     expect(state).toBe(1);
   });
@@ -146,7 +168,7 @@ describe('iotVisionTurret 本地策略', () => {
     };
     const { strategy } = loadLocalStrategy(spawnConfig);
 
-    await strategy.online({ expressApp: createMockExpressApp() });
+    await strategy.online(withOnlineOptions({ expressApp }));
     let state = await strategy.state();
     expect(state).toBe(1); // online
 
@@ -154,7 +176,7 @@ describe('iotVisionTurret 本地策略', () => {
     state = await strategy.state();
     expect(state).toBe(0); // offline
 
-    await strategy.restart({ expressApp: createMockExpressApp() });
+    await strategy.restart(withOnlineOptions({ expressApp }));
 
     // restart 應該讓狀態回到 online
     state = await strategy.state();
@@ -179,7 +201,7 @@ describe('iotVisionTurret 本地策略', () => {
     };
     const { strategy, spawnMock } = loadLocalStrategy(spawnConfig);
 
-    await strategy.online({ expressApp: createMockExpressApp() });
+    await strategy.online(withOnlineOptions({ expressApp }));
     spawnMock.mockClear();
 
     // 新實作需要裝置註冊才能執行，否則回傳 { ok: false }
@@ -220,7 +242,7 @@ describe('iotVisionTurret 本地策略', () => {
 
     const strategy = require('../src/plugins/iotVisionTurret/strategies/local');
 
-    await strategy.online({ expressApp: createMockExpressApp() });
+    await strategy.online(withOnlineOptions({ expressApp: createMockExpressApp() }));
     const result = await strategy.send({ test: 'data' });
     
     // 新實作在裝置未註冊時回傳 { ok: false } 而非拋出異常
@@ -234,7 +256,7 @@ describe('iotVisionTurret 本地策略', () => {
     };
     const { strategy } = loadLocalStrategy(spawnConfig);
 
-    await strategy.online({ expressApp: createMockExpressApp() });
+    await strategy.online(withOnlineOptions({ expressApp }));
 
     // 同時發起兩個請求
     const send1 = strategy.send({ request: 1 });
@@ -256,7 +278,7 @@ describe('iotVisionTurret 本地策略', () => {
     };
     const { strategy } = loadLocalStrategy(spawnConfig);
 
-    await strategy.online({ expressApp: createMockExpressApp() });
+    await strategy.online(withOnlineOptions({ expressApp }));
     const result = await strategy.send({ test: 'data' });
     
     // 新實作不呼叫 Python runner，而是使用 IoT 裝置佇列
@@ -284,7 +306,7 @@ describe('iotVisionTurret 本地策略', () => {
     const strategy = require('../src/plugins/iotVisionTurret/strategies/local');
 
     // online 應該接受 timeoutMs 參數但不會進行 ping 測試
-    await strategy.online({ timeoutMs: 100, expressApp: createMockExpressApp() });
+    await strategy.online(withOnlineOptions({ expressApp }, { timeoutMs: 100 }));
     const state = await strategy.state();
     expect(state).toBe(1); // 應該成功上線
   }, 10000);
@@ -327,7 +349,7 @@ describe('iotVisionTurret 插件整合', () => {
 
     const plugin = require('../src/plugins/iotVisionTurret');
 
-    await plugin.online({ expressApp: createMockExpressApp() });
+    await plugin.online(withOnlineOptions({ expressApp: createMockExpressApp() }));
     let state = await plugin.state();
     expect(state).toBe(1);
 
@@ -335,7 +357,7 @@ describe('iotVisionTurret 插件整合', () => {
     state = await plugin.state();
     expect(state).toBe(0);
 
-    await plugin.restart({ expressApp: createMockExpressApp() });
+    await plugin.restart(withOnlineOptions({ expressApp: createMockExpressApp() }));
     state = await plugin.state();
     expect(state).toBe(1);
   });
@@ -349,7 +371,7 @@ describe('iotVisionTurret 插件整合', () => {
 
     const plugin = require('../src/plugins/iotVisionTurret');
 
-    await plugin.online({ expressApp: createMockExpressApp() });
+    await plugin.online(withOnlineOptions({ expressApp: createMockExpressApp() }));
     const result = await plugin.send({ test: 'data' });
 
     // 新實作回傳 { ok: boolean } 物件

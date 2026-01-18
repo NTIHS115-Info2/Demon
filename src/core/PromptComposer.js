@@ -288,10 +288,18 @@ async function createToolMessage(state = {}) {
   } catch (error) {
     logger.error(`建立工具訊息失敗：${error.message}`);
     // 回傳安全的錯誤訊息
+    const json = JSON.stringify({
+      toolResult: {
+        toolName: state?.toolName || 'unknown_tool',
+        called: true,
+        success: false,
+        error: error.message || 'unknown_error'
+      }
+    }, null, 2);
     return {
       role: MESSAGE_ROLES.USER,  // ★ 改成 user
       name: state.toolName || 'unknown_tool',
-      content: `工具訊息產生失敗：${error.message}`,
+      content: `\n\n\`\`\`json\n${json}\n\`\`\`\n`,
       tool_call_id: `call_error_${Date.now()}`,
       timestamp: Date.now()
     };

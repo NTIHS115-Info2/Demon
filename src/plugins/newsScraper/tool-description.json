@@ -5,7 +5,7 @@
     "topic": "String – The research topic that requires broad searching, for example 'NVIDIA Blackwell architecture'.",
     "query": "String – The specific question to be answered from the search results, for example 'What are the performance improvements of Blackwell over Hopper?'.",
     "keywords": "Array[String] – Optional keyword array; if provided, these will be prioritized during searching.",
-    "detail_level": "Enum('concise','normal','deep_dive') – The depth of searching and summarization; defaults to 'normal'."
+    "detail_level": "Enum('normal','deep_dive') – The depth of searching and summarization; defaults to 'normal'."
   },
   "output": {
     "success": "Boolean – True if the operation succeeds, false if it fails.",
