@@ -44,6 +44,9 @@ const UPLOAD_DIR = path.resolve(process.cwd(), 'artifacts', 'iotVisionTurret');
 // 是否上傳後刪除影像檔案
 const deleteImage = false;
 
+// command dispatch waiters (command_id -> { resolve, reject, timer })
+const dispatchWaiters = new Map();
+
 // ───────────────────────────────────────────────
 // 參數（可由 env 覆寫）
 // ───────────────────────────────────────────────
@@ -60,8 +63,8 @@ const IMAGE_TTL_MS = Number(process.env.IOT_IMAGE_TTL_MS || 60_000);
 const MAX_IMAGE_STORE_ENTRIES = Number(process.env.IOT_MAX_IMAGE_STORE_ENTRIES || 64);
 
 // 掃描/追蹤參數
-const SCAN_PITCH_LIST = [0 , 45 , 135 , 180];
-const SCAN_YAW_LIST = [0, 45, 90, 135, 180];
+const SCAN_PITCH_LIST = [0 , 180];
+const SCAN_YAW_LIST = [0, 15, 30 , 45, 60 , 75 , 90, 105 , 120 , 135, 150 , 165 ,180];
 const TRACK_MAX_STEPS = Number(process.env.IOT_TRACK_MAX_STEPS || 6);
 
 function readEnvPositiveNumber(name, fallback) {
@@ -99,18 +102,41 @@ const DEFAULT_ROBOFLOW_MAX_RESPONSE_RAM_BYTES = 10 * 1024 * 1024 * 1024;
 // IR 指令字典（請你之後把實際碼填上）
 const IR_CODE_DICT = Object.freeze({
   light: Object.freeze({
-    turn_on: '0x000000',
-    turn_off: '0x000001'
+    turn_on: '0xBA45FF00',
+    turn_off: '0xB847FF00'
   }),
   fan: Object.freeze({
-    turn_on: '0x000010',
-    turn_off: '0x000011'
+    turn_on: '0xB847FF00',
+    turn_off: '0xB847FF00'
   })
 });
 
 // ───────────────────────────────────────────────
 // 小工具
 // ───────────────────────────────────────────────
+
+function buildCommandId() {
+  // 夠用就好：時間 + 隨機
+  return `cmd_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function waitForDispatch(commandId, timeoutMs) {
+  return new Promise((resolve, reject) => {
+    const existing = dispatchWaiters.get(commandId);
+    if (existing) {
+      // 理論上不該撞到；撞到就覆蓋
+      try { existing.reject(new Error('DISPATCH_WAITER_REPLACED')); } catch (_) {}
+      dispatchWaiters.delete(commandId);
+    }
+
+    const timer = setTimeout(() => {
+      dispatchWaiters.delete(commandId);
+      reject(new Error(`DISPATCH_TIMEOUT: ${commandId}`));
+    }, Math.max(0, timeoutMs));
+
+    dispatchWaiters.set(commandId, { resolve, reject, timer });
+  });
+}
 
 function readEnvString(name, fallback) {
   const value = process.env[name];
@@ -273,46 +299,69 @@ function sendError(res, status, message) {
 }
 
 function drainCommandsResponse(res) {
-  // 單裝置/單 job MVP：直接吐出所有 pendingCommands
   const commands = pendingCommands.splice(0, pendingCommands.length);
+
   if (commands.length > 0) {
     logger.info(
       `[iotVisionTurret] dispatch ${commands.length} command(s) to device=${currentDeviceId || 'unknown'}`
     );
+
     for (const command of commands) {
       logger.info(`[iotVisionTurret] command detail: ${JSON.stringify(command)}`);
+
+      // ✅ resolve "dispatched" waiters
+      const cid = command?.command_id;
+      if (cid && dispatchWaiters.has(cid)) {
+        const w = dispatchWaiters.get(cid);
+        dispatchWaiters.delete(cid);
+        try { if (w?.timer) clearTimeout(w.timer); } catch (_) {}
+        try { w.resolve(true); } catch (_) {}
+      }
     }
   }
+
   return res.status(200).json({ ok: true, commands });
 }
+
 
 function enqueueCommand(command, { jobId } = {}) {
   if (jobId) ensureJobActive(jobId);
   ensureDeviceOnline();
-  const enriched = { ...command, jobId: jobId || currentJobId || null, queuedAt: nowMs() };
+
+  const command_id = buildCommandId();
+  const enriched = {
+    ...command,
+    command_id,
+    jobId: jobId || currentJobId || null,
+    queuedAt: nowMs()
+  };
+
   pendingCommands.push(enriched);
-  
-  //Server log
+
   logger.info(`[iotVisionTurret] enqueue command: ${JSON.stringify(enriched)}`);
 
   // 喚醒一個長輪詢
   const waiter = pendingPullWaiters.shift();
-  if (waiter) {
-    waiter.wake();
-  }
+  if (waiter) waiter.wake();
+
+  return command_id;
 }
 
-function clearPendingCommandsForJob(jobId) {
+
+function clearPendingCommandsForJob(jobId, { keepTypes = [] } = {}) {
   if (!jobId) {
     pendingCommands.length = 0;
     return;
   }
   for (let i = pendingCommands.length - 1; i >= 0; i--) {
-    if (pendingCommands[i]?.jobId === jobId) {
+    const c = pendingCommands[i];
+    if (c?.jobId === jobId) {
+      if (keepTypes.includes(c?.type)) continue;
       pendingCommands.splice(i, 1);
     }
   }
 }
+
 
 function terminateAllLongPolls(statusCode, message) {
   // 主動結束所有 in-flight /iot/pull
@@ -340,6 +389,7 @@ function resetDeviceState(reason) {
   // 1) 清空指令（避免 reset 後舊指令被新裝置拉走）
   pendingCommands.length = 0;
   currentJobId = null;
+  jobLock = false;
 
   // 2) 結束所有長輪詢（避免連線 hang / leak）
   terminateAllLongPolls(409, `DEVICE_RESET: ${reason}`);
@@ -356,6 +406,13 @@ function resetDeviceState(reason) {
 
   // 4) 清理 image store（含檔案）
   cleanupImageStore({ force: true });
+
+  // 5) 清理 dispatch waiters（全部 reject，避免 job 永遠卡住）
+  for (const [cid, w] of dispatchWaiters.entries()) {
+    try { if (w?.timer) clearTimeout(w.timer); } catch (_) {}
+    try { w.reject(new Error(`DISPATCH_WAIT_RESET: ${reason}`)); } catch (_) {}
+    dispatchWaiters.delete(cid);
+  }
 
   logger.info(`[iotVisionTurret] resetDeviceState: ${reason}`);
 }
@@ -622,21 +679,35 @@ async function aimAndFire({ device, method, code }, deadlineMs, jobId) {
     const dx = last.center.x - width / 2;
     const dy = last.center.y - height / 2;
 
-    // 機構限制：pitch 已到底(0)且目標仍在畫面下方時，dy 永遠不可能收斂到 tolerance。
-    // 這種情況下，只要水平(dx)已對準，就直接發 IR，避免「看起來鎖定但永遠不發射」。
-    // 你提出的策略：若垂直軸已到下限（無法再往下），就只保證 X 對齊即可發射 IR。
-    // 這能避免「目標在下方、dy 永遠無法收斂」導致永遠不發射。
-    if (pitch === PITCH_MIN && Math.abs(dx) <= TRACK_PIXEL_TOLERANCE) {
-      logger.info(`[iotVisionTurret] pitch-bottom lock: fire (step=${step}, dx=${dx.toFixed(1)}, dy=${dy.toFixed(1)}, yaw=${yaw.toFixed(1)}, pitch=${pitch.toFixed(1)})`);
-      enqueueCommand({ type: 'ir_send', device, code }, { jobId });
+    // 統一：發射 IR 後要等到被 /iot/pull dispatch 才算成功
+    const fireAndWaitDispatch = async (reason) => {
+      logger.info(reason);
+
+      const cid = enqueueCommand({ type: 'ir_send', device, code }, { jobId });
+
+      // 依剩餘時間決定等待上限，避免逼近 deadline 還在等
+      const remaining = Math.max(0, deadlineMs - nowMs());
+
+      // 你可以調整這個上限：2~5 秒通常夠用
+      const waitMs = Math.min(remaining, 5000);
+
+      await waitForDispatch(cid, waitMs);
       return { ok: true };
+    };
+
+    // 機構限制：pitch 已到底(0)且目標仍在畫面下方時，dy 永遠不可能收斂到 tolerance。
+    // 只要水平(dx)已對準，就直接發 IR，避免「看起來鎖定但永遠不發射」。
+    if (pitch === PITCH_MIN && Math.abs(dx) <= TRACK_PIXEL_TOLERANCE) {
+      return await fireAndWaitDispatch(
+        `[iotVisionTurret] pitch-bottom lock: fire (step=${step}, dx=${dx.toFixed(1)}, dy=${dy.toFixed(1)}, yaw=${yaw.toFixed(1)}, pitch=${pitch.toFixed(1)})`
+      );
     }
 
+    // 正常鎖定：dx/dy 都收斂
     if (Math.abs(dx) <= TRACK_PIXEL_TOLERANCE && Math.abs(dy) <= TRACK_PIXEL_TOLERANCE) {
-      // locked
-      logger.info(`[iotVisionTurret] locked: fire (step=${step}, dx=${dx.toFixed(1)}, dy=${dy.toFixed(1)}, yaw=${yaw.toFixed(1)}, pitch=${pitch.toFixed(1)})`);
-      enqueueCommand({ type: 'ir_send', device, code }, { jobId });
-      return { ok: true };
+      return await fireAndWaitDispatch(
+        `[iotVisionTurret] locked: fire (step=${step}, dx=${dx.toFixed(1)}, dy=${dy.toFixed(1)}, yaw=${yaw.toFixed(1)}, pitch=${pitch.toFixed(1)})`
+      );
     }
 
     const { yawStep, pitchStep } = computeStepDegrees(dx, dy, width, height);
@@ -645,31 +716,27 @@ async function aimAndFire({ device, method, code }, deadlineMs, jobId) {
     yaw = clamp(yaw + yawStep * YAW_DIR, YAW_MIN, YAW_MAX);
 
     // pitch: dy>0 -> target below center -> 理論需要往下（pitch -）
-    // 但垂直軸下限為 0，不能往下；所以使用 clamp 後會卡在 0。
-    // 這裡採用「pitch - step」是因為 pitch 增加代表鏡頭往上（依你先前規則），
-    // 若你機構相反，只要把符號翻轉即可。
     pitch = clamp(pitch - pitchStep * PITCH_DIR, PITCH_MIN, PITCH_MAX);
 
     enqueueCommand({ type: 'move', yaw, pitch }, { jobId });
     last = await captureAndInfer(deadlineMs, jobId);
 
-    // 若目標在下方但 pitch 已到 0：不再嘗試負角（機構限制），仍允許繼續 yaw 修正。
-    // 注意：這裡必須用「最新一張」的 dy 判斷，避免用上一張的 dy 造成誤判。
+    // pitch 到底且目標仍在下方：允許保底發射（但一樣要等 dispatch）
     const lastDy = (last?.center && last?.imageSize)
       ? (last.center.y - (last.imageSize.height / 2))
       : null;
-    if (pitch === PITCH_MIN && Number.isFinite(lastDy) && lastDy > 0) {
-      // 只要仍能找到目標，就給一次 IR（避免永遠追不到）
-      if (last?.found) {
-        const lastDx = (last?.center && last?.imageSize)
-          ? (last.center.x - (last.imageSize.width / 2))
-          : NaN;
-        logger.info(`[iotVisionTurret] pitch-bottom fallback: fire (step=${step}, dx=${Number.isFinite(lastDx) ? lastDx.toFixed(1) : 'n/a'}, dy=${Number.isFinite(lastDy) ? lastDy.toFixed(1) : 'n/a'}, yaw=${yaw.toFixed(1)}, pitch=${pitch.toFixed(1)})`);
-        enqueueCommand({ type: 'ir_send', device, code }, { jobId });
-        return { ok: true };
-      }
+
+    if (pitch === PITCH_MIN && Number.isFinite(lastDy) && lastDy > 0 && last?.found) {
+      const lastDx = (last?.center && last?.imageSize)
+        ? (last.center.x - (last.imageSize.width / 2))
+        : NaN;
+
+      return await fireAndWaitDispatch(
+        `[iotVisionTurret] pitch-bottom fallback: fire (step=${step}, dx=${Number.isFinite(lastDx) ? lastDx.toFixed(1) : 'n/a'}, dy=${Number.isFinite(lastDy) ? lastDy.toFixed(1) : 'n/a'}, yaw=${yaw.toFixed(1)}, pitch=${pitch.toFixed(1)})`
+      );
     }
   }
+
 
   // 3) give up
   return { ok: false };
@@ -899,13 +966,14 @@ module.exports = {
       pendingCommands.length = 0;
 
       const result = await aimAndFire({ device, method, code }, deadlineMs, jobId);
+
       return { ok: Boolean(result?.ok) };
     } catch (err) {
       logger.error(`[iotVisionTurret] send failed: ${err.message}`);
       return { ok: false };
     } finally {
       // 將本 job 的殘留指令清掉，避免 fail 後在下一次 /iot/pull 被執行
-      clearPendingCommandsForJob(jobId);
+      clearPendingCommandsForJob(jobId); // 不要 keepTypes
       currentJobId = null;
       jobLock = false;
       cleanupImageStore();
