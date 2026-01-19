@@ -404,3 +404,21 @@
 # [v.1.5.3.10]
 ### Fix
 - 修復 newsScraper 上機的一些問題
+
+# [v.1.5.4]
+### Change
+- 將appChatService改成webSocket的形式，讓其可以持續對話
+### Fix
+- 修復了第一次專題報告時遇到的問題
+
+# [v.1.5.4.1]
+### New
+- 令Iot的YoLo是可以用的
+
+# [v.1.5.4.2]
+### Change
+- 修改TalkToDemon中 User的注入方式，以適配v3的系統提示詞
+
+# [v.1.5.4.3]
+### Fix
+- IoT上機測試成功

@@ -38,6 +38,7 @@ config/*.js
 !config/*.example.js
 tokens/
 !tokens/README.md
+artifacts/
 
 # --- news_scraper_plugin additions ---
 # Python Virtual Environment

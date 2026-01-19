@@ -60,10 +60,9 @@ function findToolJSON(buffer) {
         try {
           const obj = JSON.parse(slice);
           if (
-            obj && typeof obj === 'object' &&
+            obj && typeof obj === 'object' && !Array.isArray(obj) &&
             typeof obj.toolName === 'string' &&
-            Object.prototype.hasOwnProperty.call(obj, 'input') &&
-            Object.keys(obj).every(k => ['toolName', 'input'].includes(k))
+            Object.prototype.hasOwnProperty.call(obj, 'input')
           ) {
             return { data: obj, start, end: i + 1 };
           }
@@ -186,7 +185,7 @@ function findMarkdownTool(buffer) {
     }
 
     const found = findToolJSON(content);
-    if (found && content.slice(found.end).trim() === '') {
+    if (found) {
       // 回傳絕對位置
       return { data: found.data, start: open, end: close + 3 };
     }
@@ -206,6 +205,10 @@ class ToolStreamRouter extends EventEmitter {
     this.buffer  = '';
     this.timeout = options.timeout || 80_000;
     this.source  = options.source || 'content';  // ★ 標記來源
+    this.maxTools = Number.isInteger(options.maxTools) ? options.maxTools : 1;
+    this.dropUnfinishedToolJson = options.dropUnfinishedToolJson !== false;
+    this.shouldExecuteTool = typeof options.shouldExecuteTool === 'function' ? options.shouldExecuteTool : null;
+    this._toolCount = 0;
     this.processing = Promise.resolve();
   }
 
@@ -216,7 +219,7 @@ class ToolStreamRouter extends EventEmitter {
   }
 
   // 修改：flush() 不再硬吐出殘缺 JSON；提供 force 參數
-  async flush({ force = false } = {}) {
+  async flush({ force = false, dropUnfinishedToolJson } = {}) {
     await this.feed(); // 觸發一次 parse
 
     if (!this.buffer) {
@@ -225,9 +228,19 @@ class ToolStreamRouter extends EventEmitter {
     }
     const { depth } = braceBalance(this.buffer);
     const { inCode } = backtickState(this.buffer);
-    if ((depth === 0 && !inCode) || force) {
-      // 平衡（或強制）才輸出剩餘文字
+    const dropPartial = dropUnfinishedToolJson !== undefined
+      ? dropUnfinishedToolJson
+      : this.dropUnfinishedToolJson;
+
+    if (depth === 0 && !inCode) {
       this.emit('data', this.buffer);
+      this.buffer = '';
+    } else if (force) {
+      if (!dropPartial) {
+        this.emit('data', this.buffer);
+      } else {
+        logger.info('flush 遇到未完結 JSON 或 Markdown 代碼區塊，已丟棄殘片（force + dropUnfinishedToolJson）。');
+      }
       this.buffer = '';
     } else {
       // 預設情況下保留，避免殘缺 JSON 或 Markdown 被輸出
@@ -291,14 +304,34 @@ class ToolStreamRouter extends EventEmitter {
       // 移除已處理段落
       this.buffer = this.buffer.slice(found.end);
 
+      if (this.maxTools >= 0 && this._toolCount >= this.maxTools) {
+        logger.warn(`[tool-skip] 已達 maxTools=${this.maxTools}，忽略後續工具呼叫`);
+        continue;
+      }
+
+      if (this.shouldExecuteTool && !this.shouldExecuteTool(found.data, toolDetectionInfo)) {
+        logger.warn(`[tool-skip] 外部限制拒絕工具 ${found.data.toolName}`);
+        continue;
+      }
+
       try {
         const message = await handleTool(found.data, {
-          emitWaiting: (s) => this.emit('waiting', s),
+          emitWaiting: (s) => this.emit('waiting', s, {
+            tool: { name: found.data.toolName, source: this.source },
+            detection: toolDetectionInfo
+          }),
           timeout: this.timeout
         });
+        this._toolCount += 1;
         // ★ 發射 tool 事件時帶上來源與偵測資訊
         this.emit('tool', message, { source: this.source, detection: toolDetectionInfo });
         logger.info(`[tool-executed] 來源=${this.source}, 工具=${found.data.toolName} 處理完成`);
+
+        if (this.maxTools >= 0 && this._toolCount >= this.maxTools) {
+          // 只接受一個工具呼叫，剩餘內容直接丟棄避免副作用
+          this.buffer = '';
+          break;
+        }
       } catch (err) {
         logger.error(`工具處理失敗: ${err.message}`);
       }
